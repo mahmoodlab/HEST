@@ -341,49 +341,6 @@ def identify_bad_patches(img_patches, threshold=200):
             bad_patch_indices.append(idx)
     return bad_patch_indices
 
-def extract_image_patches(df, image, patch_size = 200):
-    # df is a pandas DataFrame containing x_pixel and y_pixel columns
-    # image is the histology image (e.g., in RGB format)
-    # patch_size is the pixel size of the square patch to extract
-
-    patches = []
-    patch_half = patch_size // 2
-
-    max_x = image.shape[0]
-    max_y = image.shape[1]
-
-    # make sure our image is correct
-    assert int(df['x_pixel'].max()) <= max_x and int(df['y_pixel'].max()) <= max_y
-
-    for _, row in df.iterrows():
-        x_pixel = int(row['x_pixel'])
-        y_pixel = int(row['y_pixel'])
-        
-        patch = image[max(0, x_pixel - patch_half):min(max_x, x_pixel + patch_half + 1),
-                      max(0, y_pixel - patch_half):min(max_y, y_pixel + patch_half + 1)]
-
-        patches.append(patch)
-
-    return patches
-
-def visualize_patches(patches, cols, figsize):
-    rows = math.ceil(len(patches) / cols)
-    fig, axes = plt.subplots(rows, cols, figsize=figsize)
-    axes = axes.flatten()
-
-    c_empty = 0
-    for i, patch in enumerate(tqdm(patches)):
-        if patch.size > 0:  # Check if the patch is not empty
-            axes[i].imshow(patch)
-            axes[i].set_xticks([])
-            axes[i].set_yticks([])
-        else:
-            axes[i].set_visible(False)  # Hide the axis if the patch is empty
-            c_empty += 1
-    print(f'Number of empty patches: {c_empty}')
-    
-    plt.tight_layout()
-    plt.show()
 
 def create_folder(folder_path, clean_folder = True):
     if not os.path.isdir(folder_path):

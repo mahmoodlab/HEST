@@ -18,27 +18,66 @@ from kwimage.im_cv2 import warp_affine, imresize
 from kwimage.transform import Affine
 import json
 import urllib.request
+import tarfile
+import requests
+import subprocess
+from threading import Thread
+from time import sleep
 
+
+def _extract_tar_gz(file_path, extract_path):
+    with tarfile.open(file_path, 'r:gz') as tar:
+        tar.extractall(path=extract_path)
+
+def _download_from_row(row, root_path):
+    col_to_download = [
+        'image_link', 'xenium_bundle_link', 'spatial_data_link', 
+        'filtered_count_h5_link', 'alignment_file_link'
+    ]
+    for col in col_to_download:
+        if row[col] is not None and not isinstance(row[col], float):
+            dest_path = os.path.join(root_path, row[col].split('/')[-1])
+            if col != 'image_link':
+                continue
+            if dest_path.endswith('.tar.gz'):
+                subprocess.run(['wget', row[col], '-O', dest_path], check=True)
+            else:
+                subprocess.Popen(['wget', row[col], '-O', dest_path])#, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            #r = requests.get(row[col]) 
+            #with open(dest_path, 'wb') as outfile:
+            #    outfile.write(r.content)
+            #urllib.request.urlretrieve(row[col], dest_path)
+
+            if dest_path.endswith('.tar.gz'):
+                _extract_tar_gz(dest_path, os.path.dirname(dest_path))
+                
 
 def download_from_meta_df(meta_df: pd.DataFrame, samples_folder: str):
+    threads = []
     for index, row in meta_df.iterrows():
         dirname = row['dataset_title']
-        dir_path = os.path.join(samples_folder, dirname)
+        if row['image'] == False:
+            continue
+        tech = 'visium' if 'visium' in row['10x Instrument(s)'].lower() else 'xenium'
+        dir_path = os.path.join(samples_folder, tech, dirname)
         root_path = dir_path
-        if not os.path.exist(dir_path):
+        if not os.path.exists(dir_path):
             os.makedirs(dir_path)
-        if row['subseries'] is not None:
-            subseries_path = os.path.join(samples_folder, row['subseries'])
+        if row['subseries'] is not None and not np.isnan(row['subseries']):
+            subseries_path = os.path.join(dir_path, row['subseries'])
             root_path = subseries_path
-            if not os.path.exist(subseries_path):
+            if not os.path.exists(subseries_path):
                 os.makedirs(subseries_path)
+                
+        col_to_download = [
+            'image_link', 'xenium_bundle_link', 'spatial_data_link', 
+            'filtered_count_h5_link', 'alignment_file_link'
+        ]
+
+        _download_from_row(row, root_path)
+
         
-        urllib.request.urlretrieve(row['image_link'], row['image_link'].split('/')[-1])
-        urllib.request.urlretrieve(row['Spatial imaging data/Xenium bundle'], row['Spatial imaging data/Xenium bundle'].split('/')[-1])
-        urllib.request.urlretrieve(row['filtered_count_link_h5'], row['filtered_count_link_h5'].split('/')[-1])
-        
-        if row['alignment_file'] is not None:
-            urllib.request.urlretrieve(row['alignment_file'], row['alignment_file'].split('/')[-1])
+
 
 
 def filter_st_data(adata, nb_hvgs, min_counts = 5000, max_counts = 35000, 
@@ -165,7 +204,7 @@ def read_any(path):
         
         adata, img = read_10x_xenium(
             feature_matrix_path=os.path.join(path, 'cell_feature_matrix.h5'), 
-            cell_csv_path=os.path.join(path, 'cells.csv'), 
+            transcripts_path=os.path.join(path, 'transcripts.parquet'), 
             img_path=os.path.join(path, img_filename), 
             alignment_file_path=alignment_path, 
             in_tissue_only = True
@@ -174,7 +213,7 @@ def read_any(path):
         return adata, img
       
 
-def _register_downscale_img(adata, img, pixel_size=1):
+def _register_downscale_img(adata, img):
     print('image size is ', img.shape)
     downscale_factor = 0.025
     downscaled_fullres = imresize(img, downscale_factor)
@@ -187,9 +226,7 @@ def _register_downscale_img(adata, img, pixel_size=1):
     adata.uns['spatial']['V1_Adult_Mouse_Brain']['images']['downscaled_fullres'] = downscaled_fullres
     adata.uns['spatial']['V1_Adult_Mouse_Brain']['scalefactors'] = {}
     adata.uns['spatial']['V1_Adult_Mouse_Brain']['scalefactors']['spot_diameter_fullres'] = 55.
-    adata.uns['spatial']['V1_Adult_Mouse_Brain']['scalefactors']['tissue_downscaled_fullres_scalef'] = (downscale_factor / pixel_size)    
-    plt.imshow(downscaled_fullres)
-    plt.show()    
+    adata.uns['spatial']['V1_Adult_Mouse_Brain']['scalefactors']['tissue_downscaled_fullres_scalef'] = downscale_factor
   
 
 def read_10x_visium(
@@ -309,9 +346,41 @@ def read_10x_visium(
     return adata, spatial_aligned, img
 
 
+def xenium_to_pseudo_visium(adata, df: pd.DataFrame, pixel_size):
+    y_max = df['y_location'].max()
+    y_min = df['y_location'].min()
+    x_max = df['x_location'].max()
+    x_min = df['x_location'].min()
+    
+    m = math.ceil((y_max - y_min) / (100 / pixel_size))
+    n = math.ceil((x_max - x_min) / (100 / pixel_size))
+    
+    features = df['feature_name'].unique()
+    
+    spot_grid = pd.DataFrame(0, index=range(m * n), columns=features)
+    #spot_grid = pd.DataFrame(0, index=range(m * n), columns=features)
+    
+    a = np.floor((df['x_location'] - x_min) / (100. / pixel_size)).astype(int)
+    b = np.floor((df['y_location'] - y_min) / (100. / pixel_size)).astype(int)
+    
+    c = b * n + a
+    features = df['feature_name']
+    
+    cols = spot_grid.columns.get_indexer(features)
+    
+    spot_grid_np = spot_grid.values.astype(np.uint16)
+    spot_grid_np[c, cols] += 1
+    
+    df = pd.DataFrame(spot_grid_np, columns=spot_grid.columns)
+    df['x'] = x_min + (df.index % n) * (100. / pixel_size) + (50. / pixel_size)
+    df['y'] = y_min + np.floor(df.index / n) * (100. / pixel_size) + (50. / pixel_size)
+    return df
+
+
 def read_10x_xenium(
     feature_matrix_path: str, 
-    cell_csv_path: str, 
+    #cell_csv_path: str, 
+    transcripts_path: str,
     img_path: str, 
     alignment_file_path: str, 
     in_tissue_only = True
@@ -322,27 +391,7 @@ def read_10x_xenium(
         filename=feature_matrix_path
     )
     
-    df = pd.read_csv(
-        cell_csv_path
-    )
-    
-    df.set_index(adata.obs_names, inplace=True)
-    adata.obs = df.copy()
-    
-    adata.obsm["spatial"] = adata.obs[["x_centroid", "y_centroid"]].copy().to_numpy()
-    
-    print(adata.obs)
-    
-    cprobes = (
-        adata.obs["control_probe_counts"].sum() / adata.obs["total_counts"].sum() * 100
-    )
-    cwords = (
-        adata.obs["control_codeword_counts"].sum() / adata.obs["total_counts"].sum() * 100
-    )
-    print(f"Negative DNA probe count % : {cprobes}")
-    print(f"Negative decoding count % : {cwords}")
-    
-    cur_dir = os.path.dirname(cell_csv_path)    
+    cur_dir = os.path.dirname(transcripts_path)    
     
     experiment_file = open(os.path.join(cur_dir, 'experiment.xenium'))
     dict = json.load(experiment_file)
@@ -350,7 +399,44 @@ def read_10x_xenium(
     pixel_size = dict['pixel_size']
     
     
-    print('positions are ', adata.obsm['spatial'])
+    df_transcripts = pd.read_parquet(transcripts_path)
+    
+    #df = pd.read_csv(
+    #    cell_csv_path
+    #)
+    
+    
+    #df.set_index(adata.obs_names, inplace=True)
+    #adata.obs = df.copy()
+    
+    #adata.obsm['transcripts'] = df_transcripts
+    #adata.obs = df_transcripts
+    
+    #adata.obsm["spatial"] = adata.obs[["x_centroid", "y_centroid"]].copy().to_numpy()
+    
+    df_transcripts["x_location"] = df_transcripts["x_location"] / pixel_size
+    df_transcripts["y_location"] = df_transcripts["y_location"] / pixel_size
+    
+    spots_df = xenium_to_pseudo_visium(adata, df_transcripts, pixel_size)
+    
+    
+    # convert from micrometers to pixels and register to Anndata object
+   # adata.obsm["spatial"] = df_transcripts[["x_location", "y_location"]].copy().to_numpy() / pixel_size
+    
+    print(adata.obs)
+    
+    #cprobes = (
+    #    adata.obs["control_probe_counts"].sum() / adata.obs["total_counts"].sum() * 100
+    #)
+    #cwords = (
+    #    adata.obs["control_codeword_counts"].sum() / adata.obs["total_counts"].sum() * 100
+    #)
+    #print(f"Negative DNA probe count % : {cprobes}")
+    #print(f"Negative decoding count % : {cwords}")
+    
+    
+    
+    #print('positions are ', adata.obsm['spatial'])
     
     if alignment_file_path is not None:
         # check for a cached transformed file (as affine transformations of WSIs are very expensive)
@@ -384,17 +470,25 @@ def read_10x_xenium(
         img = tifffile.imread(img_path)
             
             
-    _register_downscale_img(adata, img, pixel_size)
+    _register_downscale_img(adata, img)
 
     #if downsample_factor:
     #    img = np.array(downsample_image(img_path, downsample_factor))
     #else:
     #    img = np.array(Image.open(img_path))
+    
+    downscale_factor = 0.025
+    img2 = imresize(img, downscale_factor)
+    
+    plt.imshow(img2)
+    my_df = spots_df[spots_df['GPC3'] != 0]
+    plt.scatter(my_df['x'] * downscale_factor, my_df['y'] * downscale_factor, s=10)
+    plt.show()
         
     return adata, img
 
 
-def extract_patch_expression_pairs(adata, df, image, patch_size = 200):
+def extract_patch_expression_pairs(adata, image, patch_size = 200):
     # df is a pandas DataFrame containing pxl_row_in_fullres and y_pixel columns
     # image is the histology image (e.g., in RGB format)
     # patch_size is the pixel size of the square patch to extract
@@ -432,10 +526,12 @@ def extract_patch_expression_pairs(adata, df, image, patch_size = 200):
     return join_df
 
 
-def extract_image_patches(df, image, patch_size = 200):
-    # df is a pandas DataFrame containing pxl_row_in_fullres and y_pixel columns
+def extract_image_patches(adata: sc.AnnData, image, patch_size = 200):
+    # df is a pandas DataFrame containing x_pixel and y_pixel columns
     # image is the histology image (e.g., in RGB format)
     # patch_size is the pixel size of the square patch to extract
+    
+    spots_coordinates = adata.obsm['spatial'] # coordinates of the spots in full res (px)
 
     patches = []
     patch_half = patch_size // 2
@@ -444,11 +540,11 @@ def extract_image_patches(df, image, patch_size = 200):
     max_y = image.shape[1]
 
     # make sure our image is correct
-    assert df['pxl_row_in_fullres'].max() <= max_x and df['pxl_col_in_fullres'].max() <= max_y
+    assert int(spots_coordinates[:, 1].max()) <= max_x and int(spots_coordinates[:, 0].max()) <= max_y
 
-    for _, row in df.iterrows():
-        x_pixel = row['pxl_row_in_fullres']
-        y_pixel = row['pxl_col_in_fullres']
+    for row in spots_coordinates:
+        x_pixel = int(row[1])
+        y_pixel = int(row[0])
         
         patch = image[max(0, x_pixel - patch_half):min(max_x, x_pixel + patch_half + 1),
                       max(0, y_pixel - patch_half):min(max_y, y_pixel + patch_half + 1)]

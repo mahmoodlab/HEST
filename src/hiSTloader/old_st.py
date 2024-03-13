@@ -204,8 +204,8 @@ def plot_spatial_plots(adata_list, sample_names, img_save_dir, start, end):
         sc.pl.spatial(adata, img_key="downscaled_fullres", color=["ACE2"])
         
         # Generate spatial plots without showing them
-        sc.pl.spatial(adata, img_key="downscaled_fullres", color=["total_counts", "n_genes_by_counts", "pct_counts_in_top_200_genes"],
-                    ncols=3, cmap='plasma', alpha_img=0.5, title=[f"Sample {start+i}, {sample_name}, total_counts", "n_genes_by_counts", "pct_counts_in_top_200_genes"], show=False)
+        #sc.pl.spatial(adata, img_key="downscaled_fullres", color=["total_counts", "n_genes_by_counts", "pct_counts_in_top_200_genes"],
+        #            ncols=3, cmap='plasma', alpha_img=0.5, title=[f"Sample {start+i}, {sample_name}, total_counts", "n_genes_by_counts", "pct_counts_in_top_200_genes"], show=False)
         
         # Adjust the layout to make room for the custom titles
         plt.tight_layout()
