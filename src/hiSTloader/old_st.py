@@ -84,26 +84,6 @@ def plot_unprocessed(st_dir, img_dir, df_img_name, img_save_dir):
 
     print(f"Distribution plots saved in {img_save_dir}")
     return adata_shape_l
-
-
-def load_data(root_dir):
-    path_list = [] 
-    for root, d_names, f_names in os.walk(root_dir):
-        if len(f_names) == 0 or os.path.basename(root) == 'spatial':
-            continue
-        path_list.append(root)
-        
-        
-    adata_list = []
-    img_list = []
-    sample_names = []
-    for path in path_list:
-        sample_names.append(os.path.basename(path))
-        adata, img = read_any(path)
-        adata_list.append(adata)
-        img_list.append(img)
-    
-    return adata_list, img_list, sample_names
         
 
 """
@@ -186,51 +166,7 @@ def plot_dist_plots(adata_list, sample_names, img_save_dir, start, end):
     print(f"Distribution plots saved in {img_save_dir}")
 
 
-###############################################################
-#### 2. Plot Spatial overlays on H&E Images ######
-# ax1: total_counts
-# ax2: n_genes_by_counts
-# ax3: pct_counts_in_top_200_genes
-###############################################################
-
-def plot_spatial_plots(adata_list, sample_names, img_save_dir, start, end):
-    print("Plotting spatial plots...")
-    os.makedirs(img_save_dir, exist_ok=True)
-
-    for i, adata in enumerate(tqdm(adata_list[start:end])):
-        sample_name = sample_names[start+i]
-        #print(sample_name)
-        
-        sc.pl.spatial(adata, img_key="downscaled_fullres", color=["ACE2"])
-        
-        # Generate spatial plots without showing them
-        #sc.pl.spatial(adata, img_key="downscaled_fullres", color=["total_counts", "n_genes_by_counts", "pct_counts_in_top_200_genes"],
-        #            ncols=3, cmap='plasma', alpha_img=0.5, title=[f"Sample {start+i}, {sample_name}, total_counts", "n_genes_by_counts", "pct_counts_in_top_200_genes"], show=False)
-        
-        # Adjust the layout to make room for the custom titles
-        plt.tight_layout()
-        
-        # Save the figure
-        plt.savefig(os.path.join(img_save_dir, f"{i}_{sample_name}_spatial_plots.png"))
-        plt.close()  # Close the plot to free memory
-    print(f"H&E overlay spatial plots saved in {img_save_dir}")
-
-
-# here we load the raw adata, we do not do any QC filtering now (min_counts, max_counts, min_cells, pct_counts_mt) 
-def get_spot_pixel_size_resolution(adata):
-    d = list(adata.uns['spatial'].values())[0]
-    d_scale_factor = d['scalefactors']
-    pix_size = round(d_scale_factor['spot_diameter_fullres'], 2)
-    resolution = round(55/ d_scale_factor['spot_diameter_fullres'], 2)
-    magnification = '< 5x'
-    if resolution < 0.4:
-        magnification = '20x'
-    elif resolution < 0.8:
-        magnification = '10x'
-
-    return pix_size, resolution, magnification
-
-def generate_metrics_df(path_metrics, load_img = True, cv_thresh = 200, 
+"""def generate_metrics_df(path_metrics, load_img = True, cv_thresh = 200, 
                         check_wsi = False,
                         save_path = None):
     
@@ -411,4 +347,4 @@ def generate_metrics_df(path_metrics, load_img = True, cv_thresh = 200,
         df_metrics.to_csv(save_path, index=False)
         print(f'Dataframe saved to {save_path}')
 
-    return df_metrics
+    return df_metrics"""
