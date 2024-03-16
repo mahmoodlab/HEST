@@ -11,7 +11,6 @@ from tqdm import tqdm
 warnings.filterwarnings("ignore")
 from tqdm import tqdm
 from PIL import Image
-import openslide
 import random
 import h5py
 import cv2

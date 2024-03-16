@@ -12,14 +12,11 @@ import tifffile
 from scipy import ndimage as ndi
 import cv2
 from skimage import transform
-import rasterio
-from rasterio import warp
 from kwimage.im_cv2 import warp_affine, imresize
 from kwimage.transform import Affine
 import json
 import urllib.request
 import tarfile
-import requests
 import subprocess
 from threading import Thread
 from time import sleep
@@ -402,13 +399,21 @@ def read_custom_1(
     plt.scatter(list1["pxl_col_in_fullres"] * 0.025, list1["pxl_row_in_fullres"] * 0.025, s=5)
     plt.show()   
     
-  
+
+def _alignment_file_to_df(path):
+    f = open(path)
+    data = json.load(f)
+    
+    return pd.DataFrame(data['oligo'])
+ 
 
 def read_10x_visium(
-    st_gene_expression_path: str, 
-    spatial_coord_path: str, 
-    img_path: str, 
+    img_path: str,
+    bc_matrix_path: str = None,
+    spatial_coord_path: str = None,
+    tissue_positions_path: str = None,
     alignment_file_path: str = None, 
+    mex_path: str = None,
     downsample_factor = None
 ):
     """
@@ -418,77 +423,33 @@ def read_10x_visium(
     img_path: path to the H&E image
     """
     
-    if st_gene_expression_path is not None:
-        raw_bc_matrix = None
-    
-    ### 1. GENE EXPRESSION
-    adata = sc.read_10x_h5(st_gene_expression_path)
+    raw_bc_matrix = None
+
+    if bc_matrix_path is not None:
+        adata = sc.read_10x_h5(bc_matrix_path)
+    elif mex_path is not None:
+        adata = sc.read_10x_mtx(mex_path)
+
     adata.var_names_make_unique()
-    print(adata)
+    print(adata)      
 
-    ### 2. SPATIAL COORDINATES
-    tissue_position_path = os.path.join(spatial_coord_path, 'tissue_positions.csv')
-    if os.path.exists(tissue_position_path):
-        spatial = pd.read_csv(tissue_position_path, sep=",", na_filter=False, index_col=0) 
-    else:
-        tissue_position_path = os.path.join(spatial_coord_path, 'tissue_positions_list.csv')
-        spatial = pd.read_csv(tissue_position_path, header=None, sep=",", na_filter=False, index_col=0)
+    if tissue_positions_path is not None or spatial_coord_path is not None:
+        tissue_positions_path = os.path.join(spatial_coord_path, 'tissue_positions.csv')
+        if os.path.exists(tissue_positions_path):
+            spatial = pd.read_csv(tissue_positions_path, sep=",", na_filter=False, index_col=0) 
+        else:
+            tissue_positions_path = os.path.join(spatial_coord_path, 'tissue_positions_list.csv')
+            spatial = pd.read_csv(tissue_positions_path, header=None, sep=",", na_filter=False, index_col=0)
+            
+            spatial = spatial.rename(columns={1: "in_tissue", # in_tissue: 1 if spot is captured in tissue region, 0 otherwise
+                                            2: "array_row", # spot row index
+                                            3: "array_col", # spot column index
+                                            4: "pxl_row_in_fullres", # spot x coordinate in image pixel
+                                            5: "pxl_col_in_fullres"}) # spot y coordinate in image pixel
         
-        spatial = spatial.rename(columns={1: "in_tissue", # in_tissue: 1 if spot is captured in tissue region, 0 otherwise
-                                        2: "array_row", # spot row index
-                                        3: "array_col", # spot column index
-                                        4: "pxl_row_in_fullres", # spot x coordinate in image pixel
-                                        5: "pxl_col_in_fullres"}) # spot y coordinate in image pixel
-    
-    # make sure the spot barcodes aligned
-    # sometimes spatial can be a greater set, but mostly they are the same
-    barcode_diff = len(spatial) - len(adata.obs) 
-    if barcode_diff != 0:
-        print(f'{barcode_diff} spots are not aligned, adata might have been filtered within tissue region already')
-    else:
-        print(f'All {len(adata.obs)} spots are aligned with spatial coordinates')
-    # align + match order        
-    spatial_aligned = spatial.reindex(adata.obs.index)
-    assert np.array_equal(spatial_aligned.index, adata.obs.index)
-    
-    
-    col1 = spatial_aligned['pxl_col_in_fullres'].values
-    col2 = spatial_aligned['pxl_row_in_fullres'].values
-    
-    matrix = np.vstack((col1, col2)).T
-    
-    adata.obsm['spatial'] = matrix
-    
-    if spatial_coord_path is not None:
-        scalefactors = _get_scalefactors(spatial_coord_path)
-        pixel_size = 55. / scalefactors['spot_diameter_fullres']
-    
-
-    ### More adata processing
-    # add into adata.obs
-    adata.obs = spatial_aligned
-    # filter out spots outside tissue region
-    print(f'Before filtering, {len(adata.obs)} spots are in adata')
-    #if in_tissue_only:
-    #    adata = adata[adata.obs["in_tissue"] == 1]
+        df = _alignment_file_to_df(alignment_file_path)
         
-    ### 3. H&E IMAGE
-    #if downsample_factor:
-    #    img = np.array(downsample_image(img_path, downsample_factor))
-    #else:
-    #    img = np.array(Image.open(img_path))
-    if img_path.endswith('tiff') or img_path.endswith('tif') or img_path.endswith('btf'):
-        img = tifffile.imread(img_path)
-    else:
-        img = np.array(Image.open(img_path))
-        
-    if alignment_file_path is not None:
-        f = open(alignment_file_path)
-        
-        data = json.load(f)
-        #alignment_matrix = np.array(data['transform'])
-        df = pd.DataFrame(data['oligo'])
-        if len(data['oligo']) > 0:
+        if len(df) > 0:
             df = df.rename(columns={
                 'row': 'array_row',
                 'col': 'array_col',
@@ -524,12 +485,84 @@ def read_10x_visium(
         
             #matrix = (np.vstack((col1, col2, np.ones(len(col1)))).T# @ matrix_cyt.T)[:,:2]
             #matrix = (np.vstack((col1, col2))).T
-            matrix_cyt = np.array(data['cytAssistInfo']['transformImages'])
-            cytassist_to_fullres = np.linalg.inv(matrix_cyt)
+        #    matrix_cyt = np.array(data['cytAssistInfo']['transformImages'])
+        #    cytassist_to_fullres = np.linalg.inv(matrix_cyt)
         
-            matrix = (np.vstack((col1, col2, np.ones(len(col1)))).T @ cytassist_to_fullres.T)[:,:2]
+        #    matrix = (np.vstack((col1, col2, np.ones(len(col1)))).T @ cytassist_to_fullres.T)[:,:2]
         
-            adata.obsm['spatial'] = matrix 
+        #    adata.obsm['spatial'] = matrix 
+        # align + match order        
+        spatial_aligned = spatial.reindex(adata.obs.index)
+        assert np.array_equal(spatial_aligned.index, adata.obs.index)
+
+    elif alignment_file_path is not None:
+        barcode_coords = pd.read_csv('./barcode_coords/visium-v1_coordinates.txt', sep='\t', header=None)
+        barcode_coords = barcode_coords.rename(columns={
+            0: 'barcode',
+            1: 'array_col',
+            2: 'array_row'
+        })
+        barcode_coords['barcode'] += '-1'
+        spatial = _alignment_file_to_df(alignment_file_path)
+        if len(spatial) != len(adata.obs):
+            raise Exception(
+                "the number of spots don't match between the alignment file and the"
+                " gene matrix, please provide a tissue_positions.csv/tissue_positions_list.csv"
+                " to align the barcodes")
+        spatial = spatial.rename(columns={
+            'tissue': 'in_tissue',
+            'row': 'array_row',
+            'col': 'array_col',
+            #'x': 'pxl_col_in_fullres',
+            #'y': 'pxl_row_in_fullres'
+            'imageX': 'pxl_col_in_fullres',
+            'imageY': 'pxl_row_in_fullres'
+        })
+
+        spatial_aligned = pd.merge(spatial, barcode_coords, on=['array_row', 'array_col'])
+
+        spatial_aligned.index = spatial_aligned['barcode']
+
+        spatial_aligned = spatial_aligned[['in_tissue', 'array_row', 'array_col', 'pxl_col_in_fullres', 'pxl_row_in_fullres']]
+    
+        #diff = spatial_aligned.index.symmetric_difference(adata.obs.index)
+
+        spatial_aligned = spatial_aligned.reindex(adata.obs.index)
+        
+        #spatial_aligned = spatial
+        #spatial_aligned.index = adata.obs.index
+    else:
+        raise Exception("a tissue_positions_list.csv/tissue_positions.csv or an alignment path must be provided")
+
+    
+    col1 = spatial_aligned['pxl_col_in_fullres'].values
+    col2 = spatial_aligned['pxl_row_in_fullres'].values
+    
+    matrix = np.vstack((col1, col2)).T
+    
+    adata.obsm['spatial'] = matrix
+    
+    if spatial_coord_path is not None:
+        scalefactors = _get_scalefactors(spatial_coord_path)
+        pixel_size = 55. / scalefactors['spot_diameter_fullres']
+    else:
+        pixel_size = 0.2 # TODO get the real pixel_size from spot dia or inter spot distance
+    
+
+    ### More adata processing
+    # add into adata.obs
+    adata.obs = spatial_aligned
+    # filter out spots outside tissue region
+    print(f'Before filtering, {len(adata.obs)} spots are in adata')
+    #if in_tissue_only:
+    #    adata = adata[adata.obs["in_tissue"] == 1]
+        
+
+    if img_path.endswith('tiff') or img_path.endswith('tif') or img_path.endswith('btf'):
+        img = tifffile.imread(img_path)
+    else:
+        img = np.array(Image.open(img_path))
+        
         
 
         
