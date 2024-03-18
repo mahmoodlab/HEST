@@ -1,6 +1,6 @@
 import pandas as pd
 from src.hiSTloader.old_st import *
-from src.hiSTloader.helpers import process_all, extract_patch_expression_pairs, visualize_patches, extract_image_patches, download_from_meta_df, read_10x_visium
+from src.hiSTloader.helpers import process_all, extract_patch_expression_pairs, visualize_patches, extract_image_patches, download_from_meta_df, read_10x_visium, save_10x_visium, save_spatial_plot
 import tifffile
 from PIL import Image
 from kwimage.im_cv2 import warp_affine, imresize
@@ -93,10 +93,34 @@ def main():
     
     #read_any()
     
-    load_from_image_matrix_align(
-        '/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Zika virus co-opts miRNA networks to persist in placental microenvironments detected by spatial transcriptomics [visium]/S07/GSM6215671_S07.png',
-        '/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Zika virus co-opts miRNA networks to persist in placental microenvironments detected by spatial transcriptomics [visium]/S07/GSM6215671_S07_filtered_feature_bc_matrix.h5',
-        '/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Zika virus co-opts miRNA networks to persist in placental microenvironments detected by spatial transcriptomics [visium]/S07/alignment.json')
+   # my = sc.read_visium('/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Mouse Brain Serial Section 1 (Sagittal-Posterior)')
+    
+    #path = '/mnt/ssd/paul/ST-histology-loader/data/samples/visium/YAP Drives Assembly of a Spatially Colocalized Cellular Triad Required for Heart Renewal/MCM control mouse heart spatial RNA-seq'
+    path = "/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Single-cell and spatial transcriptomics profile of porcine jejunum and ileum containing Peyer's patches/I2-STB"
+    adata, spatial_aligned, img, raw_bc_matrix = read_any(path)
+    
+    save_spatial_plot(adata, os.path.join(path, 'processed'), 'test')
+    
+    
+    #adata, spatial_aligned, img, raw_bc_matrix = read_10x_visium(
+    #    img_path='/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Mouse Brain Serial Section 1 (Sagittal-Posterior)/V1_Mouse_Brain_Sagittal_Posterior_image.tif',
+    #    bc_matrix_path='/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Mouse Brain Serial Section 1 (Sagittal-Posterior)/V1_Mouse_Brain_Sagittal_Posterior_filtered_feature_bc_matrix.h5',
+    #    spatial_coord_path='/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Mouse Brain Serial Section 1 (Sagittal-Posterior)/spatial'
+    #)
+    
+    # provide an option to keep the spatial folder with/without the tissue_positions.csv
+    #save_10x_visium(
+    #    adata, 
+    #    '/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Mouse Brain Serial Section 1 (Sagittal-Posterior)/processed',
+    #    img,
+    #    h5_path='/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Mouse Brain Serial Section 1 (Sagittal-Posterior)/V1_Mouse_Brain_Sagittal_Posterior_filtered_feature_bc_matrix.h5',
+    #    spatial_path='/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Mouse Brain Serial Section 1 (Sagittal-Posterior)/spatial',
+    #)
+    
+    #load_from_image_matrix_align(
+    #    '/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Zika virus co-opts miRNA networks to persist in placental microenvironments detected by spatial transcriptomics [visium]/S07/GSM6215671_S07.png',
+    #    '/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Zika virus co-opts miRNA networks to persist in placental microenvironments detected by spatial transcriptomics [visium]/S07/GSM6215671_S07_filtered_feature_bc_matrix.h5',
+    #    '/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Zika virus co-opts miRNA networks to persist in placental microenvironments detected by spatial transcriptomics [visium]/S07/alignment.json')
     
    # meta_df = pd.read_csv('/mnt/ssd/paul/ST-histology-loader/data/Datasets H&E spatial transcriptomics - 10XGenomics.csv')
     #meta_df = pd.read_csv('Datasets H&E spatial transcriptomics - Zenodo.csv')
@@ -110,9 +134,8 @@ def main():
     load_img = True
     if project == 'crc_14':
         load_img = False
-        
     
-
+    
     
     #adata_list, img_list, hvgs_union, sample_names, matched_dict = load_data(st_dir, img_dir, df_img_name)
     adata_list, img_list, sample_names = load_data(data_path)

@@ -20,6 +20,9 @@ import tarfile
 import subprocess
 from threading import Thread
 from time import sleep
+import h5py
+import shutil
+
 
 
 def _extract_tar_gz(file_path, extract_path):
@@ -156,13 +159,13 @@ def downsample_image(img_path, target_resolution = 10, save_image = False, outpu
     return img_downsampled
 
 
-def _check_file_endswith(dir, suffix):
+def _find_first_file_endswith(dir, suffix):
     files_dir = os.listdir(dir)
     matching = [file for file in files_dir if file.endswith(suffix)]
-    if matching:
-        return True
+    if len(matching) == 0:
+        return None
     else:
-        return False
+        return os.path.join(dir, matching[0])
 
 
 def save_aligned_data(path, adata: sc.AnnData, tissue_positions_df: pd.DataFrame, img, filtered_bc_matrix):
@@ -185,7 +188,7 @@ def save_aligned_data(path, adata: sc.AnnData, tissue_positions_df: pd.DataFrame
     with tifffile.TiffWriter(os.path.join(path, 'aligned_fullres_HE.ome.tif'), bigtiff=True) as tif:
         tif.write(img)
         
-    exists = _check_file_endswith(path, 'filtered_feature_bc_matrix.h5')
+    exists = _find_first_file_endswith(path, 'filtered_feature_bc_matrix.h5') is not None
     if not exists and filtered_bc_matrix is not None:
         filtered_bc_matrix.write_h5ad(os.path.join(path, 'filtered_feature_bc_matrix.h5'))
    
@@ -223,7 +226,7 @@ def save_spatial_plot(adata, save_path, name, processed=False):
         sc.pl.spatial(adata, img_key="downscaled_fullres", color=["total_counts", "n_genes_by_counts", "pct_counts_in_top_200_genes"],
                     ncols=3, cmap='plasma', alpha_img=0.5, title=[f"{name} total_counts", "n_genes_by_counts", "pct_counts_in_top_200_genes"], show=False)
     else:       
-        ax = sc.pl.spatial(adata, show=False, img_key="downscaled_fullres", color=["in_tissue"], title=f"{name} in_tissue spots")
+        sc.pl.spatial(adata, show=None, img_key="downscaled_fullres", color=['TBP'], title=f"{name} in_tissue spots")
     
     # Generate spatial plots without showing them
     
@@ -285,7 +288,7 @@ def _find_biggest_img(path):
     biggest_size = -1
     biggest_img_filename = None
     for file in os.listdir(path):
-        if file.endswith('.tif') or file.endswith('.jpg') or file.endswith('.btf'):
+        if file.endswith('.tif') or file.endswith('.jpg') or file.endswith('.btf') or file.endswith('.png'):
             if file not in ['aligned_fullres_HE.ome.tif', 'morphology.ome.tif', 'morphology_focus.ome.tif', 'morphology_mip.ome.tif']:
                 size = os.path.getsize(os.path.join(path, file))
                 if size > biggest_size:
@@ -298,28 +301,31 @@ def read_any(path):
     if 'visium' in path.lower():
         img_filename = _find_biggest_img(path)
             
-        feature_file = None
-        for file in os.listdir(path):
-            if file.endswith('filtered_feature_bc_matrix.h5'):
-                feature_file = file
-                break
-            
-        alignment_file = None
-        for file in os.listdir(path):
-            if file.endswith('alignment_file.json'):
-                alignment_file = file
-                break
+        filtered_feature_path = _find_first_file_endswith(path, 'filtered_feature_bc_matrix.h5')
+        alignment_path = _find_first_file_endswith(path, 'alignment_file.json')
+        if alignment_path is None:
+            alignment_path = _find_first_file_endswith(path, 'alignment.json')
+        spatial_coord_path = _find_first_file_endswith(path, 'spatial')
+        mex_path = _find_first_file_endswith(path, 'mex')
         
-        if alignment_file is None:
-            alignment_path = None
-        else:
-            alignment_path = os.path.join(path, alignment_file)
+
             
         adata, tissue_positions_df, img, raw_bc_matrix = read_10x_visium(
-            st_gene_expression_path=os.path.join(path, feature_file),
-            spatial_coord_path=os.path.join(path, 'spatial'),
+            bc_matrix_path=filtered_feature_path,
+            spatial_coord_path=spatial_coord_path,
             img_path=os.path.join(path, img_filename),
-            alignment_file_path=alignment_path
+            alignment_file_path=alignment_path,
+            mex_path=mex_path
+        )
+        
+        os.makedirs(os.path.join(path, 'processed'), exist_ok=True)
+        
+        save_10x_visium(
+            adata, 
+            os.path.join(path, 'processed'),
+            img,
+            h5_path=filtered_feature_path,
+            spatial_path=spatial_coord_path,
         )
         
         return adata, tissue_positions_df, img, raw_bc_matrix
@@ -342,21 +348,39 @@ def read_any(path):
         
         return adata, img
       
+      
+def _find_pixel_size_from_spot_coords(df):
+    for index, row in df.iterrows():
+        y = row['array_row']
+        pxl_x = row['pxl_col_in_fullres']
+        pxl_y = row['pxl_row_in_fullres']
+        x = row['array_col']
+        if len(df[df['array_row'] == y]) > 1:
+            b = df[df['array_row'] == y].index.max()
+            dist_col = abs(df.loc[b, 'array_col'] - x) / 2
+            dist_px_col = abs(df.loc[b, 'pxl_col_in_fullres'] - pxl_x)
+            dist_px_row = abs(df.loc[b, 'pxl_row_in_fullres'] - pxl_y)
+            dist_px = np.max([dist_px_col, dist_px_row])
+            
+            return (dist_px / dist_col) / 100.
+    raise Exception("Couldn't find two spots on the same row")
+      
 
 def _register_downscale_img(adata, img, pixel_size):
+    TARGET_PIXEL_EDGE = 1000
     print('image size is ', img.shape)
-    downscale_factor = 0.025
+    downscale_factor = TARGET_PIXEL_EDGE / np.max(img.shape)
     downscaled_fullres = imresize(img, downscale_factor)
     
     
     # register the image
     adata.uns['spatial'] = {}
-    adata.uns['spatial']['V1_Adult_Mouse_Brain'] = {}
-    adata.uns['spatial']['V1_Adult_Mouse_Brain']['images'] = {}
-    adata.uns['spatial']['V1_Adult_Mouse_Brain']['images']['downscaled_fullres'] = downscaled_fullres
-    adata.uns['spatial']['V1_Adult_Mouse_Brain']['scalefactors'] = {}
-    adata.uns['spatial']['V1_Adult_Mouse_Brain']['scalefactors']['spot_diameter_fullres'] = 55. / pixel_size
-    adata.uns['spatial']['V1_Adult_Mouse_Brain']['scalefactors']['tissue_downscaled_fullres_scalef'] = downscale_factor
+    adata.uns['spatial']['ST'] = {}
+    adata.uns['spatial']['ST']['images'] = {}
+    adata.uns['spatial']['ST']['images']['downscaled_fullres'] = downscaled_fullres
+    adata.uns['spatial']['ST']['scalefactors'] = {}
+    adata.uns['spatial']['ST']['scalefactors']['spot_diameter_fullres'] = 55. / pixel_size
+    adata.uns['spatial']['ST']['scalefactors']['tissue_downscaled_fullres_scalef'] = downscale_factor
   
 
 def _get_scalefactors(spatial_path: str):
@@ -455,6 +479,58 @@ def _find_alignment_barcodes(alignment_df: str, adata: sc.AnnData) -> pd.DataFra
     return spatial_aligned
 
 
+# taken from https://github.com/scverse/anndata/issues/595
+def write_10X_h5(adata, file):
+    """Writes adata to a 10X-formatted h5 file.
+    
+    Note that this function is not fully tested and may not work for all cases.
+    It will not write the following keys to the h5 file compared to 10X:
+    '_all_tag_keys', 'pattern', 'read', 'sequence'
+
+    Args:
+        adata (AnnData object): AnnData object to be written.
+        file (str): File name to be written to. If no extension is given, '.h5' is appended.
+
+    Raises:
+        FileExistsError: If file already exists.
+
+    Returns:
+        None
+    """
+    
+    if '.h5' not in file: file = f'{file}.h5'
+    #if os.path.exists(file):
+    #    raise FileExistsError(f"There already is a file `{file}`.")
+    def int_max(x):
+        return int(max(np.floor(len(str(int(max(x)))) / 4), 1) * 4)
+    def str_max(x):
+        return max([len(i) for i in x])
+
+    w = h5py.File(file, 'w')
+    grp = w.create_group("matrix")
+    grp.create_dataset("barcodes", data=np.array(adata.obs_names, dtype=f'|S{str_max(adata.obs_names)}'))
+    grp.create_dataset("data", data=np.array(adata.X.data, dtype=f'<i{int_max(adata.X.data)}'))
+    ftrs = grp.create_group("features")
+    # this group will lack the following keys:
+    # '_all_tag_keys', 'feature_type', 'genome', 'id', 'name', 'pattern', 'read', 'sequence'
+    ftrs.create_dataset("feature_type", data=np.array(adata.var.feature_types, dtype=f'|S{str_max(adata.var.feature_types)}'))
+    if 'genome' in adata.var.columns:
+        ftrs.create_dataset("genome", data=np.array(adata.var.genome, dtype=f'|S{str_max(adata.var.genome)}'))
+    ftrs.create_dataset("id", data=np.array(adata.var.gene_ids, dtype=f'|S{str_max(adata.var.gene_ids)}'))
+    ftrs.create_dataset("name", data=np.array(adata.var.index, dtype=f'|S{str_max(adata.var.index)}'))
+    grp.create_dataset("indices", data=np.array(adata.X.indices, dtype=f'<i{int_max(adata.X.indices)}'))
+    grp.create_dataset("indptr", data=np.array(adata.X.indptr, dtype=f'<i{int_max(adata.X.indptr)}'))
+    grp.create_dataset("shape", data=np.array(list(adata.X.shape)[::-1], dtype=f'<i{int_max(adata.X.shape)}'))
+
+
+def __helper_mex(path, filename):
+    dst = os.path.join(path, filename)
+    src = _find_first_file_endswith(path, filename)
+    if not os.path.exists(src) and \
+            src is not None:
+        shutil.copy(src, dst)
+
+
 def read_10x_visium(
     img_path: str,
     bc_matrix_path: str = None,
@@ -462,7 +538,7 @@ def read_10x_visium(
     tissue_positions_path: str = None,
     alignment_file_path: str = None, 
     mex_path: str = None,
-    matrix_path: str = None,
+    custom_matrix_path: str = None,
     downsample_factor = None
 ):
     """
@@ -477,9 +553,14 @@ def read_10x_visium(
     if bc_matrix_path is not None:
         adata = sc.read_10x_h5(bc_matrix_path)
     elif mex_path is not None:
+        __helper_mex(mex_path, 'barcodes.tsv.gz')
+        __helper_mex(mex_path, 'features.tsv.gz')
+        __helper_mex(mex_path, 'matrix.mtx.gz')
+
+            
         adata = sc.read_10x_mtx(mex_path)
-    elif matrix_path is not None:
-        adata = _txt_matrix_to_adata(matrix_path)
+    elif custom_matrix_path is not None:
+        adata = _txt_matrix_to_adata(custom_matrix_path)
 
     adata.var_names_make_unique()
     print(adata)      
@@ -487,72 +568,63 @@ def read_10x_visium(
     if tissue_positions_path is not None or spatial_coord_path is not None:
         tissue_positions_path = os.path.join(spatial_coord_path, 'tissue_positions.csv')
         if os.path.exists(tissue_positions_path):
-            spatial = pd.read_csv(tissue_positions_path, sep=",", na_filter=False, index_col=0) 
+            tissue_positions = pd.read_csv(tissue_positions_path, sep=",", na_filter=False, index_col=0) 
         else:
             tissue_positions_path = os.path.join(spatial_coord_path, 'tissue_positions_list.csv')
-            spatial = pd.read_csv(tissue_positions_path, header=None, sep=",", na_filter=False, index_col=0)
+            tissue_positions = pd.read_csv(tissue_positions_path, header=None, sep=",", na_filter=False, index_col=0)
             
-            spatial = spatial.rename(columns={1: "in_tissue", # in_tissue: 1 if spot is captured in tissue region, 0 otherwise
+            tissue_positions = tissue_positions.rename(columns={1: "in_tissue", # in_tissue: 1 if spot is captured in tissue region, 0 otherwise
                                             2: "array_row", # spot row index
                                             3: "array_col", # spot column index
                                             4: "pxl_row_in_fullres", # spot x coordinate in image pixel
                                             5: "pxl_col_in_fullres"}) # spot y coordinate in image pixel
-        
-        df = _alignment_file_to_df(alignment_file_path)
-        
-        if len(df) > 0:
-            df = df.rename(columns={
-                'row': 'array_row',
-                'col': 'array_col',
-                'x': 'pxl_col_in_fullres',
-                'y': 'pxl_row_in_fullres'
-                #'imageX': 'pxl_col_in_fullres',
-                #'imageY': 'pxl_row_in_fullres'
-            })
-            df_merged = spatial.rename(columns={
-                'pxl_col_in_fullres': 'pxl_col_in_fullres_old',
-                'pxl_row_in_fullres': 'pxl_row_in_fullres_old'
-            })
-        
-            df = df[['array_row', 'array_col', 'pxl_col_in_fullres', 'pxl_row_in_fullres']]
-            #original_index = df_merged.index
-            df_merged = df_merged.merge(df, on=['array_row', 'array_col'], how='left')
+
+        if alignment_file_path is not None:        
+            alignment_df = _alignment_file_to_df(alignment_file_path)
             
-            adata.obs = df_merged[df_merged['in_tissue'] == 1]
+            if len(alignment_df) > 0:
+                alignment_df = alignment_df.rename(columns={
+                    'row': 'array_row',
+                    'col': 'array_col',
+                    'x': 'pxl_col_in_fullres',
+                    'y': 'pxl_row_in_fullres'
+                    #'imageX': 'pxl_col_in_fullres',
+                    #'imageY': 'pxl_row_in_fullres'
+                })
+                df_merged = tissue_positions.rename(columns={
+                    'pxl_col_in_fullres': 'pxl_col_in_fullres_old',
+                    'pxl_row_in_fullres': 'pxl_row_in_fullres_old'
+                })
             
-            col1 = adata.obs['pxl_col_in_fullres'].values
-            col2 = adata.obs['pxl_row_in_fullres'].values
-            matrix = (np.vstack((col1, col2))).T
-            
-            adata.obsm['spatial'] = matrix 
-            
-            spatial['pxl_col_in_fullres'] = df_merged['pxl_col_in_fullres']
-            spatial['pxl_row_in_fullres'] = df_merged['pxl_row_in_fullres']
-            
-        else:
-            col1 = spatial['pxl_col_in_fullres'].values
-            col2 = spatial['pxl_row_in_fullres'].values
-            
-        
-            #matrix = (np.vstack((col1, col2, np.ones(len(col1)))).T# @ matrix_cyt.T)[:,:2]
-            #matrix = (np.vstack((col1, col2))).T
-        #    matrix_cyt = np.array(data['cytAssistInfo']['transformImages'])
-        #    cytassist_to_fullres = np.linalg.inv(matrix_cyt)
-        
-        #    matrix = (np.vstack((col1, col2, np.ones(len(col1)))).T @ cytassist_to_fullres.T)[:,:2]
-        
-        #    adata.obsm['spatial'] = matrix 
-        # align + match order        
-        spatial_aligned = spatial.reindex(adata.obs.index)
+                alignment_df = alignment_df[['array_row', 'array_col', 'pxl_col_in_fullres', 'pxl_row_in_fullres']]
+                #original_index = df_merged.index
+                df_merged = df_merged.merge(alignment_df, on=['array_row', 'array_col'], how='left')
+                
+                adata.obs = df_merged[df_merged['in_tissue'] == 1]
+                
+                col1 = adata.obs['pxl_col_in_fullres'].values
+                col2 = adata.obs['pxl_row_in_fullres'].values
+                matrix = (np.vstack((col1, col2))).T
+                
+                adata.obsm['spatial'] = matrix 
+                
+                tissue_positions['pxl_col_in_fullres'] = df_merged['pxl_col_in_fullres']
+                tissue_positions['pxl_row_in_fullres'] = df_merged['pxl_row_in_fullres']
+                
+            else:
+                col1 = tissue_positions['pxl_col_in_fullres'].values
+                col2 = tissue_positions['pxl_row_in_fullres'].values        
+                 
+        spatial_aligned = tissue_positions.reindex(adata.obs.index)
         assert np.array_equal(spatial_aligned.index, adata.obs.index)
 
     elif alignment_file_path is not None:
         alignment_df = _alignment_file_to_df(alignment_file_path)
-        if len(alignment_df) != len(adata.obs):
-            raise Exception(
-                "the number of spots don't match between the alignment file and the"
-                " gene matrix, please provide a tissue_positions.csv/tissue_positions_list.csv"
-                " to align the barcodes")
+        #if len(alignment_df) != len(adata.obs):
+        #    raise Exception(
+        #        "the number of spots don't match between the alignment file and the"
+        #        " gene matrix, please provide a tissue_positions.csv/tissue_positions_list.csv"
+        #        " to align the barcodes")
         alignment_df = alignment_df.rename(columns={
             'tissue': 'in_tissue',
             'row': 'array_row',
@@ -580,14 +652,13 @@ def read_10x_visium(
         scalefactors = _get_scalefactors(spatial_coord_path)
         pixel_size = 55. / scalefactors['spot_diameter_fullres']
     else:
-        pixel_size = 0.2 # TODO get the real pixel_size from spot dia or inter spot distance
+        pixel_size = _find_pixel_size_from_spot_coords(spatial_aligned)
     
 
     ### More adata processing
     # add into adata.obs
     adata.obs = spatial_aligned
     # filter out spots outside tissue region
-    print(f'Before filtering, {len(adata.obs)} spots are in adata')
     #if in_tissue_only:
     #    adata = adata[adata.obs["in_tissue"] == 1]
         
@@ -615,6 +686,38 @@ def read_10x_visium(
     _register_downscale_img(adata, img, pixel_size)
 
     return adata, spatial_aligned, img, raw_bc_matrix
+
+
+def _save_scalefactors(adata: sc.AnnData, path):
+    dict = {}
+    dict['tissue_downscaled_fullres_scalef'] = adata.uns['spatial']['ST']['scalefactors']['tissue_downscaled_fullres_scalef']
+    dict['spot_diameter_fullres'] = adata.uns['spatial']['ST']['scalefactors']['spot_diameter_fullres']
+    
+    with open(path, 'w') as json_file:
+        json.dump(dict, json_file)
+
+
+def save_10x_visium(adata, path, img, h5_path=None, spatial_path=None):
+    
+    if h5_path is not None:
+        shutil.copy(h5_path, os.path.join(path, 'filtered_feature_bc_matrix.h5'))
+    else:
+        write_10X_h5(adata, os.path.join(path, 'filtered_feature_bc_matrix.h5'))
+    
+    if spatial_path is not None:
+        shutil.copytree(spatial_path, os.path.join(path, 'spatial'), dirs_exist_ok=True)
+    else:
+        os.makedirs(os.path.join(path, 'spatial'), exist_ok=True)
+        _save_scalefactors(adata, os.path.join(path, 'spatial/scalefactors_json.json'))
+
+    df = adata.obs
+    tissue_positions = df[['in_tissue', 'array_row', 'array_col', 'pxl_row_in_fullres', 'pxl_col_in_fullres']]
+    
+    tissue_positions.to_csv(os.path.join(path, 'spatial/tissue_positions.csv'), index=True, index_label='barcode')
+    
+    
+    with tifffile.TiffWriter(os.path.join(path, 'aligned_fullres_HE.ome.tif'), bigtiff=True) as tif:
+        tif.write(img)
 
 
 def xenium_to_pseudo_visium(adata, df: pd.DataFrame, pixel_size):
