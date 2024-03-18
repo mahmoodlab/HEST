@@ -407,6 +407,54 @@ def _alignment_file_to_df(path):
     return pd.DataFrame(data['oligo'])
  
 
+def _txt_matrix_to_adata(txt_matrix_path):
+    matrix = pd.read_csv(txt_matrix_path, sep='\t')
+    matrix = matrix.transpose()
+
+    adata = sc.AnnData(matrix)
+
+    return adata
+
+
+def _find_slide_version(alignment_df: str) -> str:
+    highest_nb_match = -1
+    version_file_name = None
+    for file in os.listdir('./barcode_coords/'):
+        barcode_coords = pd.read_csv(os.path.join('./barcode_coords/', file), sep='\t', header=None)
+        barcode_coords = barcode_coords.rename(columns={
+            0: 'barcode',
+            1: 'array_col',
+            2: 'array_row'
+        })
+        barcode_coords['barcode'] += '-1'
+
+        spatial_aligned = pd.merge(alignment_df, barcode_coords, on=['array_row', 'array_col'], how='inner')
+        if len(spatial_aligned) > highest_nb_match:
+            highest_nb_match = len(spatial_aligned)
+            version_file_name = file
+    return version_file_name
+            
+
+def _find_alignment_barcodes(alignment_df: str, adata: sc.AnnData) -> pd.DataFrame:
+    barcode_coords = pd.read_csv('./barcode_coords/visium-v1_coordinates.txt', sep='\t', header=None)
+    barcode_coords = barcode_coords.rename(columns={
+        0: 'barcode',
+        1: 'array_col',
+        2: 'array_row'
+    })
+    barcode_coords['barcode'] += '-1'
+
+    spatial_aligned = pd.merge(alignment_df, barcode_coords, on=['array_row', 'array_col'], how='inner')
+
+    spatial_aligned.index = spatial_aligned['barcode']
+
+    spatial_aligned = spatial_aligned[['in_tissue', 'array_row', 'array_col', 'pxl_col_in_fullres', 'pxl_row_in_fullres']]
+
+    spatial_aligned = spatial_aligned.reindex(adata.obs.index)
+
+    return spatial_aligned
+
+
 def read_10x_visium(
     img_path: str,
     bc_matrix_path: str = None,
@@ -414,6 +462,7 @@ def read_10x_visium(
     tissue_positions_path: str = None,
     alignment_file_path: str = None, 
     mex_path: str = None,
+    matrix_path: str = None,
     downsample_factor = None
 ):
     """
@@ -429,6 +478,8 @@ def read_10x_visium(
         adata = sc.read_10x_h5(bc_matrix_path)
     elif mex_path is not None:
         adata = sc.read_10x_mtx(mex_path)
+    elif matrix_path is not None:
+        adata = _txt_matrix_to_adata(matrix_path)
 
     adata.var_names_make_unique()
     print(adata)      
@@ -496,20 +547,13 @@ def read_10x_visium(
         assert np.array_equal(spatial_aligned.index, adata.obs.index)
 
     elif alignment_file_path is not None:
-        barcode_coords = pd.read_csv('./barcode_coords/visium-v1_coordinates.txt', sep='\t', header=None)
-        barcode_coords = barcode_coords.rename(columns={
-            0: 'barcode',
-            1: 'array_col',
-            2: 'array_row'
-        })
-        barcode_coords['barcode'] += '-1'
-        spatial = _alignment_file_to_df(alignment_file_path)
-        if len(spatial) != len(adata.obs):
+        alignment_df = _alignment_file_to_df(alignment_file_path)
+        if len(alignment_df) != len(adata.obs):
             raise Exception(
                 "the number of spots don't match between the alignment file and the"
                 " gene matrix, please provide a tissue_positions.csv/tissue_positions_list.csv"
                 " to align the barcodes")
-        spatial = spatial.rename(columns={
+        alignment_df = alignment_df.rename(columns={
             'tissue': 'in_tissue',
             'row': 'array_row',
             'col': 'array_col',
@@ -519,18 +563,8 @@ def read_10x_visium(
             'imageY': 'pxl_row_in_fullres'
         })
 
-        spatial_aligned = pd.merge(spatial, barcode_coords, on=['array_row', 'array_col'])
-
-        spatial_aligned.index = spatial_aligned['barcode']
-
-        spatial_aligned = spatial_aligned[['in_tissue', 'array_row', 'array_col', 'pxl_col_in_fullres', 'pxl_row_in_fullres']]
-    
-        #diff = spatial_aligned.index.symmetric_difference(adata.obs.index)
-
-        spatial_aligned = spatial_aligned.reindex(adata.obs.index)
+        spatial_aligned = _find_alignment_barcodes(alignment_df, adata)
         
-        #spatial_aligned = spatial
-        #spatial_aligned.index = adata.obs.index
     else:
         raise Exception("a tissue_positions_list.csv/tissue_positions.csv or an alignment path must be provided")
 
@@ -580,7 +614,7 @@ def read_10x_visium(
     #pixel_size = 
     _register_downscale_img(adata, img, pixel_size)
 
-    return adata, spatial, img, raw_bc_matrix
+    return adata, spatial_aligned, img, raw_bc_matrix
 
 
 def xenium_to_pseudo_visium(adata, df: pd.DataFrame, pixel_size):
