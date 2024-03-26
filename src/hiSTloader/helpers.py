@@ -277,7 +277,7 @@ def process_all(meta_df, root_path, save_plots=True):
         img_list.append(img)
         raw_bc_matrices.append(raw_bc_matrix)
     
-        save_aligned_data(path, adata, tissue_positions_df, img, raw_bc_matrix)
+        #save_aligned_data(path, adata, tissue_positions_df, img, raw_bc_matrix)
         if save_plots:
             save_spatial_plot(adata, os.path.join(path, 'processed'), name)
             #save_spatial_plot(processed_adata, os.path.join(path, 'aligned'), name, processed=True)
@@ -661,9 +661,9 @@ def read_10x_visium(
     adata.var_names_make_unique()
     print(adata)
     
-    if adata.obs.index[0][-1] != '-':
-        print('append -1 to the barcodes')
-        adata.obs.index = [idx + '-1' for idx in adata.obs.index]
+    #if adata.obs.index[0][-1] != '-':
+        #print('append -1 to the barcodes')
+        #adata.obs.index = [idx + '-1' for idx in adata.obs.index]
 
     if spatial_coord_path is not None:
         tissue_positions_path = _find_first_file_endswith(spatial_coord_path, 'tissue_positions.csv')
@@ -820,6 +820,10 @@ def save_10x_visium(adata, path, img, h5_path=None, spatial_path=None):
     tissue_positions = df[['in_tissue', 'array_row', 'array_col', 'pxl_row_in_fullres', 'pxl_col_in_fullres']]
     
     tissue_positions.to_csv(os.path.join(path, 'spatial/tissue_positions.csv'), index=True, index_label='barcode')
+    
+    
+    down_img = Image.fromarray(adata.uns['spatial']['ST']['images']['downscaled_fullres'])
+    down_img.save(os.path.join(path, 'downscaled_fullres.jpeg'))
     
     
     with tifffile.TiffWriter(os.path.join(path, 'aligned_fullres_HE.ome.tif'), bigtiff=True) as tif:

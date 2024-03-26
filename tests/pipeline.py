@@ -37,6 +37,29 @@ def cut_in_four_ndpi(path):
     img = openslide.OpenSlide(path)
     height, width = img.dimensions
     img1 = img.read_region((0, 0), 0, (width // 4, height)) #img[:, :width // 4]
+    myimg = imresize(img1, 0.025)
+    plt.imshow(myimg)
+    plt.show()
+    img2 = img.read_region((width // 4, 0), 0, (width // 4, height)) #img[:, width // 4:(2 * width) // 4]
+    img3 = img.read_region((width // 2, 0), 0, (width // 4, height)) #img[:,(2 * width) // 4:(3 * width) // 4]
+    img4 = img.read_region(((3 * width) // 4, 0), 0, (width // 4, height)) #img[:, (3 * width) // 4:]
+    
+    with tifffile.TiffWriter('split1.ome.tif', bigtiff=True) as tif:
+        tif.write(img1)
+    with tifffile.TiffWriter('split2.ome.tif', bigtiff=True) as tif:
+        tif.write(img2)
+    with tifffile.TiffWriter('split3.ome.tif', bigtiff=True) as tif:
+        tif.write(img3)
+    with tifffile.TiffWriter('split4.ome.tif', bigtiff=True) as tif:
+        tif.write(img4)
+
+
+def cut_in_four_from_bbox(path, bbox):
+    left_corner = bbox[0]
+    
+    img = openslide.OpenSlide(path)
+    height, width = img.dimensions
+    img1 = img.read_region((0, 0), 0, (width // 4, height)) #img[:, :width // 4]
     img2 = img.read_region((width // 4, 0), 0, (width // 4, height)) #img[:, width // 4:(2 * width) // 4]
     img3 = img.read_region((width // 2, 0), 0, (width // 4, height)) #img[:,(2 * width) // 4:(3 * width) // 4]
     img4 = img.read_region(((3 * width) // 4, 0), 0, (width // 4, height)) #img[:, (3 * width) // 4:]
@@ -119,13 +142,15 @@ def main():
     project = 'test_paul'
     sample_path = '/mnt/ssd/paul/ST-histology-loader/data/samples'
     
-    meta_df = pd.read_csv('/mnt/ssd/paul/ST-histology-loader/data/ST H&E datasets - NCBI.csv')
-    
+    #meta_df = pd.read_csv('/mnt/sdb1/paul/ST H&E datasets - 10XGenomics.csv')[34:]
+    #process_all(meta_df, '/mnt/sdb1/paul/data/samples')
     
     
     #_create_dir_structure_from_meta_df(meta_df[80:])
     
     #adata = sc.read_h5ad('/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Spatial transcriptomics profiling of the developing mouse embryo/Embryo, E12.5,  visium/_1_filtered_feature_bc_matrix.h5')
+    
+    
     
     
     #path = '/mnt/sdb1/paul/data/samples/visium/Bern ST/2000233V11Y17-0362022-05-17 - 2022-03-07 12.42.15.ndpi'
@@ -189,12 +214,13 @@ def main():
     #prefix = '/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Spatial transcriptomics profiling of the developing mouse embryo'
     #prefix = '/mnt/ssd/paul/ST-histology-loader/data/samples/visium/10X Visium Spatial transcriptomics of murine colon in steady state and during recovery after DSS colitis'
     
-    prefix ='/mnt/sdb1/paul/data/samples/visium/Spatial Total RNA-Sequencing of regenerating mouse hindlimb muscle and Type 1-Lang reovirus-infected mouse heart'
+    prefix ='/mnt/sdb1/paul/data/samples/visium/Single-nucleus Ribonucleic Acid-sequencing and Spatial Transcriptomics Reveal the Cardioprotection of Shexiang Baoxin Pill (MUSKARDIA) in Mice with Myocardial Ischemia-Reperfusion Injury'
     paths = os.listdir(prefix)
     for path in paths:
         path = os.path.join(prefix, path)
         adata, spatial_aligned, img, raw_bc_matrix = read_any(path)
         save_spatial_plot(adata, os.path.join(path, 'processed'), 'test')
+        
     
 
     
