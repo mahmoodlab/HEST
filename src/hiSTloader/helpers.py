@@ -25,6 +25,7 @@ import shutil
 import gzip
 from scipy import sparse
 from .align import autoalign_with_fiducials
+import seaborn as sns
 
 
 
@@ -162,9 +163,9 @@ def downsample_image(img_path, target_resolution = 10, save_image = False, outpu
     return img_downsampled
 
 
-def _find_first_file_endswith(dir, suffix):
+def _find_first_file_endswith(dir, suffix, exclude=''):
     files_dir = os.listdir(dir)
-    matching = [file for file in files_dir if file.endswith(suffix)]
+    matching = [file for file in files_dir if file.endswith(suffix) and file != exclude]
     if len(matching) == 0:
         return None
     else:
@@ -186,19 +187,81 @@ def _get_name_from_meta_row(row):
     else:
         return row['dataset_title'] + '_' + row['subseries'] + '_' + tech
  
+
+def save_metrics_plot(adata, save_path, name):
+    fig, ax = plt.subplots(figsize=(10, 5))
+    sns.histplot(adata.obs['log1p_n_genes_by_counts'], bins=50, kde=False, color='blue', ax=ax)
+    plt.savefig(save_path)
+    plt.close()
+
+def save_spatial_metrics_plot(adata, save_path, name, filtered_adata):
+    print('Plotting metrics pol...')
     
-###############################################################
-#### 2. Plot Spatial overlays on H&E Images ######
-# ax1: total_counts
-# ax2: n_genes_by_counts
-# ax3: pct_counts_in_top_200_genes
-###############################################################
+    fig, ax = plt.subplots(figsize=(30, 15))
+    ax = [[None for _ in range(6)] for _ in range(4)]
+    
+    ax[0][0] = plt.subplot2grid((6, 6), (3, 0), colspan=3)
+    ax[0][1] = plt.subplot2grid((6, 6), (4, 0), colspan=3)
+    ax[0][2] = plt.subplot2grid((6, 6), (5, 0), colspan=3)
+    ax[1][0] = plt.subplot2grid((6, 6), (3, 3), colspan=3)
+    ax[1][1] = plt.subplot2grid((6, 6), (4, 3), colspan=3)
+    ax[1][2] = plt.subplot2grid((6, 6), (5, 3), colspan=3)
+    ax[1][3] = plt.subplot2grid((6, 6), (0, 0), rowspan=3, colspan=3)
+    ax[1][4] = plt.subplot2grid((6, 6), (0, 3), rowspan=3, colspan=3)
+    
+    my_filtered_adata = adata.copy()
+    #missing_obs_idx = pd.concat([adata.obs, filtered_adata.obs]).drop_duplicates(keep=False).index
+    my_filtered_adata.obs['filtered_out'] = [0 for _ in range(len(my_filtered_adata.obs))]
+    #my_filtered_adata.obs[missing_obs_idx] = 1
+    #adata.obs['filtered_out'] = [0 for _ in range(len(adata.obs))]
+    
+    sns.histplot(adata.obs['log1p_n_genes_by_counts'], bins=50, kde=False, color='blue', ax=ax[0][0])
+
+    
+    sns.histplot(adata.obs['pct_counts_mito'], bins=50, kde=False, color='blue', ax=ax[0][1])
+    
+    sns.histplot(adata.obs['log1p_total_counts'], bins=50, kde=False, color='blue', ax=ax[0][2])
+    #sc.pl.spatial(adata, show=None, img_key="downscaled_fullres", color=['total_counts'], title=f"total_counts", ax=ax[0][3])
+    
+    #sc.pl.spatial(adata, show=None, img_key="downscaled_fullres", color=['filtered_out'], title=f"filtered_out", ax=ax[0][4], color_map='rainbow')
+
+    sns.histplot(filtered_adata.obs['log1p_n_genes_by_counts'], bins=50, kde=False, color='blue', ax=ax[1][0])
+    
+
+    sns.histplot(filtered_adata.obs['pct_counts_mito'], bins=50, kde=False, color='blue', ax=ax[1][1])
+    sns.histplot(filtered_adata.obs['log1p_total_counts'], bins=50, kde=False, color='blue', ax=ax[1][2])
+    
+    sc.pl.spatial(adata, show=None, img_key="downscaled_fullres", color=['total_counts'], title=f"total_counts before filtering", ax=ax[1][3])
+    sc.pl.spatial(my_filtered_adata, show=None, img_key="downscaled_fullres", color=['filtered_out'], title=f"filtered out spots", ax=ax[1][4], color_map='rainbow')
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_path, f'metrics_plot.png'))
+    plt.close()
+    
+    
+def filter_adata(adata):
+    filtered_adata = adata.copy()
+    std = filtered_adata.obs['total_counts'].std()
+    mean = filtered_adata.obs['total_counts'].mean()
+    lower_cutoff = mean - std  # Adjust this value as needed
+    higher_cutoff = mean + std  # Adjust this value as needed
+
+    # Filter cells based on total count
+    sc.pp.filter_cells(adata, min_counts=lower_cutoff)
+    sc.pp.filter_cells(adata, max_counts=higher_cutoff)
+    
+    
+    return filtered_adata
+    
 
 def save_spatial_plot(adata, save_path, name, processed=False):
     print("Plotting spatial plots...")
 
 
     #print(sample_name)
+    
+    #plt.imshow(adata.uns['spatial']['ST']['images']['downscaled_fullres'])
+    #plt.show()
     
     if processed:
         sc.pl.spatial(adata, img_key="downscaled_fullres", color=["total_counts", "n_genes_by_counts", "pct_counts_in_top_200_genes"],
@@ -227,15 +290,35 @@ def save_spatial_plot(adata, save_path, name, processed=False):
     print(f"H&E overlay spatial plots saved in {save_path}")
 
 
-def write_wsi(img, save_path, pixel_size):
+def write_wsi(img, save_path, meta_dict):
+    pixel_size = meta_dict['pixel_size_um_estimated']
+    pixel_size_embedded = meta_dict['pixel_size_um_embedded']
     
     with tifffile.TiffWriter(save_path, bigtiff=True) as tif:
-        options = dict(tile=(256, 256), compression='deflate', resolution=(
-               1. / pixel_size,
-               1. / pixel_size,
-               'micrometers',
-            ))
-        tif.write(img, subifds=3, **options)
+        extratags = {
+            'EstimatedPhysicalSizeX': f"{pixel_size} µm",
+            'EstimatedPhysicalSizeY': f"{pixel_size} µm",
+            'EmbeddedPhysicalSizeX': f"{pixel_size_embedded} µm",
+            'EmbeddedPhysicalSizeY': f"{pixel_size_embedded} µm",            
+        }
+        extratags = json.dumps(extratags)
+        
+        metadata = {
+         'PhysicalSizeX': pixel_size,
+         'PhysicalSizeXUnit': 'µm',
+         'PhysicalSizeY': pixel_size,
+         'PhysicalSizeYUnit': 'µm'
+        }
+        options = dict(
+            tile=(256, 256), 
+            compression='deflate', 
+            metadata=metadata,
+            resolution=(
+                1. / pixel_size,
+                1. / pixel_size
+            )
+        )
+        tif.write(img, subifds=3, description=extratags, **options)
 
         # save pyramid levels to the two subifds
         # in production use resampling to generate sub-resolutions
@@ -281,15 +364,19 @@ def process_all(meta_df, root_path, save_plots=True):
 
 
 def _find_biggest_img(path):
+    ACCEPTED_FORMATS = ['.tif', '.jpg', '.btf', '.png', '.tiff', '.TIF']
     biggest_size = -1
     biggest_img_filename = None
     for file in os.listdir(path):
-        if file.endswith('.tif') or file.endswith('.jpg') or file.endswith('.btf') or file.endswith('.png') or file.endswith('.tiff'):
+        ls = [s for s in ACCEPTED_FORMATS if file.endswith(s)]
+        if len(ls) > 0:
             if file not in ['aligned_fullres_HE.ome.tif', 'morphology.ome.tif', 'morphology_focus.ome.tif', 'morphology_mip.ome.tif']:
                 size = os.path.getsize(os.path.join(path, file))
                 if size > biggest_size:
                     biggest_img_filename = file
                     biggest_size = size
+    if biggest_img_filename is None:
+        raise Exception(f"Couldn't find an image automatically, make sure that the folder {path} contains an image of one of these types: {ACCEPTED_FORMATS}")
     return biggest_img_filename
 
 
@@ -314,20 +401,182 @@ def join_object_to_adatas_GSE171351(path):
     sampleIDS = ['A1', 'B1', 'C1', 'D1']
     for sampleID in sampleIDS:
         my_adata = adata.copy()
-        df = my_adata.obs.reset_index(drop=True)
+        df = my_adata.obs#.reset_index(drop=True)
         df = df[df['sampleID'] == sampleID]
         new_df = my_adata.to_df().loc[df.index]
         new_adata = sc.AnnData(new_df, var=adata.var)
-    
+        new_adata.var['feature_types'] = ['Gene Expression' for _ in range(len(new_adata.var))]
+        new_adata.var['genome'] = ['Unspecified' for _ in range(len(new_adata.var))]
         new_adata.X = sparse.csr_matrix(new_adata.X)
         new_adata.obs = my_adata.obs[my_adata.obs['sampleID'] == sampleID]
         
         
         new_adata.uns['spatial'] = my_adata.uns['spatial'][sampleID]
-        new_adata.obsm['spatial'] = my_adata.obsm['spatial'][df.index]
+        
+        #col1 = new_adata.obs['pxl_col_in_fullres'].values
+        #col2 = new_adata.obs['pxl_row_in_fullres'].values
+        #matrix = (np.vstack((col1, col2))).T
+        
+        #new_adata.obsm['spatial'] = matrix 
+        
         #adatas.append(new_adata)
         write_10X_h5(new_adata, os.path.join(os.path.dirname(path), f'{sampleID}_filtered_feature_bc_matrix.h5'))
 
+
+def _ST_spot_to_pixel(x, y, img):
+    ARRAY_WIDTH = 6200.0
+    ARRAY_HEIGHT = 6600.0
+    SPOT_SPACING = ARRAY_WIDTH/(31+1)
+    
+    pixelDimX = (SPOT_SPACING*img.shape[1])/(ARRAY_WIDTH)
+    pixelDimY = (SPOT_SPACING*img.shape[0])/(ARRAY_HEIGHT)
+    return (x-1)*pixelDimX,(y-1)*pixelDimY
+
+
+
+def align_dev_human_heart(raw_counts, spot_coords, exp_name):
+    EXP_ORDER = ['ST_Sample_4.5-5PCW_1', 'ST_Sample_4.5-5PCW_2', 
+                 'ST_Sample_4.5-5PCW_3', 'ST_Sample_4.5-5PCW_4',
+                 'ST_Sample_6.5PCW_1', 'ST_Sample_6.5PCW_2', 
+                 'ST_Sample_6.5PCW_3', 'ST_Sample_6.5PCW_4',
+                 'ST_Sample_6.5PCW_5', 'ST_Sample_6.5PCW_6',
+                 'ST_Sample_6.5PCW_7', 'ST_Sample_6.5PCW_8',
+                 'ST_Sample_6.5PCW_9', 'ST_Sample_9PCW_1',
+                 'ST_Sample_9PCW_2', 'ST_Sample_9PCW_3',
+                 'ST_Sample_9PCW_4', 'ST_Sample_9PCW_5',
+                 'ST_Sample_9PCW_6']
+    EXP_MAP = {key: value for key, value in zip(EXP_ORDER, np.arange(19) + 1)}
+    
+    # select 
+    exp_id = EXP_MAP[exp_name]
+    col_mask = [col for col in raw_counts.columns if col.startswith(f'{exp_id}x')]
+    raw_counts = raw_counts[col_mask]
+    raw_counts = raw_counts.transpose()
+    spot_coords.index = [str(exp_id) + 'x' for _ in range(len(spot_coords))] + spot_coords['x'].astype(str) + ['x' for _ in range(len(spot_coords))] + spot_coords['y'].astype(str)
+    
+    merged = pd.merge(raw_counts, spot_coords, left_index=True, right_index=True, how='inner')
+    raw_counts = raw_counts.reindex(merged.index)
+    adata = sc.AnnData(raw_counts)
+    col1 = merged['pixel_x'].values
+    col2 = merged['pixel_y'].values
+    matrix = (np.vstack((col1, col2))).T
+    return adata, matrix
+
+
+def align_ST_counts_with_transform(raw_counts_path, transform_path):
+    raw_counts = pd.read_csv(raw_counts_path, sep='\t', index_col=0)
+    with open(transform_path) as file:
+        aff_transform = np.array(file.read().split(' '))
+        aff_transform = aff_transform.reshape((3, 3)).astype(float).T
+    xy = np.array([[idx.split('x')[0], idx.split('x')[1], 1] for idx in raw_counts.index]).astype(float)
+    xy_aligned = (aff_transform @ xy.T).T
+    adata = sc.AnnData(raw_counts)
+    matrix = xy_aligned[:, :2]
+    return adata, matrix
+    
+    
+    
+def raw_counts_to_pixel(raw_counts_df, img):
+    spot_coords = []
+    for col in raw_counts_df.columns:
+        tup = col.split('_')
+        x, y = _ST_spot_to_pixel(float(tup[0]), float(tup[1]), img)
+        spot_coords.append([x, y])
+    return np.array(spot_coords)
+    
+
+def read_ST(meta_table_path=None, raw_counts_path=None, img_path=None, spot_coord_path=None, transform_path=None, ADT_data=False, is_GSE144239=False):
+    #raw_counts = pd.read_csv(raw_counts_path, sep='\t')
+    img, pixel_size_embedded = _load_image(img_path)
+    
+    if is_GSE144239:
+        raw_counts = pd.read_csv(raw_counts_path, sep='\t', index_col=0)
+        spot_coord = pd.read_csv(spot_coord_path, sep='\t')
+        spot_coord.index = spot_coord['x'].astype(str) + ['x' for _ in range(len(spot_coord))] + spot_coord['y'].astype(str)
+        merged = pd.merge(spot_coord, raw_counts, left_index=True, right_index=True)
+        raw_counts = raw_counts.reindex(merged.index)
+        adata = sc.AnnData(raw_counts)
+        col1 = merged['pixel_x'].values
+        col2 = merged['pixel_y'].values
+        matrix = (np.vstack((col1, col2))).T
+    
+    elif ADT_data:
+        basedir = os.path.dirname(img_path)
+        # combine spot coordinates into a single dataframe
+        pre_adt_path= _find_first_file_endswith(basedir, 'pre-ADT.tsv')
+        post_adt_path = _find_first_file_endswith(basedir, 'postADT.tsv')
+        if post_adt_path is None:
+            post_adt_path = _find_first_file_endswith(basedir, 'post-ADT.tsv')
+        counts = pd.read_csv(raw_counts_path, index_col=0, sep='\t')
+        pre_adt = pd.read_csv(pre_adt_path, sep='\t')
+        post_adt = pd.read_csv(post_adt_path, sep='\t')
+        merged_coords = pd.concat([pre_adt, post_adt], ignore_index=True)
+        merged_coords.index = [str(x) + 'x' + str(y) for x, y in zip(merged_coords['x'], merged_coords['y'])]
+        merged = pd.merge(merged_coords, counts, left_index=True, right_index=True, how='inner')
+        counts = counts.reindex(merged.index)
+        adata = sc.AnnData(counts)
+        col1 = merged['pixel_x'].values
+        col2 = merged['pixel_y'].values
+        matrix = (np.vstack((col1, col2))).T
+        
+    
+    elif transform_path is not None:
+        adata, matrix = align_ST_counts_with_transform(raw_counts_path, transform_path)
+    
+    # TODO modify logic later on
+    elif meta_table_path is not None and raw_counts_path is not None and spot_coord_path is not None:
+        # this works for the developing human heart dataset
+        spot_coords = pd.read_csv(spot_coord_path, sep='\t')
+        raw_counts = pd.read_csv(raw_counts_path, sep='\t', index_col=0)
+        #meta = pd.read_csv(meta_table_path, sep='\t', index_col=0)
+        exp_name = os.path.dirname(spot_coord_path).split('/')[-1]
+        adata, matrix = align_dev_human_heart(raw_counts, spot_coords, exp_name)
+    else:
+        if 'Unnamed: 0' in raw_counts.columns:
+            raw_counts.index = raw_counts['Unnamed: 0']
+            raw_counts = raw_counts.drop(['Unnamed: 0'], axis=1)
+        if meta_table_path is not None:
+            meta = pd.read_csv(meta_table_path, sep='\t', index_col=0)
+            merged = pd.merge(meta, raw_counts, left_index=True, right_index=True, how='inner')
+            raw_counts = raw_counts.reindex(merged.index)
+            adata = sc.AnnData(raw_counts)
+            col1 = merged['HE_X'].values
+            col2 = merged['HE_Y'].values
+            matrix = (np.vstack((col1, col2))).T
+        elif spot_coord_path is not None:
+            #spot_coord = pd.read_csv(spot_coord_path, sep='\t', index_col=0)
+            spot_coord = pd.read_csv(spot_coord_path, sep=',', index_col=0)
+            merged = pd.merge(spot_coord, raw_counts, left_index=True, right_index=True, how='inner')
+            raw_counts = raw_counts.reindex(merged.index)
+            adata = sc.AnnData(raw_counts)
+
+            col1 = merged['X'].values
+            col2 = merged['Y'].values
+                
+            matrix = (np.vstack((col1, col2))).T
+        else:
+            matrix = raw_counts_to_pixel(raw_counts, img)
+            raw_counts = raw_counts.transpose()
+            adata = sc.AnnData(raw_counts)
+    
+    adata.obsm['spatial'] = matrix
+    
+    # TODO get real pixel size
+    my_df = pd.DataFrame(adata.obsm['spatial'], adata.to_df().index, columns=['pxl_col_in_fullres', 'pxl_row_in_fullres'])
+    my_df['array_row'] = [int(idx.split('x')[0]) for idx in my_df.index]
+    my_df['array_col'] = [int(idx.split('x')[1]) for idx in my_df.index]
+    
+    pixel_size = _find_pixel_size_from_spot_coords(my_df, inter_spot_dist=200)
+    _register_downscale_img(adata, img, pixel_size, spot_size=100.)
+    
+    return adata, img, pixel_size
+
+
+def _metric_file_do_dict(metric_file_path):
+    metrics = pd.read_csv(metric_file_path)
+    dict = metrics.to_dict('records')[0]
+    return dict
+    
 
 def read_any(path):
     if 'visium' in path.lower():
@@ -341,6 +590,7 @@ def read_any(path):
         hires_path = _find_first_file_endswith(path, 'tissue_hires_image.png')
         lowres_path = _find_first_file_endswith(path, 'tissue_lowres_image.png')
         spatial_coord_path = _find_first_file_endswith(path, 'spatial')
+        raw_count_path = _find_first_file_endswith(path, 'raw_count.txt')
         if spatial_coord_path is None and (tissue_positions_path is not None or \
                 scalefactors_path is not None or hires_path is not None or \
                 lowres_path is not None or spatial_coord_path is not None):
@@ -362,6 +612,8 @@ def read_any(path):
         alignment_path = _find_first_file_endswith(path, 'alignment_file.json')
         if alignment_path is None:
             alignment_path = _find_first_file_endswith(path, 'alignment.json')
+        if alignment_path is None and os.path.exists(os.path.join(path, 'spatial')):
+            alignment_path = _find_first_file_endswith(os.path.join(path, 'spatial'), 'autoalignment.json')
         if alignment_path is None:
             json_path = _find_first_file_endswith(path, '.json')
             if json_path is not None:
@@ -384,29 +636,59 @@ def read_any(path):
             shutil.move(features_path, mex_path)
             shutil.move(barcodes_path, mex_path)
         
+        # TODO remove
+        GSE234047_count_path = _find_first_file_endswith(path, '_counts.csv')
+        GSE180128_count_path = None
+        if "Comprehensive Atlas of the Mouse Urinary Bladder" in path:
+            GSE180128_count_path = _find_first_file_endswith(path, '.csv')
             
-        adata, tissue_positions_df, img, raw_bc_matrix = read_10x_visium(
+        GSE167096_count_path = None
+        if "Spatial Transcriptomics of human fetal liver"  in path:
+            GSE167096_count_path = _find_first_file_endswith(path, 'symbol.txt')
+            
+        GSE203165_count_path = None
+        if 'Spatial sequencing of Foreign body granuloma' in path:
+            GSE203165_count_path = _find_first_file_endswith(path, 'raw_counts.txt')
+            
+        seurat_h5_path = _find_first_file_endswith(path, 'seurat.h5ad')
+        
+        if img_filename is None:
+            raise Exception(f"Couldn't detect an image in the directory {path}")
+        
+        metric_file_path = _find_first_file_endswith(path, 'metrics_summary.csv')
+            
+        adata, tissue_positions_df, img, raw_bc_matrix, dict = read_10x_visium(
             filtered_bc_matrix_path=filtered_feature_path,
             raw_bc_matrix_path=raw_feature_path,
             spatial_coord_path=spatial_coord_path,
             img_path=os.path.join(path, img_filename),
             alignment_file_path=alignment_path,
-            mex_path=mex_path
+            mex_path=mex_path,
+            raw_count_path=raw_count_path,
+            GSE234047_count_path=GSE234047_count_path,
+            GSE180128_count_path=GSE180128_count_path,
+            GSE167096_count_path=GSE167096_count_path,
+            GSE203165_count_path=GSE203165_count_path,
+            seurat_h5_path=seurat_h5_path,
+            metric_file_path=metric_file_path
         )
+        
         
         os.makedirs(os.path.join(path, 'processed'), exist_ok=True)
         
-        sc.pp.calculate_qc_metrics(adata, inplace=True)
+        adata.var["mito"] = adata.var_names.str.startswith("MT-")
+        sc.pp.calculate_qc_metrics(adata, qc_vars=["mito"], inplace=True)
         
         save_10x_visium(
             adata, 
             os.path.join(path, 'processed'),
             img,
+            dict,
             h5_path=filtered_feature_path,
             spatial_path=spatial_coord_path,
         )
         
-        return adata, tissue_positions_df, img, raw_bc_matrix
+        return adata
         
     elif 'xenium'in path.lower():
         img_filename = _find_biggest_img(path)
@@ -425,31 +707,103 @@ def read_any(path):
         )
         
         return adata, img
-      
-      
-def _find_pixel_size_from_spot_coords(df):
-    for index, row in df.iterrows():
-        y = row['array_row']
-        pxl_x = row['pxl_col_in_fullres']
-        pxl_y = row['pxl_row_in_fullres']
-        x = row['array_col']
-        if len(df[df['array_col'] == x]) > 1:
-            b = df[df['array_col'] == x].index.max()
-            dist_col = abs(df.loc[b, 'array_row'] - y)
-            dist_px_col = abs(df.loc[b, 'pxl_col_in_fullres'] - pxl_x)
-            dist_px_row = abs(df.loc[b, 'pxl_row_in_fullres'] - pxl_y)
-            dist_px = np.max([dist_px_col, dist_px_row])
+    
+    elif 'ST' in path:
+        meta_table_path = None
+        for file in os.listdir(path):
+            if 'meta' in file:
+                meta_table_path = os.path.join(path, file)
+                break
+        raw_counts_path = None
+        for file in os.listdir(path):
+            if 'count' in file or 'stdata' in file:
+                raw_counts_path = os.path.join(path, file)
+                break
             
-            return 100 / (dist_px / dist_col)
-    raise Exception("Couldn't find two spots on the same row")
+        spot_coord_path = None
+        for file in os.listdir(path):
+            if 'spot' in file:
+                spot_coord_path = os.path.join(path, file)
+                break
+
+        transform_path = None
+        for file in os.listdir(path):
+            if 'transform' in file:
+                transform_path = os.path.join(path, file)
+                break
+            
+        if "Prostate needle biopsies pre- and post-ADT: Count matrices, histological-, and Androgen receptor immunohistochemistry images" in path:
+            ADT_data = True
+        else:
+            ADT_data = False
+            
+        if "Single Cell and Spatial Analysis of Human Squamous Cell Carcinoma [ST]" in path:
+            is_GSE144239 = True
+        else:
+            is_GSE144239 = False
+       
+        img_path = _find_biggest_img(path)
+        adata, img, pixel_size = read_ST(meta_table_path, raw_counts_path, os.path.join(path, img_path), spot_coord_path, transform_path, ADT_data, is_GSE144239)
+        
+        sc.pp.calculate_qc_metrics(adata, inplace=True)
+        
+        os.makedirs(os.path.join(path, 'processed'), exist_ok=True) 
+        
+        #save_10x_visium(
+        #    adata, 
+        #    os.path.join(path, 'processed'),
+        #    img,
+        #    pixel_size,
+        #    h5_path=filtered_feature_path,
+        #    spatial_path=spatial_coord_path,
+        #)
+        return adata
+    
+
+def cart_dist(start_spot, end_spot):
+    d = np.sqrt((start_spot['pxl_col_in_fullres'] - end_spot['pxl_col_in_fullres']) ** 2 \
+        + (start_spot['pxl_row_in_fullres'] - end_spot['pxl_row_in_fullres']) ** 2)
+    return d
+      
+      
+def _find_pixel_size_from_spot_coords(my_df, inter_spot_dist=100.):
+    df = my_df.copy()
+    
+    
+    max_dist_col = 0
+    approx_nb = 0
+    best_approx = 0
+    df = df.sort_values('array_row')
+    for index, row in df.iterrows():
+        y = row['array_col']
+        x = row['array_row']
+        if len(df[df['array_row'] == x]) > 1:
+            b = df[df['array_row'] == x]['array_col'].idxmax()
+            start_spot = row
+            end_spot = df.loc[b]
+            dist_px = cart_dist(start_spot, end_spot)
+            
+            dist_col = abs(df.loc[b, 'array_col'] - y) // 2
+            
+            approx_nb += 1
+            
+            if dist_col > max_dist_col:
+                max_dist_col = dist_col
+                best_approx = inter_spot_dist / (dist_px / dist_col)
+            if approx_nb > 3:
+                break
+            
+    if approx_nb == 0:
+        raise Exception("Couldn't find two spots on the same row")
+            
+    return best_approx, max_dist_col
       
 
-def _register_downscale_img(adata, img, pixel_size):
+def _register_downscale_img(adata, img, pixel_size, spot_size=55.):
     TARGET_PIXEL_EDGE = 1000
     print('image size is ', img.shape)
     downscale_factor = TARGET_PIXEL_EDGE / np.max(img.shape)
     downscaled_fullres = imresize(img, downscale_factor)
-    
     
     # register the image
     adata.uns['spatial'] = {}
@@ -457,8 +811,10 @@ def _register_downscale_img(adata, img, pixel_size):
     adata.uns['spatial']['ST']['images'] = {}
     adata.uns['spatial']['ST']['images']['downscaled_fullres'] = downscaled_fullres
     adata.uns['spatial']['ST']['scalefactors'] = {}
-    adata.uns['spatial']['ST']['scalefactors']['spot_diameter_fullres'] = 55. / pixel_size
+    adata.uns['spatial']['ST']['scalefactors']['spot_diameter_fullres'] = spot_size / pixel_size
     adata.uns['spatial']['ST']['scalefactors']['tissue_downscaled_fullres_scalef'] = downscale_factor
+    
+    return downscaled_fullres, downscale_factor
   
 
 def _get_scalefactors(path: str):
@@ -494,6 +850,10 @@ def _find_slide_version(alignment_df: str) -> str:
             2: 'array_row'
         })
         barcode_coords['barcode'] += '-1'
+        
+        # space rangers provided barcode coords are 1 indexed whereas alignment file are 0 indexed
+        barcode_coords['array_col'] -= 1
+        barcode_coords['array_row'] -= 1
 
         spatial_aligned = pd.merge(alignment_df, barcode_coords, on=['array_row', 'array_col'], how='inner')
         if len(spatial_aligned) > highest_nb_match:
@@ -510,6 +870,10 @@ def _find_alignment_barcodes(alignment_df: str, adata: sc.AnnData) -> pd.DataFra
         2: 'array_row'
     })
     barcode_coords['barcode'] += '-1'
+    
+    # space rangers provided barcode coords are 1 indexed whereas alignment file are 0 indexed
+    barcode_coords['array_col'] -= 1
+    barcode_coords['array_row'] -= 1
 
     spatial_aligned = pd.merge(alignment_df, barcode_coords, on=['array_row', 'array_col'], how='inner')
 
@@ -556,10 +920,14 @@ def write_10X_h5(adata, file):
     ftrs = grp.create_group("features")
     # this group will lack the following keys:
     # '_all_tag_keys', 'feature_type', 'genome', 'id', 'name', 'pattern', 'read', 'sequence'
-    ftrs.create_dataset("feature_types", data=np.array(adata.var.feature_types, dtype=f'|S{str_max(adata.var.feature_types)}'))
+    if 'feature_types' not in adata.var:
+        adata.var['feature_types'] = ['Unspecified' for _ in range(len(adata.var))]   
+    ftrs.create_dataset("feature_type", data=np.array(adata.var.feature_types, dtype=f'|S{str_max(adata.var.feature_types)}'))
     if 'genome' not in adata.var:
         adata.var['genome'] = ['Unspecified_genone' for _ in range(len(adata.var))]
     ftrs.create_dataset("genome", data=np.array(adata.var.genome, dtype=f'|S{str_max(adata.var.genome)}'))
+    if 'gene_ids' not in adata.var:
+        adata.var['gene_ids'] = ['Unspecified_gene_id' for _ in range(len(adata.var))]
     ftrs.create_dataset("id", data=np.array(adata.var.gene_ids, dtype=f'|S{str_max(adata.var.gene_ids)}'))
     ftrs.create_dataset("name", data=np.array(adata.var.index, dtype=f'|S{str_max(adata.var.index)}'))
     grp.create_dataset("indices", data=np.array(adata.X.indices, dtype=f'<i{int_max(adata.X.indices)}'))
@@ -585,8 +953,20 @@ def _helper_mex(path, filename):
 
 
 def _load_image(img_path):
-    if img_path.endswith('tiff') or img_path.endswith('tif') or img_path.endswith('btf'):
+    unit_to_micrometers = {
+        tifffile.RESUNIT.INCH: 25.4,
+        tifffile.RESUNIT.CENTIMETER: 1.e4,
+        tifffile.RESUNIT.MILLIMETER: 1.e3,
+        tifffile.RESUNIT.MICROMETER: 1.,
+    }
+    pixel_size_embedded = None
+    if img_path.endswith('tiff') or img_path.endswith('tif') or img_path.endswith('btf') or img_path.endswith('TIF'):
         img = tifffile.imread(img_path)
+        my_img = tifffile.TiffFile(img_path)
+        if 'XResolution' in my_img.pages[0].tags and my_img.pages[0].tags['XResolution'].value[0] != 0:
+            # result in micrometers per pixel
+            factor = unit_to_micrometers[my_img.pages[0].tags['ResolutionUnit'].value]
+            pixel_size_embedded = (my_img.pages[0].tags['XResolution'].value[1] / my_img.pages[0].tags['XResolution'].value[0]) * factor
     else:
         img = np.array(Image.open(img_path))
         
@@ -595,8 +975,9 @@ def _load_image(img_path):
         img = np.transpose(img, axes=(1, 2, 0))
     if np.max(img) > 1000:
         img = img.astype(np.float64)
-        img /= 2**16
-    return img
+        img /= 2**16    
+    
+    return img, pixel_size_embedded
 
 
 def _align_tissue_positions(
@@ -653,6 +1034,188 @@ def _alignment_file_to_tissue_positions(alignment_file_path, adata):
     })
 
     spatial_aligned = _find_alignment_barcodes(alignment_df, adata)
+    return spatial_aligned
+
+
+def _raw_count_to_adata(raw_count_path):
+    matrix = pd.read_csv(raw_count_path, sep=',')
+    matrix.index = matrix['Gene']
+    matrix = matrix.transpose().iloc[1:]
+
+    adata = sc.AnnData(matrix)
+
+    return adata
+
+
+def GSE206391_split_h5(path):
+    adata = sc.read_h5ad(path)
+    a = 1
+    library_ids = np.unique(adata.obs['library_id'])
+    for library_id in library_ids:
+        old_library_id = library_id
+        library_id = "_".join(library_id.split('_')[:2])
+        new_adata = adata.copy()
+        adata.obs['int_index'] = np.arange(len(adata.obs))
+        df = adata.obs[adata.obs['library_id'] == old_library_id]
+        
+        new_df = adata.to_df().iloc[df['int_index']]
+        #new_df.index = [idx[:-2] for idx in new_df.index]
+        new_df.index = [idx + '-1' for idx in new_df.index]
+        new_adata = sc.AnnData(new_df, var=adata.var)
+        new_adata.var['feature_types'] = ['Gene Expression' for _ in range(len(new_adata.var))]
+        new_adata.var['genome'] = ['Unspecified' for _ in range(len(new_adata.var))]
+        new_adata.X = sparse.csr_matrix(new_adata.X)
+        new_adata.obsm['spatial'] = adata.obsm['spatial'][df['int_index'].values.astype(int)]
+        write_10X_h5(new_adata, os.path.join(os.path.dirname(path), f'{library_id}_filtered_feature_bc_matrix.h5'))
+        
+        
+def _GSE206391_copy_dir(path):
+    for dir in os.listdir(path):
+        if dir.endswith('filtered_feature_bc_matrix.h5'):
+            whole_path = os.path.join(path, dir)
+            if '21L' in dir:
+                sample_name = dir.split('_filtered_feature_bc_matrix.h5')[0].split('_')[1]
+            else:
+                sample_name = dir.split('_filtered_feature_bc_matrix.h5')[0]
+            param = f'mv "{whole_path}" "{path}/"*{sample_name}*'
+            subprocess.Popen(param, shell=True)
+
+def GSE234047_to_h5(path):
+            
+    df = pd.read_csv(path)
+    df.index = df['barcode']
+    columns_drop = ['barcode', 'prediction_celltype', 'Bipolar', 'Cone', 'Endothelial', 'Fibroblast', 'Immune', 'Interneuron', 'Melanocyte', 'Muller.Astrocyte', 'Pericyte.SMC', 'RGC', 'Rod', 'RPE.x', 'Schwann', 'res_ss', 'region', 'tissue', 'percent_CNV', 'image']
+    
+    df = df.drop(columns_drop, axis=1)
+    
+    df.index = [s.split('_')[1].split('-')[0] + '-1' for s in df.index]
+    
+    adata = sc.AnnData(df)
+    adata.var['feature_types'] = ['Gene Expression' for _ in range(len(adata.var))]
+    adata.var['genome'] = ['Unspecified' for _ in range(len(adata.var))]
+    adata.X = sparse.csr_matrix(adata.X)
+    return adata
+
+
+def GSE180128_to_h5(path):
+    df = pd.read_csv(path)
+    #df.index = df['barcode']
+    #columns_drop = ['barcode', 'prediction_celltype', 'Bipolar', 'Cone', 'Endothelial', 'Fibroblast', 'Immune', 'Interneuron', 'Melanocyte', 'Muller.Astrocyte', 'Pericyte.SMC', 'RGC', 'Rod', 'RPE.x', 'Schwann', 'res_ss', 'region', 'tissue', 'percent_CNV', 'image']
+    
+    #df = df.drop(columns_drop, axis=1)
+    
+    #df.index = [s.split('_')[1].split('-')[0] + '-1' for s in df.index]
+    df.index = df['Unnamed: 0']
+    df = df.drop(['Unnamed: 0'], axis=1)
+    adata = sc.AnnData(df)
+    adata.var['feature_types'] = ['Gene Expression' for _ in range(len(adata.var))]
+    adata.var['genome'] = ['Unspecified' for _ in range(len(adata.var))]
+    adata.X = sparse.csr_matrix(adata.X)
+    return adata    
+
+
+def GSE184369_to_h5(path):
+    adata = sc.read_10x_mtx(path)
+    
+    
+    df = pd.read_csv(path)
+    df.index = df['barcode']
+    columns_drop = ['barcode', 'prediction_celltype', 'Bipolar', 'Cone', 'Endothelial', 'Fibroblast', 'Immune', 'Interneuron', 'Melanocyte', 'Muller.Astrocyte', 'Pericyte.SMC', 'RGC', 'Rod', 'RPE.x', 'Schwann', 'res_ss', 'region', 'tissue', 'percent_CNV', 'image']
+    
+    df = df.drop(columns_drop, axis=1)
+    
+    df.index = [s.split('_')[1].split('-')[0] + '-1' for s in df.index]
+    
+    adata = sc.AnnData(df)
+    adata.var['feature_types'] = ['Gene Expression' for _ in range(len(adata.var))]
+    adata.var['genome'] = ['Unspecified' for _ in range(len(adata.var))]
+    adata.X = sparse.csr_matrix(adata.X)
+    return adata
+
+
+
+def GSE167096_to_h5(path):
+
+    matrix = pd.read_csv(path, sep='\t')
+    matrix.index = matrix['Symbol']
+    matrix = matrix.transpose().iloc[1:]
+    
+    #matrix = matrix.replace("NaN", np.nan)
+
+    adata = sc.AnnData(matrix)
+    adata.var['feature_types'] = ['Gene Expression' for _ in range(len(adata.var))]
+    adata.var['genome'] = ['Unspecified' for _ in range(len(adata.var))]
+    adata.X = sparse.csr_matrix(adata.X.astype(int))
+    return adata
+
+
+def GSE203165_to_adata(path):
+    matrix = pd.read_csv(path, sep='\t', index_col=0)
+    matrix = matrix.transpose()
+    adata = sc.AnnData(matrix)
+    adata.var['feature_types'] = ['Gene Expression' for _ in range(len(adata.var))]
+    adata.var['genome'] = ['Unspecified' for _ in range(len(adata.var))]
+    adata.X = sparse.csr_matrix(adata.X.astype(int))
+    return adata
+    
+    
+def GSE236787_split_to_h5(path):
+    adata = sc.read_10x_h5(path)
+    sampleIDS = ['-1', '-2', '-3', '-4']
+    for sampleID in sampleIDS:
+        my_adata = adata.copy()
+        df = my_adata.obs#.reset_index(drop=True)
+        df = df.loc[[i for i in df.index.values if i.endswith(sampleID)]]
+        new_df = my_adata.to_df().loc[df.index]
+        new_df.index = [s.split('-')[0] + '-1' for s in new_df.index]
+        new_adata = sc.AnnData(new_df, var=adata.var)
+        new_adata.var['feature_types'] = ['Gene Expression' for _ in range(len(new_adata.var))]
+        new_adata.var['genome'] = ['Unspecified' for _ in range(len(new_adata.var))]
+        new_adata.X = sparse.csr_matrix(new_adata.X)
+        new_adata.obs = df
+        new_adata.obs.index = new_df.index
+        
+        
+        #new_adata.uns['spatial'] = my_adata.uns['spatial'][sampleID]
+        
+        #col1 = new_adata.obs['pxl_col_in_fullres'].values
+        #col2 = new_adata.obs['pxl_row_in_fullres'].values
+        #matrix = (np.vstack((col1, col2))).T
+        
+        #new_adata.obsm['spatial'] = matrix 
+        
+        #adatas.append(new_adata)
+        write_10X_h5(new_adata, os.path.join(os.path.dirname(path), f'N{sampleID}filtered_feature_bc_matrix.h5'))
+
+    return df
+
+
+def _plot_center_square(width, height, length, color, text, offset=0):
+    margin_x = (width - length) / 2
+    margin_y = (height - length) / 2
+    plt.text(width // 2, (height // 2) + offset, text, fontsize=12, ha='center', va='center', color=color)
+    plt.plot([margin_x, length + margin_x], [margin_y, margin_y], color=color)
+    plt.plot([margin_x, length + margin_x], [height - margin_y, height - margin_y], color=color)
+    plt.plot([margin_x, margin_x], [margin_y, height - margin_y], color=color)
+    plt.plot([length + margin_x, length + margin_x], [margin_y, height - margin_y], color=color)
+
+
+def _plot_verify_pixel_size(downscaled_img, down_fact, pixel_size_embedded, pixel_size_estimated, path):
+    plt.imshow(downscaled_img)
+
+    length_estimated = (6500. / pixel_size_estimated) * down_fact
+
+    width = downscaled_img.shape[1]
+    height = downscaled_img.shape[0]
+    
+    if pixel_size_embedded is not None:
+        length_embedded = (6500. / pixel_size_embedded) * down_fact
+        _plot_center_square(width, height, length_embedded, 'red', '6.5m, embedded', offset=50)
+        
+    _plot_center_square(width, height, length_estimated, 'blue', '6.5m, estimated')
+    
+    plt.savefig(path)
+    plt.close()
 
 
 def read_10x_visium(
@@ -663,9 +1226,17 @@ def read_10x_visium(
     alignment_file_path: str = None, 
     mex_path: str = None,
     custom_matrix_path: str = None,
-    downsample_factor = None
+    downsample_factor = None,
+    raw_count_path: str = None,
+    GSE234047_count_path: str = None,
+    GSE180128_count_path: str = None,
+    GSE167096_count_path: str = None,
+    GSE203165_count_path: str = None,
+    seurat_h5_path: str = None,
+    metric_file_path: str = None,
+    meta_dict: dict = {}
 ):
-    
+    print(f'read image from {img_path}')
     raw_bc_matrix = None
 
     if filtered_bc_matrix_path is not None:
@@ -680,18 +1251,33 @@ def read_10x_visium(
         adata = sc.read_10x_h5(raw_bc_matrix_path)
     elif custom_matrix_path is not None:
         adata = _txt_matrix_to_adata(custom_matrix_path)
+    elif raw_count_path is not None:
+        adata = _raw_count_to_adata(raw_count_path)
+    elif GSE234047_count_path is not None:
+        adata = GSE234047_to_h5(GSE234047_count_path)
+    elif GSE180128_count_path is not None:
+        adata = GSE180128_to_h5(GSE180128_count_path)
+    elif GSE167096_count_path is not None:
+        adata = GSE167096_to_h5(GSE167096_count_path)
+    elif seurat_h5_path is not None:
+        adata = sc.read_h5ad(seurat_h5_path)
+    elif GSE203165_count_path is not None:
+        adata = GSE203165_to_adata(GSE203165_count_path)
+    else:
+        raise Exception(f"Couldn't find gene expressions, make sure to provide at least a filtered_bc_matrix.h5 or a mex folder")
 
     adata.var_names_make_unique()
     print(adata)
 
-    img = _load_image(img_path)
+    img, pixel_size_embedded = _load_image(img_path)
     
-    if adata.obs.index[0][-1] != '-':
-        print('append -1 to the barcodes')
-        adata.obs.index = [idx + '-1' for idx in adata.obs.index]
+    print('trim the barcodes')
+    adata.obs.index = [idx[:18] for idx in adata.obs.index]
 
-    if spatial_coord_path is not None:
-        tissue_positions_path = _find_first_file_endswith(spatial_coord_path, 'tissue_positions.csv')
+    tissue_positions_path = _find_first_file_endswith(spatial_coord_path, 'tissue_positions.csv', exclude='aligned_tissue_positions.csv')
+    tissue_position_list_path = _find_first_file_endswith(spatial_coord_path, 'tissue_positions_list.csv')
+    if tissue_positions_path is not None or tissue_position_list_path is not None:
+        #tissue_positions_path = _find_first_file_endswith(spatial_coord_path, 'tissue_positions.csv')
         if tissue_positions_path is not None:
             tissue_positions = pd.read_csv(tissue_positions_path, sep=",", na_filter=False, index_col=0) 
         else:
@@ -704,6 +1290,7 @@ def read_10x_visium(
                                             4: "pxl_row_in_fullres", # spot x coordinate in image pixel
                                             5: "pxl_col_in_fullres"}) # spot y coordinate in image pixel
 
+        tissue_positions.index = [idx[:18] for idx in tissue_positions.index]
         spatial_aligned = _align_tissue_positions(
             alignment_file_path, 
             tissue_positions, 
@@ -718,6 +1305,7 @@ def read_10x_visium(
         print('no tissue_positions_list.csv/tissue_positions.csv or alignment file found')
         print('attempt fiducial auto alignment...')
 
+        os.makedirs(os.path.join(os.path.dirname(img_path), 'spatial'), exist_ok=True)
         autoalign_with_fiducials(img, os.path.join(os.path.dirname(img_path), 'spatial'))
         
         autoalignment_file_path = os.path.join(os.path.dirname(img_path), 'spatial', 'autoalignment.json')
@@ -733,17 +1321,36 @@ def read_10x_visium(
     
     scalefactors_path = _find_first_file_endswith(spatial_coord_path, 'scalefactors_json.json')
     if scalefactors_path is not None:
-        scalefactors = _get_scalefactors(scalefactors_path)
-        pixel_size = 55. / scalefactors['spot_diameter_fullres']
+        with open(scalefactors_path) as f:
+            scalefactors = json.load(f)
+        pixel_size, spot_estimate_dist = _find_pixel_size_from_spot_coords(spatial_aligned)
+        #pixel_size = 55. / scalefactors['spot_diameter_fullres']
     else:
-        pixel_size = _find_pixel_size_from_spot_coords(spatial_aligned)
+        pixel_size, spot_estimate_dist = _find_pixel_size_from_spot_coords(spatial_aligned)
     
 
     adata.obs = spatial_aligned
         
-    _register_downscale_img(adata, img, pixel_size)
+    downscaled_img, down_fact = _register_downscale_img(adata, img, pixel_size)
+    
+    dict = {}
+    if metric_file_path is not None:
+        dict = _metric_file_do_dict(metric_file_path)
+        
+    dict['pixel_size_um_embedded'] = pixel_size_embedded
+    dict['pixel_size_um_estimated'] = pixel_size
+    dict['fullres_height'] = img.shape[0]
+    dict['fullres_width'] = img.shape[1]
+    dict['spots_under_tissue'] = len(adata.obs)
+    dict['spot_estimate_dist'] = int(spot_estimate_dist)
+    
+    print(f"'pixel_size_um_embedded' is {pixel_size_embedded}")
+    print(f"'pixel_size_um_estimated' is {pixel_size} estimated by averaging over {spot_estimate_dist} spots")
+    print(f"'spots_under_tissue' is {len(adata.obs)}")
+    
+    dict = {**meta_dict, **dict}
 
-    return adata, spatial_aligned, img, raw_bc_matrix
+    return adata, spatial_aligned, img, raw_bc_matrix, dict
 
 
 def _save_scalefactors(adata: sc.AnnData, path):
@@ -755,7 +1362,7 @@ def _save_scalefactors(adata: sc.AnnData, path):
         json.dump(dict, json_file)
 
 
-def save_10x_visium(adata, path, img, h5_path=None, spatial_path=None):
+def save_10x_visium(adata, path, img, dict, h5_path=None, spatial_path=None):
     
     if h5_path is not None:
         shutil.copy(h5_path, os.path.join(path, 'filtered_feature_bc_matrix.h5'))
@@ -773,11 +1380,22 @@ def save_10x_visium(adata, path, img, h5_path=None, spatial_path=None):
     
     tissue_positions.to_csv(os.path.join(path, 'spatial/tissue_positions.csv'), index=True, index_label='barcode')
     
+    with open(os.path.join(path, 'metrics.json'), 'w') as json_file:
+        json.dump(dict, json_file) 
     
-    down_img = Image.fromarray(adata.uns['spatial']['ST']['images']['downscaled_fullres'])
+    downscaled_img = adata.uns['spatial']['ST']['images']['downscaled_fullres']
+    down_fact = adata.uns['spatial']['ST']['scalefactors']['tissue_downscaled_fullres_scalef']
+    down_img = Image.fromarray(downscaled_img)
     down_img.save(os.path.join(path, 'downscaled_fullres.jpeg'))
     
-    write_wsi(img, os.path.join(path, 'aligned_fullres_HE.ome.tif'))
+    pixel_size_embedded = dict['pixel_size_um_embedded']
+    pixel_size_estimated = dict['pixel_size_um_estimated']
+    
+    _plot_verify_pixel_size(downscaled_img, down_fact, pixel_size_embedded, pixel_size_estimated, os.path.join(path, 'pixel_size_vis.png'))
+    
+    
+    
+    write_wsi(img, os.path.join(path, 'aligned_fullres_HE.ome.tif'), dict)
 
 
 def xenium_to_pseudo_visium(adata, df: pd.DataFrame, pixel_size):

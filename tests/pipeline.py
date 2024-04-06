@@ -1,12 +1,15 @@
 import pandas as pd
 from src.hiSTloader.old_st import *
 from src.hiSTloader.helpers import join_object_to_adatas_GSE171351, process_all, extract_patch_expression_pairs, visualize_patches, extract_image_patches, download_from_meta_df, read_10x_visium, save_10x_visium, save_spatial_plot \
-    , join_object_to_adatas_GSE214989
+    , join_object_to_adatas_GSE214989, GSE234047_to_h5, GSE206391_split_h5, _GSE206391_copy_dir, GSE184369_to_h5, read_ST, save_spatial_metrics_plot, filter_adata, save_metrics_plot, GSE236787_split_to_h5
+from src.hiSTloader.align import autoalign_with_fiducials
+import spatialdata_io
+import spatialdata_plot
 
 import tifffile
 from PIL import Image
 from kwimage.im_cv2 import warp_affine, imresize
-import openslide
+import subprocess
 
 import json
 
@@ -37,41 +40,52 @@ def cut_in_four_ndpi(path):
     img = openslide.OpenSlide(path)
     height, width = img.dimensions
     img1 = img.read_region((0, 0), 0, (width // 4, height)) #img[:, :width // 4]
-    myimg = imresize(img1, 0.025)
-    plt.imshow(myimg)
-    plt.show()
+    #myimg = imresize(img1, 0.025)
+    #plt.imshow(myimg)
+    #plt.show()
     img2 = img.read_region((width // 4, 0), 0, (width // 4, height)) #img[:, width // 4:(2 * width) // 4]
     img3 = img.read_region((width // 2, 0), 0, (width // 4, height)) #img[:,(2 * width) // 4:(3 * width) // 4]
     img4 = img.read_region(((3 * width) // 4, 0), 0, (width // 4, height)) #img[:, (3 * width) // 4:]
     
-    with tifffile.TiffWriter('split1.ome.tif', bigtiff=True) as tif:
+    base_dir = os.path.dirname(path)
+    name = os.path.basename(path).split('.')[0]
+    
+    with tifffile.TiffWriter(os.path.join(base_dir, f'{name}_split1.ome.tif'), bigtiff=True) as tif:
         tif.write(img1)
-    with tifffile.TiffWriter('split2.ome.tif', bigtiff=True) as tif:
+    with tifffile.TiffWriter(os.path.join(base_dir, f'{name}_split2.ome.tif'), bigtiff=True) as tif:
         tif.write(img2)
-    with tifffile.TiffWriter('split3.ome.tif', bigtiff=True) as tif:
+    with tifffile.TiffWriter(os.path.join(base_dir, f'{name}_split3.ome.tif'), bigtiff=True) as tif:
         tif.write(img3)
-    with tifffile.TiffWriter('split4.ome.tif', bigtiff=True) as tif:
+    with tifffile.TiffWriter(os.path.join(base_dir, f'{name}_split4.ome.tif'), bigtiff=True) as tif:
         tif.write(img4)
 
 
-def cut_in_four_from_bbox(path, bbox):
-    left_corner = bbox[0]
+def cut_in_four_from_bbox(path):
     
-    img = openslide.OpenSlide(path)
-    height, width = img.dimensions
-    img1 = img.read_region((0, 0), 0, (width // 4, height)) #img[:, :width // 4]
-    img2 = img.read_region((width // 4, 0), 0, (width // 4, height)) #img[:, width // 4:(2 * width) // 4]
-    img3 = img.read_region((width // 2, 0), 0, (width // 4, height)) #img[:,(2 * width) // 4:(3 * width) // 4]
-    img4 = img.read_region(((3 * width) // 4, 0), 0, (width // 4, height)) #img[:, (3 * width) // 4:]
+    #img = openslide.OpenSlide(path)
+    img = tifffile.imread(path)
+    height = img.shape[0]
+    width = img.shape[1]
+    img1 = img[:,:width // 4]
+    img2 = img[:,width // 4:(2 * width) // 4]
+    img3 = img[:,(2 * width) // 4:(3 * width) // 4]
+    img4 = img[:,(3 * width) // 4:]
+    #img1 = img.read_region((0, 0), 0, (width // 4, height)) #img[:, :width // 4]
+    #img2 = img.read_region((width // 4, 0), 0, (width // 4, height)) #img[:, width // 4:(2 * width) // 4]
+    #img3 = img.read_region((width // 2, 0), 0, (width // 4, height)) #img[:,(2 * width) // 4:(3 * width) // 4]
+    #img4 = img.read_region(((3 * width) // 4, 0), 0, (width // 4, height)) #img[:, (3 * width) // 4:]
     
-    with tifffile.TiffWriter('split1.ome.tif', bigtiff=True) as tif:
-        tif.write(img1)
-    with tifffile.TiffWriter('split2.ome.tif', bigtiff=True) as tif:
-        tif.write(img2)
-    with tifffile.TiffWriter('split3.ome.tif', bigtiff=True) as tif:
-        tif.write(img3)
-    with tifffile.TiffWriter('split4.ome.tif', bigtiff=True) as tif:
-        tif.write(img4)
+    base_dir = os.path.dirname(path)
+    name = os.path.basename(path).split('.')[0]
+    
+    with tifffile.TiffWriter(os.path.join(base_dir, f'{name}_split1.ome.tif'), bigtiff=True) as tif:
+        tif.write(img1, compression='zlib', compressionargs={'level': 8})
+    with tifffile.TiffWriter(os.path.join(base_dir, f'{name}_split2.ome.tif'), bigtiff=True) as tif:
+        tif.write(img2, compression='zlib', compressionargs={'level': 8})
+    with tifffile.TiffWriter(os.path.join(base_dir, f'{name}_split3.ome.tif'), bigtiff=True) as tif:
+        tif.write(img3, compression='zlib', compressionargs={'level': 8})
+    with tifffile.TiffWriter(os.path.join(base_dir, f'{name}_split4.ome.tif'), bigtiff=True) as tif:
+        tif.write(img4, compression='zlib', compressionargs={'level': 8})
 
 
 
@@ -131,158 +145,108 @@ def custom():
     
 def _create_dir_structure_from_meta_df(meta_df):
     for index, row in meta_df.iterrows():
+        if isinstance(row['subseries'], float):
+            continue
         dataset_title = row['dataset_title']
         subseries = row['subseries']
         path = os.path.join('/mnt/sdb1/paul/data/samples/visium', dataset_title, subseries)
         os.makedirs(path, exist_ok=True)
         
         
+def read_bern():
+    path = '/mnt/sdb1/paul/data/samples/visium/Bern ST'
+    df = pd.read_csv(os.path.join(path, 'mouse_mammary_tumor_meta_df.csv'))
+    i = 0
+    for index, row in tqdm(df.iterrows()):
+        bbox = eval(row['bounding_box'])
+        px_size = 0.2299
+        x = int(bbox[0][0] / px_size)
+        y = int(bbox[0][1] / px_size)
+        w = int((bbox[2][0] - bbox[0][0]) / px_size)
+        h = int((bbox[2][1] - bbox[0][1]) / px_size)
+        img_path = os.path.join(path, row['slide_name'])
+        
+        x -= 1500
+        y -= 1000
+        
+        img=tifffile.imread(img_path, series=0, level=0)
+        img2 = img[y:y+h, x:x+w]
+        with tifffile.TiffWriter(os.path.join(path, f'my{i}_split1.ome.tif'), bigtiff=True) as tif:
+            tif.write(img2, compression='zlib', compressionargs={'level': 8})
+        
+        #subprocess.Popen(f'"/mnt/sdb1/paul/data/samples/visium/Bern ST/ndpisplit" -Ex40,{x},{y},{w},{h},i{i} "{img_path}"', shell=True)
+        #subprocess.call(['/mnt/sdb1/paul/data/samples/visium/Bern ST/ndpisplit', f'-Ex40,{x},{y},{w},{h},i{i}', f'{img_path}'])
+        i += 1
+        #break
+    
+    print(bbox)
+    
+def _copy_to_right_subfolder(dataset_title):
+    prefix = f'/mnt/sdb1/paul/data/samples/ST/{dataset_title}'
+    #paths = os.listdir(prefix)
+    meta_path = '/mnt/sdb1/paul/ST H&E datasets - NCBI (3).csv'
+    meta_df = pd.read_csv(meta_path)
+    meta_df = meta_df[meta_df['dataset_title'] == dataset_title]
+    subseries = meta_df['subseries'].values
+    sample_name = meta_df['sample_id'].values
+    for i in range(len(subseries)):
+        try:
+            param = f'mv "{prefix}/{sample_name[i]}"* "{os.path.join(prefix, subseries[i])}"'
+            subprocess.Popen(param, shell=True)
+        except Exception:
+            pass
+    
+    
+def process_meta_df(meta_df):
+    for index, row in meta_df.iterrows():
+        subseries = row['subseries']
+        if isinstance(subseries, float):
+            subseries = ""
+        path = os.path.join('/mnt/sdb1/paul/data/samples/visium', row['dataset_title'], subseries)
+        adata = read_any(path)
+        save_spatial_plot(adata, os.path.join(path, 'processed'), 'test')
+    
 
 def main():
-    project = 'test_paul'
-    sample_path = '/mnt/ssd/paul/ST-histology-loader/data/samples'
     
-    #meta_df = pd.read_csv('/mnt/sdb1/paul/ST H&E datasets - 10XGenomics.csv')[34:]
-    #process_all(meta_df, '/mnt/sdb1/paul/data/samples')
+    path = '/mnt/sdb1/paul/data/samples/visium/Visium CytAssist Gene Expression Libraries of Post-Xenium Human Colon Cancer (FFPE)/Control, Replicate 1/processed'
+    #vs = spatialdata_io.visium(path, dataset_id='', fullres_image_file='aligned_fullres_HE.ome.tif')
     
+    #vs.pl.render_images().pl.render_shapes().pl.show("global")
+    #GSE236787_split_to_h5(path)
     
-    #_create_dir_structure_from_meta_df(meta_df[80:])
+    meta = '/mnt/sdb1/paul/ST H&E datasets - 10XGenomics.csv'
+    meta_df = pd.read_csv(meta)[32:]
+    meta_df = meta_df[meta_df['Products'] == 'Spatial Gene Expression']
+    meta_df = meta_df[meta_df['image'] == True]
     
-    #adata = sc.read_h5ad('/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Spatial transcriptomics profiling of the developing mouse embryo/Embryo, E12.5,  visium/_1_filtered_feature_bc_matrix.h5')
-    
-    
-    
-    
-    #path = '/mnt/sdb1/paul/data/samples/visium/Bern ST/2000233V11Y17-0362022-05-17 - 2022-03-07 12.42.15.ndpi'
-    #cut_in_four_ndpi(path)
-    
-   # adata = sc.read_10x_h5('/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Distinct mesenchymal cell states mediate prostate cancer progression [Spatial Transcriptomics]/PRN/GSM7914975_WT_feature_bc_matrix.h5')
-    
-    #read_any()
-    
-   # my = sc.read_visium('/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Mouse Brain Serial Section 1 (Sagittal-Posterior)')
-    
+    process_meta_df(meta_df)
 
-    #path = '/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Spatial transcriptomics profiling of the developing mouse embryo/GSE214989_counts_embryo_visium.h5'
-    #join_object_to_adatas_GSE214989(path)
-     
-    
-    #path = '/mnt/sdb1/paul/data/samples/visium/A new epithelial cell subpopulation predicts response to surgery, chemotherapy, and immunotherapy in bladder cancer/GSE171351_combined_visium.h5ad'
-    #join_object_to_adatas_GSE171351(path)
+    prefix = "/mnt/sdb1/paul/data/samples/visium/A novel model of binge ethanol exposure reveals enhanced neurodegeneration with advanced age"
     
     
-    #path = '/mnt/ssd/paul/ST-histology-loader/data/samples/visium/YAP Drives Assembly of a Spatially Colocalized Cellular Triad Required for Heart Renewal/MCM control mouse heart spatial RNA-seq'
-   # path = "/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Multi-resolution deconvolution of spatial transcriptomics data reveals continuous patterns of inflammation"
-    #path = '/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Spatial transcriptomics of adenoid cystic carcinoma of the lacrimal gland/LGACC, sample A, spatial'
-    #path = '/mnt/ssd/paul/ST-histology-loader/data/samples/visium/10X Visium Spatial transcriptomics of murine colon in steady state and during recovery after DSS colitis/Colon DSS day0'
-    #path = '/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Epithelial Plasticity and Innate Immune Activation Promote Lung Tissue Remodeling following Respiratory Viral Infection./R3_Spatial'
-    path = '/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Spatially resolved transcriptomics reveals the architecture of the tumor-microenvironment interface/Visium-A'
-    #path = '/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Assessment of Spatial Genomics for Oncology Discovery'
-    #path = '/mnt/sdb1/paul/data/samples/visium/Spatial transcriptomics of the mouse brain across three age groups/Middle Replicate 2 Slide 2'
-    
-    #read_any(path)
-    #path = '/mnt/sdb1/paul/data/samples/visium/Single-cell and spatial transcriptomics characterisation of the immunological landscape in the healthy and PSC human liver'
-    #
-    # 
-    # dirs = ['Tumor_1', 'Tumor_2', 'LN_1', 'LN_2']
-
-
-    #imagepath = '/mnt/ssd/paul/ST-histology-loader/data/samples/visium/10X Visium Spatial transcriptomics of murine colon in steady state and during recovery after DSS colitis/Colon DSS day0/GSM5213483_V19S23-097_A1_S1_Region1_colon_d0_rotated.tif'
-    
-    #img = np.array(Image.open(imagepath))
-    #img = tifffile.imread(imagepath)
-    #img2 = imresize(img, 0.025)
-    #plt.imshow(img2)
-    #plt.show()
-    
-    #for mypath in tqdm(os.listdir(path)[12:]):
-    #mypath = os.path.join(path, mypath)
-    #paths = [
-        #'/mnt/sdb1/paul/data/samples/visium/Spatial transcriptomics of the mouse brain across three age groups/Old Replicate 1 Slide 1',
-        #'/mnt/sdb1/paul/data/samples/visium/Spatial transcriptomics of the mouse brain across three age groups/Old Replicate 2 Slide 2',
-    #    '/mnt/sdb1/paul/data/samples/visium/Spatial transcriptomics of the mouse brain across three age groups/Young Replicate 1 Slide 1',
-     #   '/mnt/sdb1/paul/data/samples/visium/Spatial transcriptomics of the mouse brain across three age groups/Young Replicate 2 Slide 1'
-    #]
-    #prefix = '/mnt/sdb1/paul/data/samples/visium/Single cell profiling of primary and paired metastatic lymph node tumors in breast cancer patients'
-    #prefix = '/mnt/sdb1/paul/data/samples/visium/Single-cell and spatial transcriptomics characterisation of the immunological landscape in the healthy and PSC human liver'
-    #prefix = '/mnt/sdb1/paul/data/samples/visium/A cellular hierarchy in melanoma uncouples growth and metastasis'
-    #prefix = '/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Spatial RNA sequencing of regenerating mouse hindlimb muscle'
-    
-    #path = '/mnt/sdb1/paul/data/samples/visium/Spatial sequencing of Foreign body granuloma/CMC_Visium_Sponge_2 wks'
-
-    
-    #prefix = '/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Spatial transcriptomics profiling of the developing mouse embryo'
-    #prefix = '/mnt/ssd/paul/ST-histology-loader/data/samples/visium/10X Visium Spatial transcriptomics of murine colon in steady state and during recovery after DSS colitis'
-    
-    prefix ='/mnt/sdb1/paul/data/samples/visium/Single-nucleus Ribonucleic Acid-sequencing and Spatial Transcriptomics Reveal the Cardioprotection of Shexiang Baoxin Pill (MUSKARDIA) in Mice with Myocardial Ischemia-Reperfusion Injury'
+    #adata = read_any(prefix)
+    #filtered_adata = filter_adata(adata)
+    #save_spatial_plot(adata, os.path.join(prefix, 'processed'), 'test')
+    #save_metrics_plot(adata, os.path.join(prefix, 'processed'), 'test')
+    #save_spatial_metrics_plot(adata, os.path.join(prefix, 'processed'), 'test', filtered_adata=filtered_adata)
     paths = os.listdir(prefix)
+    # Use list comprehension to filter out non-directory items
+    folders_only = [item for item in paths if os.path.isdir(os.path.join(prefix, item))]
+    if len(folders_only) != len(paths):
+        paths = [prefix]
+    exclude_paths = []
     for path in paths:
+        if path == 'old' or path in exclude_paths:
+            continue
         path = os.path.join(prefix, path)
-        adata, spatial_aligned, img, raw_bc_matrix = read_any(path)
+
+        adata = read_any(path)
         save_spatial_plot(adata, os.path.join(path, 'processed'), 'test')
+        #save_metrics_plot(adata, os.path.join(path, 'processed'), 'test')
+        #save_metrics_plot(adata, os.path.join(path, 'processed'), 'test')
+        #break
         
-    
-
-    
-    for dir in dirs:
-        mypath = os.path.join(path, dir)
-    
-        adata, spatial_aligned, img, raw_bc_matrix = read_any(mypath)
-    
-        save_spatial_plot(adata, os.path.join(mypath, 'processed'), 'test')
-    
-    
-    #adata, spatial_aligned, img, raw_bc_matrix = read_10x_visium(
-    #    img_path='/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Mouse Brain Serial Section 1 (Sagittal-Posterior)/V1_Mouse_Brain_Sagittal_Posterior_image.tif',
-    #    bc_matrix_path='/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Mouse Brain Serial Section 1 (Sagittal-Posterior)/V1_Mouse_Brain_Sagittal_Posterior_filtered_feature_bc_matrix.h5',
-    #    spatial_coord_path='/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Mouse Brain Serial Section 1 (Sagittal-Posterior)/spatial'
-    #)
-    
-    # provide an option to keep the spatial folder with/without the tissue_positions.csv
-    #save_10x_visium(
-    #    adata, 
-    #    '/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Mouse Brain Serial Section 1 (Sagittal-Posterior)/processed',
-    #    img,
-    #    h5_path='/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Mouse Brain Serial Section 1 (Sagittal-Posterior)/V1_Mouse_Brain_Sagittal_Posterior_filtered_feature_bc_matrix.h5',
-    #    spatial_path='/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Mouse Brain Serial Section 1 (Sagittal-Posterior)/spatial',
-    #)
-    
-    #load_from_image_matrix_align(
-    #    '/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Zika virus co-opts miRNA networks to persist in placental microenvironments detected by spatial transcriptomics [visium]/S07/GSM6215671_S07.png',
-    #    '/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Zika virus co-opts miRNA networks to persist in placental microenvironments detected by spatial transcriptomics [visium]/S07/GSM6215671_S07_filtered_feature_bc_matrix.h5',
-    #    '/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Zika virus co-opts miRNA networks to persist in placental microenvironments detected by spatial transcriptomics [visium]/S07/alignment.json')
-    
-   # meta_df = pd.read_csv('/mnt/ssd/paul/ST-histology-loader/data/Datasets H&E spatial transcriptomics - 10XGenomics.csv')
-    #meta_df = pd.read_csv('Datasets H&E spatial transcriptomics - Zenodo.csv')
-    #download_from_meta_df(meta_df,
-    #                      '/mnt/ssd/paul/ST-histology-loader/data/samples')
-    
-    #process_all(meta_df[51:], sample_path)
-
-    # adata_shape_l_unprocessed = plot_unprocessed(st_dir, img_dir, df_img_name, f'./figures/{project}/unprocessed_plots')
-    save_path_df_metrics = f'./figures/{project}/df_metrics_{project}.csv'
-    load_img = True
-    if project == 'crc_14':
-        load_img = False
-    
-    
-    
-    #adata_list, img_list, hvgs_union, sample_names, matched_dict = load_data(st_dir, img_dir, df_img_name)
-    adata_list, img_list, sample_names = load_data(data_path)
-    
-    start, end = 0, len(adata_list)
-    # # Ensure the directory exists for saving the figure
-    dist_img_save_dir = f'./figures/{project}/combined_dist_plots'
-    spatial_img_save_dir = f'./figures/{project}/spatial_plots'
-
-    #plot_dist_plots(adata_list, sample_names, dist_img_save_dir, start, end)
-    plot_spatial_plots(adata_list, sample_names, spatial_img_save_dir, start, end)
-    
-    for i in range(len(adata_list)):
-        patches = extract_image_patches(adata_list[i], img_list[i], patch_size = 200)
-    #visualize_patches(patches[:20])
-    mask_bad = identify_bad_patches(patches[:200])
-    visualize_patches([patches[i] for i in mask_bad])
 
 if __name__ == "__main__":
     main()

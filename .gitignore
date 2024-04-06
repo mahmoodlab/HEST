@@ -2,3 +2,4 @@ __pycache__
 data
 align_coord_img.ipynb
 src/hiSTloader/yolov8n.pt
+best.pt

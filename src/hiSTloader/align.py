@@ -94,7 +94,7 @@ def _spots_to_file(path, spots, fiducials, template):
         arr_spots.append({
             'tissue': True,
             'row': oligo['row'],
-            'col': oligo['row'],
+            'col': oligo['col'],
             'imageX': spots[i][0],
             'imageY': spots[i][1]
         })
@@ -123,7 +123,7 @@ def _get_orientation(box, boxes):
     else:
         return 4
 
-model = YOLO('/home/paul/Documents/us.bwh/detector/runs/detect/train4/weights/best.pt')
+model = YOLO('best.pt')
 
 def _resize_to_target(img):
     TARGET_PIXEL_EDGE = 1000
@@ -209,7 +209,7 @@ def autoalign_with_fiducials(fullres_img, save_dir, name=''):
     result = model(img)[0]
 
     if len(result.boxes) == 0:
-        return
+        raise Exception("couldn't find any fiducials")
 
     
     #diffs = []
@@ -246,18 +246,45 @@ def autoalign_with_fiducials(fullres_img, save_dir, name=''):
         src_pts.append(src)
         dst_pts.append(dst)
 
-    src_pts = np.array(src_pts)[:3].astype(np.float32)
-    dst_pts = np.array(dst_pts)[:3].astype(np.float32)
+    n = len(boxes_to_match)
+    if n >= 3:
+        found = False
+        for i in range(n):
+            if found:
+                break
+            for j in range(n):
+                if found:
+                    break
+                for k in range(n):
+                    if i == j or i == k or k == j:
+                        continue
+                    
+                    my_src_pts = np.array(src_pts)[[i, j, k]].astype(np.float32)
+                    my_dst_pts = np.array(dst_pts)[[i, j, k]].astype(np.float32)
 
-    warp_mat = cv2.getAffineTransform(src_pts, dst_pts) * (1 / factor)
+                    warp_mat = cv2.getAffineTransform(my_src_pts, my_dst_pts) * (1 / factor)
+                    
+                    fiducials = np.column_stack((template.fiducials, np.ones((template.fiducials.shape[0],))))
+                    aligned_fiducials = warp_mat @ fiducials.T
+                    aligned_fiducials = aligned_fiducials.T
+                    
+                    min_y = np.min(aligned_fiducials[:, 0])
+                    max_y = np.max(aligned_fiducials[:, 0])
+                    min_x = np.min(aligned_fiducials[:, 1])
+                    max_x = np.max(aligned_fiducials[:, 1])
+                    max_width_height = int(np.max(fullres_img.shape)) # we need this lie as the image might be rotated
+                    if min_y > 0 and min_x > 0 and max_y < max_width_height and max_x < max_width_height:
+                        found = True
+                        break
+                    
+        if not found:
+            raise Exception("couldn't find alignment, make sure that all the fiducials are visible")
+    
 
     spots = np.column_stack((template.spots, np.ones((template.spots.shape[0],))))
     aligned_spots = warp_mat @ spots.T
     aligned_spots = aligned_spots.T
-
-    fiducials = np.column_stack((template.fiducials, np.ones((template.fiducials.shape[0],))))
-    aligned_fiducials = warp_mat @ fiducials.T
-    aligned_fiducials = aligned_fiducials.T
+                    
 
     #filename = path.split('/')[-1].split('.')[0]
     save_path = os.path.join(save_dir, name + 'autoalignment.png')
@@ -272,20 +299,15 @@ def autoalign_with_fiducials(fullres_img, save_dir, name=''):
                             img,
                             save_path)
 
-    _spots_to_file(os.path.join(save_dir, name + 'autoalignment.json'), spots, fiducials, template)
+    _spots_to_file(os.path.join(save_dir, name + 'autoalignment.json'), aligned_spots, aligned_fiducials, template)
 
 
 def main():
-    #path_image = '/home/paul/Documents/us.bwh/detector/val/GSM6585445_sample1_tissue_hires_image.png'
-
     path_image = '/home/paul/Documents/us.bwh/detector/val/test_rotated.png'
-    #input_dir = '/home/paul/Documents/us.bwh/detector/data'
     input_dir = '/home/paul/Documents/us.bwh/detector/test'
     for path in tqdm(os.listdir(input_dir)):
         if path.endswith('.txt'):
             continue
-        #if path != 'tissue_hires_image37.jpeg':
-        #    continue
         Image.MAX_IMAGE_PIXELS = None
         path_image = os.path.join(input_dir, path)
         #full_res_img = np.array(Image.open(path_image))
