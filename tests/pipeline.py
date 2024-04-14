@@ -1,186 +1,23 @@
+#import apeer_ometiff_library.io
 import pandas as pd
 from src.hiSTloader.old_st import *
-from src.hiSTloader.helpers import join_object_to_adatas_GSE171351, process_all, extract_patch_expression_pairs, visualize_patches, extract_image_patches, download_from_meta_df, read_10x_visium, save_10x_visium, save_spatial_plot \
-    , join_object_to_adatas_GSE214989, GSE234047_to_h5, GSE206391_split_h5, _GSE206391_copy_dir, GSE184369_to_h5, read_ST, save_spatial_metrics_plot, filter_adata, save_metrics_plot, GSE236787_split_to_h5
-from src.hiSTloader.align import autoalign_with_fiducials
-import spatialdata_io
-import spatialdata_plot
+from src.hiSTloader.helpers import save_spatial_plot, GSE184384_to_h5, write_10X_h5
 
 import tifffile
 from PIL import Image
 from kwimage.im_cv2 import warp_affine, imresize
 import subprocess
+#import fiftyone as fo
+from tqdm import tqdm
 
+import shutil
 import json
+#from valis import registration
 
 Image.MAX_IMAGE_PIXELS = 9331200000
-
-def load_from_image_matrix_align(img_path, matrix_path, alignment_path):
-    img = np.array(Image.open(img_path))
-    adata = sc.read_10x_h5(matrix_path)
     
-    file = open(alignment_path)
-    tissue = json.load(file)['oligo']
-    df = pd.DataFrame(tissue)
-    df = df.rename(columns={
-        'row': 'array_row',
-        'col': 'array_col',
-        #'x': 'pxl_col_in_fullres',
-        #'y': 'pxl_row_in_fullres'
-        'imageX': 'pxl_col_in_fullres',
-        'imageY': 'pxl_row_in_fullres'
-    })
-    
-    adata.obsm['spatial'] = np.column_stack((df['pxl_col_in_fullres'].values, df['pxl_row_in_fullres'].values))
-    
-    a = 3
-    
-
-def cut_in_four_ndpi(path):
-    img = openslide.OpenSlide(path)
-    height, width = img.dimensions
-    img1 = img.read_region((0, 0), 0, (width // 4, height)) #img[:, :width // 4]
-    #myimg = imresize(img1, 0.025)
-    #plt.imshow(myimg)
-    #plt.show()
-    img2 = img.read_region((width // 4, 0), 0, (width // 4, height)) #img[:, width // 4:(2 * width) // 4]
-    img3 = img.read_region((width // 2, 0), 0, (width // 4, height)) #img[:,(2 * width) // 4:(3 * width) // 4]
-    img4 = img.read_region(((3 * width) // 4, 0), 0, (width // 4, height)) #img[:, (3 * width) // 4:]
-    
-    base_dir = os.path.dirname(path)
-    name = os.path.basename(path).split('.')[0]
-    
-    with tifffile.TiffWriter(os.path.join(base_dir, f'{name}_split1.ome.tif'), bigtiff=True) as tif:
-        tif.write(img1)
-    with tifffile.TiffWriter(os.path.join(base_dir, f'{name}_split2.ome.tif'), bigtiff=True) as tif:
-        tif.write(img2)
-    with tifffile.TiffWriter(os.path.join(base_dir, f'{name}_split3.ome.tif'), bigtiff=True) as tif:
-        tif.write(img3)
-    with tifffile.TiffWriter(os.path.join(base_dir, f'{name}_split4.ome.tif'), bigtiff=True) as tif:
-        tif.write(img4)
-
-
-def cut_in_four_from_bbox(path):
-    
-    #img = openslide.OpenSlide(path)
-    img = tifffile.imread(path)
-    height = img.shape[0]
-    width = img.shape[1]
-    img1 = img[:,:width // 4]
-    img2 = img[:,width // 4:(2 * width) // 4]
-    img3 = img[:,(2 * width) // 4:(3 * width) // 4]
-    img4 = img[:,(3 * width) // 4:]
-    #img1 = img.read_region((0, 0), 0, (width // 4, height)) #img[:, :width // 4]
-    #img2 = img.read_region((width // 4, 0), 0, (width // 4, height)) #img[:, width // 4:(2 * width) // 4]
-    #img3 = img.read_region((width // 2, 0), 0, (width // 4, height)) #img[:,(2 * width) // 4:(3 * width) // 4]
-    #img4 = img.read_region(((3 * width) // 4, 0), 0, (width // 4, height)) #img[:, (3 * width) // 4:]
-    
-    base_dir = os.path.dirname(path)
-    name = os.path.basename(path).split('.')[0]
-    
-    with tifffile.TiffWriter(os.path.join(base_dir, f'{name}_split1.ome.tif'), bigtiff=True) as tif:
-        tif.write(img1, compression='zlib', compressionargs={'level': 8})
-    with tifffile.TiffWriter(os.path.join(base_dir, f'{name}_split2.ome.tif'), bigtiff=True) as tif:
-        tif.write(img2, compression='zlib', compressionargs={'level': 8})
-    with tifffile.TiffWriter(os.path.join(base_dir, f'{name}_split3.ome.tif'), bigtiff=True) as tif:
-        tif.write(img3, compression='zlib', compressionargs={'level': 8})
-    with tifffile.TiffWriter(os.path.join(base_dir, f'{name}_split4.ome.tif'), bigtiff=True) as tif:
-        tif.write(img4, compression='zlib', compressionargs={'level': 8})
-
-
-
-def custom():
-    #data_path = '/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Visium CytAssist Gene Expression Libraries of Post-Xenium Human Colon Cancer (FFPE)/Control, Replicate 1'
-    data_path = '/mnt/ssd/paul/ST-histology-loader/data/samples/xenium/Human Tonsil Data with Xenium Human Multi-Tissue and Cancer Panel/Reactive follicular hyperplasia'
-    my_path = '/mnt/ssd/paul/ST-histology-loader/data/samples/visium/Spatial transcriptomics profiling of the developing mouse embryo/GSM6619680'
-    
-    adata = sc.read_10x_h5(os.path.join(my_path, 'GSE214989_counts_embryo_visium.h5'))
-    
-    img = np.array(Image.open(os.path.join(my_path, 'GSM6619680_220420_sATAC_V10B01-031_B1_NB-Spot000001.jpg')))
-    #img3 = np.array(Image.open(os.path.join(my_path, 'GSM6619681_211007_V10S29-086_D1-Spot000001.jpg')))
-    #img = tifffile.imread(os.path.join(my_path, 'GSM6619680_220420_sATAC_V10B01-031_B1_NB-Spot000001.jpg'))
-    #img4 = imresize(img3, 0.025)
-    #plt.imshow(img4)
-    #plt.show()
-    list1 = pd.read_csv(os.path.join(my_path, 'GSM6619680_220420_sATAC_V10B01-031_B1_tissue_positions_list.csv'), header=None)
-    list2 = pd.read_csv(os.path.join(my_path, 'GSM6619681_211007_V10S29-086_D1_tissue_positions_list.csv'), header=None)
-    #list3 = pd.read_csv(os.path.join(my_path, 'GSM6619682_V10B01-135_D1_tissue_positions_list.csv'), header=None)
-    
-    list1 = list1.rename(columns={1: "in_tissue", # in_tissue: 1 if spot is captured in tissue region, 0 otherwise
-                                2: "array_row", # spot row index
-                                3: "array_col", # spot column index
-                                4: "pxl_row_in_fullres", # spot x coordinate in image pixel
-                                5: "pxl_col_in_fullres"}) # spot y coordinate in image pixel
-
-    list2 = list2.rename(columns={1: "in_tissue", # in_tissue: 1 if spot is captured in tissue region, 0 otherwise
-                                2: "array_row", # spot row index
-                                3: "array_col", # spot column index
-                                4: "pxl_row_in_fullres", # spot x coordinate in image pixel
-                                5: "pxl_col_in_fullres"}) # spot y coordinate in image pixel
-
-    list1[0] = list1[0] + '_1'
-    list2[0] = list2[0] + '_2'
-    
-    
-    img2 = imresize(img, 0.025)
-    
-    #list1 = list1[list1['in_tissue'] == 1]
-    #list2 = list2[list2['in_tissue'] == 1]
-    #list1 = list1[list1['in_tissue'] == 1]
-    
-    names = adata.obs_names
-    
-    missing_values = np.setdiff1d(list1[0].values, names.values)
-    my_index = np.setdiff1d(list1[0].values, missing_values)
-    
-    
-    adata1 = adata[my_index]
-    
-    names = adata.obs_names
-    
-    plt.imshow(img2)
-    plt.scatter(list1["pxl_col_in_fullres"] * 0.025, list1["pxl_row_in_fullres"] * 0.025, s=5)
-    plt.show()
-    
-    
-def _create_dir_structure_from_meta_df(meta_df):
-    for index, row in meta_df.iterrows():
-        if isinstance(row['subseries'], float):
-            continue
-        dataset_title = row['dataset_title']
-        subseries = row['subseries']
-        path = os.path.join('/mnt/sdb1/paul/data/samples/visium', dataset_title, subseries)
-        os.makedirs(path, exist_ok=True)
         
         
-def read_bern():
-    path = '/mnt/sdb1/paul/data/samples/visium/Bern ST'
-    df = pd.read_csv(os.path.join(path, 'mouse_mammary_tumor_meta_df.csv'))
-    i = 0
-    for index, row in tqdm(df.iterrows()):
-        bbox = eval(row['bounding_box'])
-        px_size = 0.2299
-        x = int(bbox[0][0] / px_size)
-        y = int(bbox[0][1] / px_size)
-        w = int((bbox[2][0] - bbox[0][0]) / px_size)
-        h = int((bbox[2][1] - bbox[0][1]) / px_size)
-        img_path = os.path.join(path, row['slide_name'])
-        
-        x -= 1500
-        y -= 1000
-        
-        img=tifffile.imread(img_path, series=0, level=0)
-        img2 = img[y:y+h, x:x+w]
-        with tifffile.TiffWriter(os.path.join(path, f'my{i}_split1.ome.tif'), bigtiff=True) as tif:
-            tif.write(img2, compression='zlib', compressionargs={'level': 8})
-        
-        #subprocess.Popen(f'"/mnt/sdb1/paul/data/samples/visium/Bern ST/ndpisplit" -Ex40,{x},{y},{w},{h},i{i} "{img_path}"', shell=True)
-        #subprocess.call(['/mnt/sdb1/paul/data/samples/visium/Bern ST/ndpisplit', f'-Ex40,{x},{y},{w},{h},i{i}', f'{img_path}'])
-        i += 1
-        #break
-    
-    print(bbox)
-    
 def _copy_to_right_subfolder(dataset_title):
     prefix = f'/mnt/sdb1/paul/data/samples/ST/{dataset_title}'
     #paths = os.listdir(prefix)
@@ -195,41 +32,208 @@ def _copy_to_right_subfolder(dataset_title):
             subprocess.Popen(param, shell=True)
         except Exception:
             pass
+   
+
+def _get_path_from_meta_row(row):
+    subseries = row['subseries']
+    if isinstance(subseries, float):
+        subseries = ""
+        
+    tech = row['st_instrument']
+    if isinstance(tech, float):
+        tech = 'visium'
+    elif 'visium' in tech.lower() and ('visium hd' not in tech.lower()):
+        tech = 'visium'
+    elif 'xenium' in tech.lower():
+        tech = 'xenium'
+    elif 'spatial transcriptomics' in tech.lower():
+        tech = 'ST'
+    elif 'visium hd' in tech.lower():
+        tech = 'visium-hd'
+    else:
+        raise Exception(f'unknown tech {tech}')
+    path = os.path.join('/mnt/sdb1/paul/data/samples/', tech, row['dataset_title'], subseries)
+    return path   
+ 
     
-    
-def process_meta_df(meta_df):
-    for index, row in meta_df.iterrows():
-        subseries = row['subseries']
-        if isinstance(subseries, float):
-            subseries = ""
-        path = os.path.join('/mnt/sdb1/paul/data/samples/visium', row['dataset_title'], subseries)
+def process_meta_df(meta_df, save_spatial_plots=True):
+    for index, row in tqdm(meta_df.iterrows()):
+        path = _get_path_from_meta_row(row)
         adata = read_any(path)
-        save_spatial_plot(adata, os.path.join(path, 'processed'), 'test')
+        if save_spatial_plots:
+            save_spatial_plot(adata, os.path.join(path, 'processed'), 'test')
+        
+
+def copy_processed_images(dest, meta_df, cp_spatial=True, cp_downscaled=True):
+    for index, row in meta_df.iterrows():
+        
+        try:
+            path = _get_path_from_meta_row(row)
+        except Exception:
+            continue
+        path = os.path.join(path, 'processed')
+        if isinstance(row['id'], float):
+            my_id = row['id']
+            raise Exception(f'invalid sample id {my_id}')
+        
+        path_fullres = os.path.join(path, 'aligned_fullres_HE.ome.tif')
+        if not os.path.exists(path_fullres):
+            print(f"couldn't copy {path}")
+            continue
+        print(f"copying {row['id']}")
+        if cp_downscaled:
+            path_downscaled = os.path.join(path, 'downscaled_fullres.jpeg')
+            path_dest_downscaled = os.path.join(dest, 'downscaled', row['id'] + '_downscaled_fullres.jpeg')
+            shutil.copy(path_downscaled, path_dest_downscaled)
+        if cp_spatial:
+            path_spatial = os.path.join(path, 'spatial_plots.png')
+            path_dest_spatial = os.path.join(dest, 'spatial_plots', row['id'] + '_spatial_plots.png')
+            shutil.copy(path_spatial, path_dest_spatial)
+        path_dest_fullres = os.path.join(dest, 'fullres', row['id'] + '_aligned_fullres_HE.ome.tif')
+        
+
+        
+        #path_downscaled = os.path.join(path, 'downscaled_fullres.jpeg')
+        #path_dest_downscaled = os.path.join(dest, 'downscaled', row['id'] + '_downscaled_fullres.jpeg')
+        
+        shutil.copy(path_fullres, path_dest_fullres)
+        
+
+def open_fiftyone():
+    dest = '/mnt/sdb1/paul/images'
+    dataset = fo.Dataset.from_images_dir("/mnt/sdb1/paul/images")
+    session = fo.launch_app(dataset)    
     
+    
+def create_joined_gene_plots(meta):
+    # determine common genes
+    common_genes = None
+    n = len(meta)
+    for index, row in meta.iterrows():
+        path = _get_path_from_meta_row(row)
+        gene_files = np.array(os.listdir(os.path.join(path, 'gene_bar_plots')))
+        if common_genes is None:
+            common_genes = gene_files
+        else:
+            common_genes = np.intersect1d(common_genes, gene_files)
+            
+    for gene in tqdm(common_genes):
+        fig, axes = plt.subplots(n, 1)
+        i = 0
+        for index, row in meta.iterrows():
+            path = _get_path_from_meta_row(row)
+            gene_path = os.path.join(path, 'gene_bar_plots', gene)
+            image = Image.open(gene_path)
+            axes[i].imshow(image)
+            axes[i].axis('off')
+            i += 1
+        plt.savefig(os.path.join('/mnt/sdb1/paul/gene_subplots', f'{gene}_subplot.png'), bbox_inches='tight', pad_inches=0, dpi=600)
+        plt.subplots_adjust(wspace=0.1)
+        plt.close()
+
+
+def split_join_adata_by_col(path, adata_path, col):
+    adata = sc.read_h5ad(os.path.join(path, adata_path))
+    samples = np.unique(adata.obs[col])
+    for sample in samples:
+        sample_adata = adata[adata.obs['orig.ident'] == sample]
+        try:
+            #write_10X_h5(sample_adata, os.path.join(path, f'{sample}.h5'))
+            sample_adata.write_h5ad(os.path.join(path, f'{sample}.h5ad'))
+            #write_10X_h5(sample_adata, os.path.join(path, f'{sample}.h5'))
+        except:
+            sample_adata.__dict__['_raw'].__dict__['_var'] = sample_adata.__dict__['_raw'].__dict__['_var'].rename(columns={'_index': 'features'})
+            sample_adata.write_h5ad(os.path.join(path, f'{sample}.h5ad'))
+            
+            
+def GSE205707_split_to_h5ad(path):
+    #adata = sc.read_h5ad(os.path.join(path, 'ITD1_1202L.h5ad'))
+    #write_10X_h5(adata, os.path.join(path, '1202L.h5'))
+    split_join_adata_by_col(path, 'aggregate.h5ad', 'orig.ident')
+    split_join_adata_by_col(path, '2L_2R_1197L_1203L_599L_600R.h5ad', 'orig.ident')
+    
+    
+def GSE184369_split_to_h5ad(path):
+    feature_path = os.path.join(path, 'old/GSE184369_features.txt')
+    features = pd.read_csv(feature_path, header=None)
+    features[1] = features[0]
+    features[0] = ['Unspecified' for _ in range(len(features))]
+    features[2] = ['Unspecified' for _ in range(len(features))]
+    features.to_csv(os.path.join(path, 'old/new_features.tsv'), sep='\t', index=False, header=False)
+    
+    mex_path = os.path.join(path, 'mex')
+    adata = sc.read_10x_mtx(mex_path, gex_only=False)
+    adata.obs['sample'] = [i.split('-')[0] for i in adata.obs.index]
+    adata.obs.index = [i.split('-')[1] for i in adata.obs.index]
+    samples = np.unique(adata.obs['sample'])
+    for sample in samples:
+        sample_adata = adata[adata.obs['sample'] == sample]
+        try:
+            #write_10X_h5(sample_adata, os.path.join(path, f'{sample}.h5'))
+            sample_adata.write_h5ad(os.path.join(path, f'{sample}.h5ad'))
+            #write_10X_h5(sample_adata, os.path.join(path, f'{sample}.h5'))
+        except:
+            sample_adata.__dict__['_raw'].__dict__['_var'] = sample_adata.__dict__['_raw'].__dict__['_var'].rename(columns={'_index': 'features'})
+            sample_adata.write_h5ad(os.path.join(path, f'{sample}.h5ad'))
+    
+    
+
 
 def main():
-    
-    path = '/mnt/sdb1/paul/data/samples/visium/Visium CytAssist Gene Expression Libraries of Post-Xenium Human Colon Cancer (FFPE)/Control, Replicate 1/processed'
-    #vs = spatialdata_io.visium(path, dataset_id='', fullres_image_file='aligned_fullres_HE.ome.tif')
-    
-    #vs.pl.render_images().pl.render_shapes().pl.show("global")
-    #GSE236787_split_to_h5(path)
-    
-    meta = '/mnt/sdb1/paul/ST H&E datasets - 10XGenomics.csv'
-    meta_df = pd.read_csv(meta)[32:]
-    meta_df = meta_df[meta_df['Products'] == 'Spatial Gene Expression']
-    meta_df = meta_df[meta_df['image'] == True]
-    
-    process_meta_df(meta_df)
 
-    prefix = "/mnt/sdb1/paul/data/samples/visium/A novel model of binge ethanol exposure reveals enhanced neurodegeneration with advanced age"
+    path = '/mnt/sdb1/paul/data/samples/visium/Visium CytAssist Gene Expression Libraries of Post-Xenium Human Colon Cancer (FFPE)/Control, Replicate 1/processed'
+    
+    meta = '/mnt/sdb1/paul/data/samples/ST H&E datasets - Combined data.csv'
+    meta_df = pd.read_csv(meta)
+    #meta_df = meta_df[meta_df['Products'] == 'Spatial Gene Expression']
+    #meta_df = meta_df[meta_df['id'].str.startswith('MEND')]
+    
+    #GSE184384_to_h5('/mnt/sdb1/paul/data/samples/visium/Epithelial Plasticity and Innate Immune Activation Promote Lung Tissue Remodeling following Respiratory Viral Infection./R3_Spatial')
+
     
     
+    exclude_list = [
+        'Spatial Transcriptomic Experiment of Triple-Negative Breast Cancer PDX Model PIM001-P model treatment naive sample',
+        'Spatial detection of fetal marker genes expressed at low level in adult human heart tissue',
+        'Tertiary lymphoid structures generate and propagate anti-tumor antibody-producing plasma cells in renal cell cancer',
+        'Bern ST',
+        'Spatial architecture of high-grade glioma reveals tumor heterogeneity within distinct domains'
+    ]
+    
+    meta_df = meta_df[meta_df['image'] == True]
+    meta_df = meta_df[meta_df['Products'] != 'HD Spatial Gene Expression']
+    meta_df = meta_df[~meta_df['dataset_title'].isin(exclude_list)]
+    #meta_df = meta_df[meta_df['dataset_title'] == 'Spatially resolved clonal copy number alterations in benign and malignant tissueJus']
+    #meta_df = meta_df[meta_df['dataset_title'] == 'Spatially resolved clonal copy number alterations in benign and malignant tissueJus']
+    #meta_df = meta_df[meta_df['dataset_title'] == 'FFPE Human Breast using the Entire Sample Area']
+    #meta_df = meta_df[meta_df['check_image'] == "TRUE"]
+    
+    #meta_df = meta_df[((meta_df['dataset_title'] == 'FFPE Human Breast using the Entire Sample Area') & (meta_df['subseries'] == 'Replicate 1')) |
+    #              ((meta_df['dataset_title'] == 'FFPE Human Breast with Pre-designed Panel') & (meta_df['subseries'] == 'Tissue sample 1')) |
+    #              ((meta_df['dataset_title'] == 'High resolution mapping of the tumor microenvironment using integrated single-cell, spatial and in situ analysis [Xenium]') & (meta_df['subseries'] != 'Breast Cancer, Xenium In Situ Spatial Gene Expression Rep 2'))]
+    #
+
+    #create_joined_gene_plots(meta_df)
+
+    dest = '/mnt/sdb1/paul/images'
+    #copy_processed_images(dest, meta_df, cp_spatial=False, cp_downscaled=False)
+
+    #open_fiftyone()
+    #copy_processed
+    # images(dest, meta_df)
+    
+    process_meta_df(meta_df[299:], save_spatial_plots=True) #230
+
+    prefix = "/mnt/sdb1/paul/data/samples/visium/Tertiary lymphoid structures generate and propagate anti-tumor antibody-producing plasma cells in renal cell cancer"
+    #prefix = "/mnt/sdb1/paul/data/samples/visium/Prostate ST Internal"
+    
+    #GSE184369_split_to_h5ad(prefix)
     #adata = read_any(prefix)
     #filtered_adata = filter_adata(adata)
     #save_spatial_plot(adata, os.path.join(prefix, 'processed'), 'test')
     #save_metrics_plot(adata, os.path.join(prefix, 'processed'), 'test')
     #save_spatial_metrics_plot(adata, os.path.join(prefix, 'processed'), 'test', filtered_adata=filtered_adata)
+
     paths = os.listdir(prefix)
     # Use list comprehension to filter out non-directory items
     folders_only = [item for item in paths if os.path.isdir(os.path.join(prefix, item))]
@@ -243,9 +247,6 @@ def main():
 
         adata = read_any(path)
         save_spatial_plot(adata, os.path.join(path, 'processed'), 'test')
-        #save_metrics_plot(adata, os.path.join(path, 'processed'), 'test')
-        #save_metrics_plot(adata, os.path.join(path, 'processed'), 'test')
-        #break
         
 
 if __name__ == "__main__":
