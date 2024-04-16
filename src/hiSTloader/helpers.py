@@ -29,6 +29,181 @@ import seaborn as sns
 import spatialdata_io
 from spatialdata._io import write_image
 import spatialdata_plot
+from packaging import version
+
+
+def _copy_to_right_subfolder(dataset_title):
+    prefix = f'/mnt/sdb1/paul/data/samples/ST/{dataset_title}'
+    #paths = os.listdir(prefix)
+    meta_path = '/mnt/sdb1/paul/ST H&E datasets - NCBI (3).csv'
+    meta_df = pd.read_csv(meta_path)
+    meta_df = meta_df[meta_df['dataset_title'] == dataset_title]
+    subseries = meta_df['subseries'].values
+    sample_name = meta_df['sample_id'].values
+    for i in range(len(subseries)):
+        try:
+            param = f'mv "{prefix}/{sample_name[i]}"* "{os.path.join(prefix, subseries[i])}"'
+            subprocess.Popen(param, shell=True)
+        except Exception:
+            pass
+   
+
+def _get_path_from_meta_row(row):
+    subseries = row['subseries']
+    if isinstance(subseries, float):
+        subseries = ""
+        
+    tech = row['st_instrument']
+    if isinstance(tech, float):
+        tech = 'visium'
+    elif 'visium' in tech.lower() and ('visium hd' not in tech.lower()):
+        tech = 'visium'
+    elif 'xenium' in tech.lower():
+        tech = 'xenium'
+    elif 'spatial transcriptomics' in tech.lower():
+        tech = 'ST'
+    elif 'visium hd' in tech.lower():
+        tech = 'visium-hd'
+    else:
+        raise Exception(f'unknown tech {tech}')
+    path = os.path.join('/mnt/sdb1/paul/data/samples/', tech, row['dataset_title'], subseries)
+    return path   
+
+
+def copy_processed_images(dest, meta_df, cp_spatial=True, cp_downscaled=True):
+    for index, row in meta_df.iterrows():
+        
+        try:
+            path = _get_path_from_meta_row(row)
+        except Exception:
+            continue
+        path = os.path.join(path, 'processed')
+        if isinstance(row['id'], float):
+            my_id = row['id']
+            raise Exception(f'invalid sample id {my_id}')
+        
+        path_fullres = os.path.join(path, 'aligned_fullres_HE.ome.tif')
+        if not os.path.exists(path_fullres):
+            print(f"couldn't copy {path}")
+            continue
+        print(f"copying {row['id']}")
+        if cp_downscaled:
+            path_downscaled = os.path.join(path, 'downscaled_fullres.jpeg')
+            path_dest_downscaled = os.path.join(dest, 'downscaled', row['id'] + '_downscaled_fullres.jpeg')
+            shutil.copy(path_downscaled, path_dest_downscaled)
+        if cp_spatial:
+            path_spatial = os.path.join(path, 'spatial_plots.png')
+            path_dest_spatial = os.path.join(dest, 'spatial_plots', row['id'] + '_spatial_plots.png')
+            shutil.copy(path_spatial, path_dest_spatial)
+        path_dest_fullres = os.path.join(dest, 'fullres', row['id'] + '_aligned_fullres_HE.ome.tif')
+        
+
+        
+        #path_downscaled = os.path.join(path, 'downscaled_fullres.jpeg')
+        #path_dest_downscaled = os.path.join(dest, 'downscaled', row['id'] + '_downscaled_fullres.jpeg')
+        
+        shutil.copy(path_fullres, path_dest_fullres)
+        
+
+def open_fiftyone():
+    dest = '/mnt/sdb1/paul/images'
+    dataset = fo.Dataset.from_images_dir("/mnt/sdb1/paul/images")
+    session = fo.launch_app(dataset)    
+    
+    
+def create_joined_gene_plots(meta):
+    # determine common genes
+    common_genes = None
+    n = len(meta)
+    for index, row in meta.iterrows():
+        path = _get_path_from_meta_row(row)
+        gene_files = np.array(os.listdir(os.path.join(path, 'processed', 'gene_bar_plots')))
+        if common_genes is None:
+            common_genes = gene_files
+        else:
+            common_genes = np.intersect1d(common_genes, gene_files)
+            
+    for gene in tqdm(common_genes):
+        fig, axes = plt.subplots(n, 1)
+        i = 0
+        for index, row in meta.iterrows():
+            path = _get_path_from_meta_row(row)
+            gene_path = os.path.join(path, 'processed', 'gene_bar_plots', gene)
+            image = Image.open(gene_path)
+            axes[i].imshow(image)
+            axes[i].axis('off')
+            i += 1
+        plt.savefig(os.path.join('/mnt/sdb1/paul/gene_subplots_READ', f'{gene}_subplot.png'), bbox_inches='tight', pad_inches=0, dpi=600)
+        plt.subplots_adjust(wspace=0.1)
+        plt.close()
+
+
+def split_join_adata_by_col(path, adata_path, col):
+    adata = sc.read_h5ad(os.path.join(path, adata_path))
+    samples = np.unique(adata.obs[col])
+    for sample in samples:
+        sample_adata = adata[adata.obs['orig.ident'] == sample]
+        try:
+            #write_10X_h5(sample_adata, os.path.join(path, f'{sample}.h5'))
+            sample_adata.write_h5ad(os.path.join(path, f'{sample}.h5ad'))
+            #write_10X_h5(sample_adata, os.path.join(path, f'{sample}.h5'))
+        except:
+            sample_adata.__dict__['_raw'].__dict__['_var'] = sample_adata.__dict__['_raw'].__dict__['_var'].rename(columns={'_index': 'features'})
+            sample_adata.write_h5ad(os.path.join(path, f'{sample}.h5ad'))
+            
+            
+def GSE205707_split_to_h5ad(path):
+    #adata = sc.read_h5ad(os.path.join(path, 'ITD1_1202L.h5ad'))
+    #write_10X_h5(adata, os.path.join(path, '1202L.h5'))
+    split_join_adata_by_col(path, 'aggregate.h5ad', 'orig.ident')
+    split_join_adata_by_col(path, '2L_2R_1197L_1203L_599L_600R.h5ad', 'orig.ident')
+    
+    
+def GSE184369_split_to_h5ad(path):
+    feature_path = os.path.join(path, 'old/GSE184369_features.txt')
+    features = pd.read_csv(feature_path, header=None)
+    features[1] = features[0]
+    features[0] = ['Unspecified' for _ in range(len(features))]
+    features[2] = ['Unspecified' for _ in range(len(features))]
+    features.to_csv(os.path.join(path, 'old/new_features.tsv'), sep='\t', index=False, header=False)
+    
+    mex_path = os.path.join(path, 'mex')
+    adata = sc.read_10x_mtx(mex_path, gex_only=False)
+    adata.obs['sample'] = [i.split('-')[0] for i in adata.obs.index]
+    adata.obs.index = [i.split('-')[1] for i in adata.obs.index]
+    samples = np.unique(adata.obs['sample'])
+    for sample in samples:
+        sample_adata = adata[adata.obs['sample'] == sample]
+        try:
+            #write_10X_h5(sample_adata, os.path.join(path, f'{sample}.h5'))
+            sample_adata.write_h5ad(os.path.join(path, f'{sample}.h5ad'))
+            #write_10X_h5(sample_adata, os.path.join(path, f'{sample}.h5'))
+        except:
+            sample_adata.__dict__['_raw'].__dict__['_var'] = sample_adata.__dict__['_raw'].__dict__['_var'].rename(columns={'_index': 'features'})
+            sample_adata.write_h5ad(os.path.join(path, f'{sample}.h5ad'))
+
+
+def process_meta_df(meta_df, save_spatial_plots=True, plot_genes=False):
+    for index, row in tqdm(meta_df.iterrows(), total=len(meta_df)):
+        path = _get_path_from_meta_row(row)
+        adata = read_and_save(path, save_plots=save_spatial_plots, plot_genes=plot_genes)
+        
+
+def create_meta_release(meta_df: pd.DataFrame, version: version.Version, update_pixel_size=False):
+    META_RELEASE_DIR = '/mnt/sdb1/paul/meta_releases'
+    
+    if update_pixel_size:
+        for index, row in tqdm(meta_df.iterrows(), total=len(meta_df)):
+            path = _get_path_from_meta_row(row)
+            f = open(os.path.join(path, 'processed', 'metrics.json'))
+            metrics = json.load(f)
+            meta_df.loc[index]['pixel_size_um_embedded'] = metrics['pixel_size_um_embedded']
+            meta_df.loc[index]['pixel_size_um_estimated'] = metrics['pixel_size_um_estimated']
+        
+    release_path = os.path.join(META_RELEASE_DIR, f'HEST_meta_v{str(version)}')
+    if os.path.exists(release_path):
+        raise Exception(f'meta already exists at path {release_path}')
+    meta_df.to_csv(META_RELEASE_DIR, index=False)
 
 
 def _extract_tar_gz(file_path, extract_path):
@@ -165,9 +340,12 @@ def downsample_image(img_path, target_resolution = 10, save_image = False, outpu
     return img_downsampled
 
 
-def _find_first_file_endswith(dir, suffix, exclude=''):
+def _find_first_file_endswith(dir, suffix, exclude='', anywhere=False):
     files_dir = os.listdir(dir)
-    matching = [file for file in files_dir if file.endswith(suffix) and file != exclude]
+    if anywhere:
+        matching = [file for file in files_dir if suffix in file and file != exclude]
+    else:
+        matching = [file for file in files_dir if file.endswith(suffix) and file != exclude]
     if len(matching) == 0:
         return None
     else:
@@ -258,9 +436,12 @@ def filter_adata(adata):
 
 def write_wsi(img, save_path, meta_dict, use_embedded_size=False):
     pixel_size = meta_dict['pixel_size_um_estimated']
-    pixel_size_embedded = meta_dict['pixel_size_um_embedded']
-    if use_embedded_size:
-        pixel_size = pixel_size_embedded
+    #pixel_size_embedded = meta_dict['pixel_size_um_embedded']
+    #if use_embedded_size:
+    #    pixel_size = pixel_size_embedded
+    if pixel_size is None:
+        pixel_size = meta_dict['pixel_size_um_embedded']
+    
     
     with tifffile.TiffWriter(save_path, bigtiff=True) as tif:
         """xtratags = {
@@ -782,6 +963,7 @@ def _alignment_file_to_tissue_positions(alignment_file_path, adata):
         'imageX': 'pxl_col_in_fullres',
         'imageY': 'pxl_row_in_fullres'
     })
+    alignment_df['in_tissue'] = [True for _ in range(len(alignment_df))]
 
     spatial_aligned = _find_slide_version(alignment_df, adata)
     return spatial_aligned

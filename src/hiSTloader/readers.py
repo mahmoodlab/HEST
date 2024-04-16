@@ -5,11 +5,12 @@ import numpy as np
 import scanpy as sc
 import pandas as pd
 import shutil
+import traceback
 from PIL import Image
 import matplotlib.pyplot as plt
 from matplotlib import rcParams
 from tqdm import tqdm
-from helpers import _find_first_file_endswith, _helper_mex, _txt_matrix_to_adata, \
+from src.hiSTloader.helpers import _find_first_file_endswith, _helper_mex, _txt_matrix_to_adata, \
     _raw_count_to_adata, GSE234047_to_h5, GSE180128_to_h5, GSE203165_to_adata, _load_image, \
     _align_tissue_positions, _alignment_file_to_tissue_positions, autoalign_with_fiducials, \
     _find_pixel_size_from_spot_coords, _register_downscale_img, _metric_file_do_dict, \
@@ -38,7 +39,7 @@ class STObject:
         self.adata = adata
         self.img = img
         self.meta = meta
-        self._verify_format(self, adata)
+        self._verify_format(adata)
         
     
     def save_spatial_plot(self, save_path: str):
@@ -58,6 +59,7 @@ class STObject:
         try:
             self.adata.write(os.path.join(path, 'aligned_adata.h5ad'))
         except:
+            #traceback.print_exc()
             # workaround from https://github.com/theislab/scvelo/issues/255
             self.adata.__dict__['_raw'].__dict__['_var'] = self.adata.__dict__['_raw'].__dict__['_var'].rename(columns={'_index': 'features'})
             self.adata.write(os.path.join(path, 'aligned_adata.h5ad'))
@@ -90,10 +92,50 @@ class STObject:
         pixel_size_embedded = self.meta['pixel_size_um_embedded']
         pixel_size_estimated = self.meta['pixel_size_um_estimated']
         
-        _plot_verify_pixel_size(downscaled_img, down_fact, pixel_size_embedded, pixel_size_estimated, os.path.join(path, 'pixel_size_vis.png'))
+        
+        #_plot_verify_pixel_size(downscaled_img, down_fact, pixel_size_embedded, pixel_size_estimated, os.path.join(path, 'pixel_size_vis.png'))
+        use_embedded = not self.save_positions
+        
+        write_wsi(self.img, os.path.join(path, ALIGNED_HE_FILENAME), self.meta, use_embedded_size=use_embedded)
         
         
-        write_wsi(self.img, os.path.join(path, ALIGNED_HE_FILENAME), self.meta)
+    def plot_genes(self, path, top_k=300):
+        #self.adata.obs['in_tissue_cat'] = self.adata.obs['in_tissue_cat'].astype('category')
+        #sc.tl.rank_genes_groups(self.adata, groupby='in_tissue', method='wilcoxon')
+        sums = np.array(np.sum(self.adata.X, axis=0))[0]
+
+        # Sort genes based on variability
+        top_genes_mask = np.argsort(-sums)[:top_k]  # Sort in descending order
+        top_genes = self.adata.var_names[top_genes_mask]
+        
+        
+        print('saving gene plots...')
+        FIGSIZE = (15, 5)
+        old_figsize = rcParams["figure.figsize"]
+        rcParams["figure.figsize"] = FIGSIZE
+        os.makedirs(os.path.join(path, 'gene_plots'), exist_ok=True)
+        if os.path.exists(os.path.join(path, 'gene_bar_plots')):
+            # Remove the directory if it exists
+            shutil.rmtree(os.path.join(path, 'gene_bar_plots'))
+        os.makedirs(os.path.join(path, 'gene_bar_plots'), exist_ok=True)
+
+        #gene_names = [name for name in self.adata.var_names if ('BLANK' not in name and 'NegControl' not in name)]
+        gene_names = top_genes
+
+        adata_df = self.adata.to_df()
+        for gene_name in tqdm(gene_names):
+            col = adata_df[gene_name]
+            plt.close()
+            #sc.pl.spatial(adata, show=None, img_key="downscaled_fullres", color=gene_name)
+            plt.hist(col.values, bins=50, range=(0, 2000))
+
+            # Add labels and title
+            plt.ylabel(f'{gene_name} count per spot')
+            
+            plt.savefig(os.path.join(path, 'gene_bar_plots', f'{gene_name}.png'))
+            plt.close()  # Close the plot to free memory
+        rcParams["figure.figsize"] = old_figsize
+
         
 
 class Reader:
@@ -151,6 +193,8 @@ class VisiumReader(Reader):
         alignment_path = _find_first_file_endswith(path, 'alignment_file.json')
         if alignment_path is None:
             alignment_path = _find_first_file_endswith(path, 'alignment.json')
+        if alignment_path is None:
+            alignment_path = _find_first_file_endswith(path, 'alignment', anywhere=True)
         if alignment_path is None and os.path.exists(os.path.join(path, 'spatial')):
             alignment_path = _find_first_file_endswith(os.path.join(path, 'spatial'), 'autoalignment.json')
         if alignment_path is None:
@@ -222,7 +266,6 @@ class VisiumReader(Reader):
             raw_count_path=raw_count_path,
             GSE234047_count_path=GSE234047_count_path,
             GSE180128_count_path=GSE180128_count_path,
-            GSE167096_count_path=GSE167096_count_path,
             GSE203165_count_path=GSE203165_count_path,
             seurat_h5_path=seurat_h5_path,
             metric_file_path=metric_file_path,
@@ -249,11 +292,9 @@ class VisiumReader(Reader):
         alignment_file_path: str = None, 
         mex_path: str = None,
         custom_matrix_path: str = None,
-        downsample_factor = None,
         raw_count_path: str = None,
         GSE234047_count_path: str = None,
         GSE180128_count_path: str = None,
-        GSE167096_count_path: str = None,
         GSE203165_count_path: str = None,
         seurat_h5_path: str = None,
         metric_file_path: str = None,
@@ -452,8 +493,113 @@ class STReader(Reader):
         return st_object
     
     
-    def read(self, **options) -> STObject:
-        return _read_ST(options)
+    def read(
+        self,
+        meta_table_path=None, 
+        raw_counts_path=None, 
+        img_path=None, 
+        spot_coord_path=None,
+        transform_path=None, 
+        ADT_data=False, 
+        is_GSE144239=False, 
+        custom_adata=None
+    ) -> STObject:
+        #raw_counts = pd.read_csv(raw_counts_path, sep='\t')
+        img, pixel_size_embedded = _load_image(img_path)
+        
+        if is_GSE144239:
+            raw_counts = pd.read_csv(raw_counts_path, sep='\t', index_col=0)
+            spot_coord = pd.read_csv(spot_coord_path, sep='\t')
+            spot_coord.index = spot_coord['x'].astype(str) + ['x' for _ in range(len(spot_coord))] + spot_coord['y'].astype(str)
+            merged = pd.merge(spot_coord, raw_counts, left_index=True, right_index=True)
+            raw_counts = raw_counts.reindex(merged.index)
+            adata = sc.AnnData(raw_counts)
+            col1 = merged['pixel_x'].values
+            col2 = merged['pixel_y'].values
+            matrix = (np.vstack((col1, col2))).T
+            
+        elif custom_adata is not None:
+            adata = custom_adata
+            matrix = adata.obsm['spatial']
+        
+        elif ADT_data:
+            basedir = os.path.dirname(img_path)
+            # combine spot coordinates into a single dataframe
+            pre_adt_path= _find_first_file_endswith(basedir, 'pre-ADT.tsv')
+            post_adt_path = _find_first_file_endswith(basedir, 'postADT.tsv')
+            if post_adt_path is None:
+                post_adt_path = _find_first_file_endswith(basedir, 'post-ADT.tsv')
+            counts = pd.read_csv(raw_counts_path, index_col=0, sep='\t')
+            pre_adt = pd.read_csv(pre_adt_path, sep='\t')
+            post_adt = pd.read_csv(post_adt_path, sep='\t')
+            merged_coords = pd.concat([pre_adt, post_adt], ignore_index=True)
+            merged_coords.index = [str(x) + 'x' + str(y) for x, y in zip(merged_coords['x'], merged_coords['y'])]
+            merged = pd.merge(merged_coords, counts, left_index=True, right_index=True, how='inner')
+            counts = counts.reindex(merged.index)
+            adata = sc.AnnData(counts)
+            col1 = merged['pixel_x'].values
+            col2 = merged['pixel_y'].values
+            matrix = (np.vstack((col1, col2))).T
+            
+        elif transform_path is not None:
+            # for "Visualization and analysis of gene expression in tissue sections by spatial transcriptomics"
+            adata = align_ST_counts_with_transform(raw_counts_path, transform_path)
+            matrix = adata.obsm['spatial']
+        else:
+            raw_counts = pd.read_csv(raw_counts_path, sep='\t')
+            if 'Unnamed: 0' in raw_counts.columns:
+                raw_counts.index = raw_counts['Unnamed: 0']
+                raw_counts = raw_counts.drop(['Unnamed: 0'], axis=1)
+            if meta_table_path is not None:
+                meta = pd.read_csv(meta_table_path, sep='\t', index_col=0)
+                merged = pd.merge(meta, raw_counts, left_index=True, right_index=True, how='inner')
+                raw_counts = raw_counts.reindex(merged.index)
+                raw_counts.index = [idx.split('_')[1] for idx in raw_counts.index]
+                adata = sc.AnnData(raw_counts)
+                col1 = merged['HE_X'].values
+                col2 = merged['HE_Y'].values
+                matrix = (np.vstack((col1, col2))).T
+            elif spot_coord_path is not None:
+                #spot_coord = pd.read_csv(spot_coord_path, sep='\t', index_col=0)
+                spot_coord = pd.read_csv(spot_coord_path, sep=',', index_col=0)
+                merged = pd.merge(spot_coord, raw_counts, left_index=True, right_index=True, how='inner')
+                raw_counts = raw_counts.reindex(merged.index)
+                adata = sc.AnnData(raw_counts) 
+
+                col1 = merged['X'].values
+                col2 = merged['Y'].values
+                    
+                matrix = (np.vstack((col1, col2))).T
+            else:
+                matrix = raw_counts_to_pixel(raw_counts, img)
+                raw_counts = raw_counts.transpose()
+                raw_counts.index = [idx.replace('_', 'x') for idx in raw_counts.index]
+                adata = sc.AnnData(raw_counts)
+        
+        adata.obsm['spatial'] = matrix
+        
+        # TODO get real pixel size
+        my_df = pd.DataFrame(adata.obsm['spatial'], adata.to_df().index, columns=['pxl_col_in_fullres', 'pxl_row_in_fullres'])
+        my_df['array_row'] = [round(float(idx.split('x')[0])) for idx in my_df.index]
+        my_df['array_col'] = [round(float(idx.split('x')[1])) for idx in my_df.index]
+        
+        # TODO might not be precise if we use round on the column and row
+        pixel_size, spot_estimate_dist = _find_pixel_size_from_spot_coords(my_df, inter_spot_dist=200, grid_pattern=True)
+        _register_downscale_img(adata, img, pixel_size, spot_size=100.)
+        
+        dict = {}
+        dict['pixel_size_um_embedded'] = pixel_size_embedded
+        dict['pixel_size_um_estimated'] = pixel_size
+        dict['fullres_height'] = img.shape[0]
+        dict['fullres_width'] = img.shape[1]
+        dict['spots_under_tissue'] = len(adata.obs)
+        dict['spot_estimate_dist'] = int(spot_estimate_dist)
+        
+        print(f"'pixel_size_um_embedded' is {pixel_size_embedded}")
+        print(f"'pixel_size_um_estimated' is {pixel_size} estimated by averaging over {spot_estimate_dist} spots")
+        print(f"'spots_under_tissue' is {len(adata.obs)}")
+        
+        return STObject(adata, img, dict)
     
     
 class XeniumReader(Reader):
@@ -462,7 +608,7 @@ class XeniumReader(Reader):
                 
         alignment_path = None
         for file in os.listdir(path):
-            if file.endswith('he_imagealignment.csv'):
+            if file.endswith('imagealignment.csv'):
                 alignment_path = os.path.join(path, file)
         
         st_object = self.read(
@@ -470,8 +616,7 @@ class XeniumReader(Reader):
             feature_matrix_path=os.path.join(path, 'cell_feature_matrix.h5'), 
             transcripts_path=os.path.join(path, 'transcripts.parquet'), 
             img_path=os.path.join(path, img_filename), 
-            alignment_file_path=alignment_path, 
-            in_tissue_only=True
+            alignment_file_path=alignment_path
         )
         
         os.makedirs(os.path.join(path, 'processed'), exist_ok=True)
@@ -483,8 +628,110 @@ class XeniumReader(Reader):
         return st_object
     
     
-    def read(self, **options) -> STObject:
-        return _read_10x_xenium(options)
+    def read(
+        self,
+        path: str, 
+        feature_matrix_path: str, 
+        transcripts_path: str,
+        img_path: str,
+        alignment_file_path: str,
+        plot_genes: bool = False
+    ) -> STObject:
+        basedir = os.path.dirname(img_path)
+        
+        experiment_path = _find_first_file_endswith(path, 'experiment.xenium')
+        with open(experiment_path) as f:
+            pixel_size_embedded = json.load(f)['pixel_size']
+        
+        
+        dict = {}
+        dict['pixel_size_um_embedded'] = pixel_size_embedded
+        dict['pixel_size_um_estimated'] = None
+        
+        cur_dir = os.path.dirname(transcripts_path)   
+        
+        adata = sc.read_10x_h5(
+            filename=feature_matrix_path
+        )
+        
+        #cprobes = (
+        #    adata.obs["control_probe_counts"].sum() / adata.obs["total_counts"].sum() * 100
+        #)
+        #cwords = (
+        #    adata.obs["control_codeword_counts"].sum() / adata.obs["total_counts"].sum() * 100
+        #)
+        
+        #dict['neg_dna_probe_count_per'] = cprobes
+        #dict['neg_decoding_probe_per'] = cwords
+        
+        img, pixel_size_embedded = _load_image(img_path)
+        
+        experiment_file = open(os.path.join(cur_dir, 'experiment.xenium'))
+        dict_exp = json.load(experiment_file)
+
+        pixel_size = dict_exp['pixel_size']
+        
+        dict = {**dict, **dict_exp}
+        
+        if os.path.exists(os.path.join(cur_dir, 'cached_pseudo_visium.h5ad')):
+            adata = sc.read_h5ad(os.path.join(cur_dir, 'cached_pseudo_visium.h5ad'))
+        else:
+            
+            df_transcripts = pd.read_parquet(transcripts_path)
+            
+            if alignment_file_path is not None:
+                print('found an alignment file, aligning transcripts...')
+                alignment_file = pd.read_csv(alignment_file_path, header=None)
+                alignment_matrix = alignment_file.values
+                alignment_matrix = np.linalg.inv(alignment_matrix)
+                alignment_matrix[0][2] *= pixel_size
+                alignment_matrix[1][2] *= pixel_size
+                coords = np.column_stack((df_transcripts["x_location"].values, df_transcripts["y_location"].values, np.ones((len(df_transcripts),))))
+                aligned = (alignment_matrix @ coords.T).T
+                df_transcripts['y_location'] = aligned[:,1]
+                df_transcripts['x_location'] = aligned[:,0]
+                
+            
+            df_transcripts["x_location"] = df_transcripts["x_location"] / pixel_size
+            df_transcripts["y_location"] = df_transcripts["y_location"] / pixel_size
+            
+            
+            adata = xenium_to_pseudo_visium(df_transcripts, pixel_size)
+        
+            _register_downscale_img(adata, img, pixel_size)
+            
+            adata.write_h5ad(os.path.join(cur_dir, 'cached_pseudo_visium.h5ad'))
+            
+
+        
+        if plot_genes:
+            print('saving gene plots...')
+            FIGSIZE = (15, 5)
+            old_figsize = rcParams["figure.figsize"]
+            rcParams["figure.figsize"] = FIGSIZE
+            os.makedirs(os.path.join(cur_dir, 'gene_plots'), exist_ok=True)
+            os.makedirs(os.path.join(cur_dir, 'gene_bar_plots'), exist_ok=True)
+
+            gene_names = [name for name in adata.var_names if ('BLANK' not in name and 'NegControl' not in name)]
+
+            adata_df = adata.to_df()
+            for gene_name in tqdm(gene_names):
+                col = adata_df[gene_name]
+                plt.close()
+                #sc.pl.spatial(adata, show=None, img_key="downscaled_fullres", color=gene_name)
+                plt.hist(col.values, bins=50, range=(0, 2000))
+
+                # Add labels and title
+                plt.ylabel(f'{gene_name} count per spot')
+                
+                plt.savefig(os.path.join(cur_dir, 'gene_bar_plots', f'{gene_name}.png'))
+                plt.close()  # Close the plot to free memory
+            rcParams["figure.figsize"] = old_figsize
+            
+
+        st_object =  STObject(adata, img, dict)
+        st_object.save_positions = False
+        return st_object
     
 
 def reader_factory(path: str) -> Reader:
@@ -496,229 +743,16 @@ def reader_factory(path: str) -> Reader:
     elif 'xenium' in path:
         return XeniumReader()
     elif 'st' in path:
-        return STReader
+        return STReader()
         
-
-def _read_10x_xenium(
-    path: str, 
-    feature_matrix_path: str, 
-    #cell_csv_path: str, 
-    transcripts_path: str,
-    img_path: str,
-    alignment_file_path: str, 
-    in_tissue_only = True,
-    save_gene_plot = True,
-    plot_genes: bool = False
-) -> STObject:
-    basedir = os.path.dirname(img_path)
     
-    experiment_path = _find_first_file_endswith(path, 'experiment.xenium')
-    with open(experiment_path) as f:
-        pixel_size_embedded = json.load(f)['pixel_size']
-    
-    
-    dict = {}
-    dict['pixel_size_um_embedded'] = pixel_size_embedded
-    dict['pixel_size_um_estimated'] = None
-    
-    cur_dir = os.path.dirname(transcripts_path)   
-    
-    adata = sc.read_10x_h5(
-        filename=feature_matrix_path
-    )
-    
-    #cprobes = (
-    #    adata.obs["control_probe_counts"].sum() / adata.obs["total_counts"].sum() * 100
-    #)
-    #cwords = (
-    #    adata.obs["control_codeword_counts"].sum() / adata.obs["total_counts"].sum() * 100
-    #)
-    
-    #dict['neg_dna_probe_count_per'] = cprobes
-    #dict['neg_decoding_probe_per'] = cwords
-    
-    img, pixel_size_embedded = _load_image(img_path)
-    
-    experiment_file = open(os.path.join(cur_dir, 'experiment.xenium'))
-    dict_exp = json.load(experiment_file)
-
-    pixel_size = dict_exp['pixel_size']
-    
-    dict = {**dict, **dict_exp}
-    
-    if os.path.exists(os.path.join(cur_dir, 'cached_pseudo_visium.h5ad')):
-        adata = sc.read_h5ad(os.path.join(cur_dir, 'cached_pseudo_visium.h5ad'))
-    else:
-        
-        df_transcripts = pd.read_parquet(transcripts_path)
-        
-        alignment_file = _find_first_file_endswith(cur_dir, 'imagealignment.csv')
-        if alignment_file is not None:
-            print('found an alignment file, aligning transcripts...')
-            alignment_file = pd.read_csv(alignment_file, header=None)
-            alignment_matrix = alignment_file.values
-            alignment_matrix = np.linalg.inv(alignment_matrix)
-            alignment_matrix[0][2] *= pixel_size
-            alignment_matrix[1][2] *= pixel_size
-            coords = np.column_stack((df_transcripts["x_location"].values, df_transcripts["y_location"].values, np.ones((len(df_transcripts),))))
-            aligned = (alignment_matrix @ coords.T).T
-            df_transcripts['y_location'] = aligned[:,1]
-            df_transcripts['x_location'] = aligned[:,0]
-            
-        
-        df_transcripts["x_location"] = df_transcripts["x_location"] / pixel_size
-        df_transcripts["y_location"] = df_transcripts["y_location"] / pixel_size
-        
-        
-        adata = xenium_to_pseudo_visium(df_transcripts, pixel_size)
-    
-        _register_downscale_img(adata, img, pixel_size)
-        
-        adata.write_h5ad(os.path.join(cur_dir, 'cached_pseudo_visium.h5ad'))
-        
-
-    
-    if plot_genes:
-        print('saving gene plots...')
-        FIGSIZE = (15, 5)
-        old_figsize = rcParams["figure.figsize"]
-        rcParams["figure.figsize"] = FIGSIZE
-        os.makedirs(os.path.join(cur_dir, 'gene_plots'), exist_ok=True)
-        os.makedirs(os.path.join(cur_dir, 'gene_bar_plots'), exist_ok=True)
-
-        gene_names = [name for name in adata.var_names if ('BLANK' not in name and 'NegControl' not in name)]
-
-        adata_df = adata.to_df()
-        for gene_name in tqdm(gene_names):
-            col = adata_df[gene_name]
-            plt.close()
-            #sc.pl.spatial(adata, show=None, img_key="downscaled_fullres", color=gene_name)
-            plt.hist(col.values, bins=50, range=(0, 2000))
-
-            # Add labels and title
-            plt.ylabel(f'{gene_name} count per spot')
-            
-            plt.savefig(os.path.join(cur_dir, 'gene_bar_plots', f'{gene_name}.png'))
-            plt.close()  # Close the plot to free memory
-        rcParams["figure.figsize"] = old_figsize
-        
-
-    return STObject(adata, img, dict)
-
-
-def _read_ST(
-    meta_table_path=None, 
-    raw_counts_path=None, 
-    img_path=None, 
-    spot_coord_path=None,
-    transform_path=None, 
-    ADT_data=False, 
-    is_GSE144239=False, 
-    custom_adata=None
-):
-    #raw_counts = pd.read_csv(raw_counts_path, sep='\t')
-    img, pixel_size_embedded = _load_image(img_path)
-    
-    if is_GSE144239:
-        raw_counts = pd.read_csv(raw_counts_path, sep='\t', index_col=0)
-        spot_coord = pd.read_csv(spot_coord_path, sep='\t')
-        spot_coord.index = spot_coord['x'].astype(str) + ['x' for _ in range(len(spot_coord))] + spot_coord['y'].astype(str)
-        merged = pd.merge(spot_coord, raw_counts, left_index=True, right_index=True)
-        raw_counts = raw_counts.reindex(merged.index)
-        adata = sc.AnnData(raw_counts)
-        col1 = merged['pixel_x'].values
-        col2 = merged['pixel_y'].values
-        matrix = (np.vstack((col1, col2))).T
-        
-    elif custom_adata is not None:
-        adata = custom_adata
-        matrix = adata.obsm['spatial']
-    
-    elif ADT_data:
-        basedir = os.path.dirname(img_path)
-        # combine spot coordinates into a single dataframe
-        pre_adt_path= _find_first_file_endswith(basedir, 'pre-ADT.tsv')
-        post_adt_path = _find_first_file_endswith(basedir, 'postADT.tsv')
-        if post_adt_path is None:
-            post_adt_path = _find_first_file_endswith(basedir, 'post-ADT.tsv')
-        counts = pd.read_csv(raw_counts_path, index_col=0, sep='\t')
-        pre_adt = pd.read_csv(pre_adt_path, sep='\t')
-        post_adt = pd.read_csv(post_adt_path, sep='\t')
-        merged_coords = pd.concat([pre_adt, post_adt], ignore_index=True)
-        merged_coords.index = [str(x) + 'x' + str(y) for x, y in zip(merged_coords['x'], merged_coords['y'])]
-        merged = pd.merge(merged_coords, counts, left_index=True, right_index=True, how='inner')
-        counts = counts.reindex(merged.index)
-        adata = sc.AnnData(counts)
-        col1 = merged['pixel_x'].values
-        col2 = merged['pixel_y'].values
-        matrix = (np.vstack((col1, col2))).T
-        
-    elif transform_path is not None:
-        # for "Visualization and analysis of gene expression in tissue sections by spatial transcriptomics"
-        adata = align_ST_counts_with_transform(raw_counts_path, transform_path)
-        matrix = adata.obsm['spatial']
-    else:
-        raw_counts = pd.read_csv(raw_counts_path, sep='\t')
-        if 'Unnamed: 0' in raw_counts.columns:
-            raw_counts.index = raw_counts['Unnamed: 0']
-            raw_counts = raw_counts.drop(['Unnamed: 0'], axis=1)
-        if meta_table_path is not None:
-            meta = pd.read_csv(meta_table_path, sep='\t', index_col=0)
-            merged = pd.merge(meta, raw_counts, left_index=True, right_index=True, how='inner')
-            raw_counts = raw_counts.reindex(merged.index)
-            raw_counts.index = [idx.split('_')[1] for idx in raw_counts.index]
-            adata = sc.AnnData(raw_counts)
-            col1 = merged['HE_X'].values
-            col2 = merged['HE_Y'].values
-            matrix = (np.vstack((col1, col2))).T
-        elif spot_coord_path is not None:
-            #spot_coord = pd.read_csv(spot_coord_path, sep='\t', index_col=0)
-            spot_coord = pd.read_csv(spot_coord_path, sep=',', index_col=0)
-            merged = pd.merge(spot_coord, raw_counts, left_index=True, right_index=True, how='inner')
-            raw_counts = raw_counts.reindex(merged.index)
-            adata = sc.AnnData(raw_counts) 
-
-            col1 = merged['X'].values
-            col2 = merged['Y'].values
-                
-            matrix = (np.vstack((col1, col2))).T
-        else:
-            matrix = raw_counts_to_pixel(raw_counts, img)
-            raw_counts = raw_counts.transpose()
-            raw_counts.index = [idx.replace('_', 'x') for idx in raw_counts.index]
-            adata = sc.AnnData(raw_counts)
-    
-    adata.obsm['spatial'] = matrix
-    
-    # TODO get real pixel size
-    my_df = pd.DataFrame(adata.obsm['spatial'], adata.to_df().index, columns=['pxl_col_in_fullres', 'pxl_row_in_fullres'])
-    my_df['array_row'] = [round(float(idx.split('x')[0])) for idx in my_df.index]
-    my_df['array_col'] = [round(float(idx.split('x')[1])) for idx in my_df.index]
-    
-    # TODO might not be precise if we use round on the column and row
-    pixel_size, spot_estimate_dist = _find_pixel_size_from_spot_coords(my_df, inter_spot_dist=200, grid_pattern=True)
-    _register_downscale_img(adata, img, pixel_size, spot_size=100.)
-    
-    dict = {}
-    dict['pixel_size_um_embedded'] = pixel_size_embedded
-    dict['pixel_size_um_estimated'] = pixel_size
-    dict['fullres_height'] = img.shape[0]
-    dict['fullres_width'] = img.shape[1]
-    dict['spots_under_tissue'] = len(adata.obs)
-    dict['spot_estimate_dist'] = int(spot_estimate_dist)
-    
-    print(f"'pixel_size_um_embedded' is {pixel_size_embedded}")
-    print(f"'pixel_size_um_estimated' is {pixel_size} estimated by averaging over {spot_estimate_dist} spots")
-    print(f"'spots_under_tissue' is {len(adata.obs)}")
-    
-    return STObject(adata, img, dict)
-    
-    
-def read_and_save(path, save_plots=True):
+def read_and_save(path, save_plots=True, plot_genes=False):
     print(f'Reading from {path}...')
     reader = reader_factory(path)
-    st_object = reader.read()
+    st_object = reader.auto_read(path)
     save_path = os.path.join(path, 'processed')
-    st_object.save(save_path, save_plots)
+    st_object.save(save_path)
     if save_plots:
         st_object.save_spatial_plot(save_path)
+    if plot_genes:
+        st_object.plot_genes(save_path, top_k=300)

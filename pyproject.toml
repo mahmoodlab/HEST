@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hest"
+version = "0.0.1"
+dependencies = []
+
+[tool.setuptools.packages.find]
+# All the following settings are optional:
+where = ["src"]
