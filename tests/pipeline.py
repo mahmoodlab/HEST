@@ -1,6 +1,6 @@
 import pandas as pd
-from src.hiSTloader.helpers import  create_meta_release, process_meta_df, copy_processed_images
-from src.hiSTloader.readers import read_and_save
+from src.hest.helpers import  create_meta_release, process_meta_df, copy_processed_images
+from src.hest.readers import read_and_save
 from packaging import version
 
 
