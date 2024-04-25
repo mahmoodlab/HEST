@@ -211,17 +211,6 @@ def autoalign_with_fiducials(fullres_img, save_dir, name=''):
     if len(result.boxes) == 0:
         raise Exception("couldn't find any fiducials")
 
-    
-    #diffs = []
-    #for box in result.boxes:
-    #    fid_name = id_to_name[int(box.cls)]
-    #    gt_orientation = orientations[fid_name]
-    #    actual_orientation = _get_orientation(box, result.boxes)
-    #    diff = gt_orientation - actual_orientation
-    #    diffs.append(diff)
-
-    #unique, counts = np.unique(diffs, return_counts=True)
-    #highest = unique[np.argmax(counts)]
 
     # discard fiducials prediction that didn't agree
     # with the majority vote

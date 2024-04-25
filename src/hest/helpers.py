@@ -1,3 +1,4 @@
+from enum import Enum
 import os
 
 import pandas as pd
@@ -24,13 +25,24 @@ import h5py
 import shutil
 import gzip
 from scipy import sparse
-from .align import autoalign_with_fiducials
+
+from .autoalign import autoalign_with_fiducials
 import seaborn as sns
 import spatialdata_io
 from spatialdata._io import write_image
 import spatialdata_plot
 from packaging import version
+import subprocess
+import concurrent.futures
 
+
+Image.MAX_IMAGE_PIXELS = 93312000000
+
+
+class SpotPacking(Enum):
+    ORANGE_CRATE_PACKING = 0
+    GRID_PACKING = 1
+    
 
 def _copy_to_right_subfolder(dataset_title):
     prefix = f'/mnt/sdb1/paul/data/samples/ST/{dataset_title}'
@@ -53,7 +65,7 @@ def _get_path_from_meta_row(row):
     if isinstance(subseries, float):
         subseries = ""
         
-    tech = row['st_instrument']
+    tech = row['st_technology']
     if isinstance(tech, float):
         tech = 'visium'
     elif 'visium' in tech.lower() and ('visium hd' not in tech.lower()):
@@ -70,8 +82,8 @@ def _get_path_from_meta_row(row):
     return path   
 
 
-def copy_processed_images(dest, meta_df, cp_spatial=True, cp_downscaled=True):
-    for index, row in meta_df.iterrows():
+def copy_processed_images_deprecated(dest, meta_df, cp_spatial=True, cp_downscaled=True, cp_fullres=True):
+    for index, row in tqdm(meta_df.iterrows(), total=len(meta_df)):
         
         try:
             path = _get_path_from_meta_row(row)
@@ -89,20 +101,23 @@ def copy_processed_images(dest, meta_df, cp_spatial=True, cp_downscaled=True):
         print(f"copying {row['id']}")
         if cp_downscaled:
             path_downscaled = os.path.join(path, 'downscaled_fullres.jpeg')
+            os.makedirs(os.path.join(dest, 'downscaled'), exist_ok=True)
             path_dest_downscaled = os.path.join(dest, 'downscaled', row['id'] + '_downscaled_fullres.jpeg')
             shutil.copy(path_downscaled, path_dest_downscaled)
         if cp_spatial:
             path_spatial = os.path.join(path, 'spatial_plots.png')
+            os.makedirs(os.path.join(dest, 'spatial_plots'), exist_ok=True)
             path_dest_spatial = os.path.join(dest, 'spatial_plots', row['id'] + '_spatial_plots.png')
             shutil.copy(path_spatial, path_dest_spatial)
-        path_dest_fullres = os.path.join(dest, 'fullres', row['id'] + '_aligned_fullres_HE.ome.tif')
         
+        if cp_fullres:
+            os.makedirs(os.path.join(dest, 'fullres'), exist_ok=True)
+            path_dest_fullres = os.path.join(dest, 'fullres', row['id'] + '_aligned_fullres_HE.ome.tif')
+            shutil.copy(path_fullres, path_dest_fullres)
 
         
         #path_downscaled = os.path.join(path, 'downscaled_fullres.jpeg')
         #path_dest_downscaled = os.path.join(dest, 'downscaled', row['id'] + '_downscaled_fullres.jpeg')
-        
-        shutil.copy(path_fullres, path_dest_fullres)
         
 
 def open_fiftyone():
@@ -111,29 +126,38 @@ def open_fiftyone():
     session = fo.launch_app(dataset)    
     
     
-def create_joined_gene_plots(meta):
+def create_joined_gene_plots(meta, gene_plot=False):
     # determine common genes
+    if gene_plot:
+        plot_dir = 'gene_plots'
+    else:
+        plot_dir = 'gene_bar_plots'
     common_genes = None
     n = len(meta)
     for index, row in meta.iterrows():
         path = _get_path_from_meta_row(row)
-        gene_files = np.array(os.listdir(os.path.join(path, 'processed', 'gene_bar_plots')))
+        gene_files = np.array(os.listdir(os.path.join(path, 'processed', plot_dir)))
         if common_genes is None:
             common_genes = gene_files
         else:
             common_genes = np.intersect1d(common_genes, gene_files)
             
+    my_dir = '/mnt/sdb1/paul/gene_plot_IDC_xenium'
+    os.makedirs(my_dir, exist_ok=True)
     for gene in tqdm(common_genes):
-        fig, axes = plt.subplots(n, 1)
+        if gene_plot:
+            fig, axes = plt.subplots(1, n)
+        else:
+            fig, axes = plt.subplots(n, 1)
         i = 0
         for index, row in meta.iterrows():
             path = _get_path_from_meta_row(row)
-            gene_path = os.path.join(path, 'processed', 'gene_bar_plots', gene)
+            gene_path = os.path.join(path, 'processed', plot_dir, gene)
             image = Image.open(gene_path)
             axes[i].imshow(image)
             axes[i].axis('off')
             i += 1
-        plt.savefig(os.path.join('/mnt/sdb1/paul/gene_subplots_READ', f'{gene}_subplot.png'), bbox_inches='tight', pad_inches=0, dpi=600)
+        plt.savefig(os.path.join(my_dir, f'{gene}_subplot.png'), bbox_inches='tight', pad_inches=0, dpi=600)
         plt.subplots_adjust(wspace=0.1)
         plt.close()
 
@@ -181,29 +205,114 @@ def GSE184369_split_to_h5ad(path):
         except:
             sample_adata.__dict__['_raw'].__dict__['_var'] = sample_adata.__dict__['_raw'].__dict__['_var'].rename(columns={'_index': 'features'})
             sample_adata.write_h5ad(os.path.join(path, f'{sample}.h5ad'))
-
-
-def process_meta_df(meta_df, save_spatial_plots=True, plot_genes=False):
-    for index, row in tqdm(meta_df.iterrows(), total=len(meta_df)):
-        path = _get_path_from_meta_row(row)
-        adata = read_and_save(path, save_plots=save_spatial_plots, plot_genes=plot_genes)
+            
+            
+def pixel_size_to_mag(pixel_size):
+    if pixel_size <= 0.1:
+        return '>60x'
+    elif 0.1 < pixel_size and pixel_size <= 0.25:
+        return '60x'
+    elif 0.25 < pixel_size and pixel_size <= 0.5:
+        return '40x'
+    elif 0.5 < pixel_size and pixel_size <= 1:
+        return '20x'
+    elif 1 < pixel_size and pixel_size <= 4:
+        return '10x'  
+    elif 4 < pixel_size :
+        return '<10x'
+    
+    
+def _get_nan(cell, col_name):
+    val = cell[col_name]
+    if isinstance(cell[col_name], float):
+        return ''
+    else:
+        return val
         
 
-def create_meta_release(meta_df: pd.DataFrame, version: version.Version, update_pixel_size=False):
+def create_meta_release(meta_df: pd.DataFrame, version: version.Version):
     META_RELEASE_DIR = '/mnt/sdb1/paul/meta_releases'
     
-    if update_pixel_size:
-        for index, row in tqdm(meta_df.iterrows(), total=len(meta_df)):
-            path = _get_path_from_meta_row(row)
-            f = open(os.path.join(path, 'processed', 'metrics.json'))
-            metrics = json.load(f)
-            meta_df.loc[index]['pixel_size_um_embedded'] = metrics['pixel_size_um_embedded']
-            meta_df.loc[index]['pixel_size_um_estimated'] = metrics['pixel_size_um_estimated']
+    metric_subset = [
+        'pixel_size_um_embedded', 
+        'pixel_size_um_estimated', 
+        'fullres_px_width',
+        'fullres_px_height',
+        'spots_under_tissue',
+        'inter_spot_dist',
+        'spot_diameter'
+    ]
+    
+    for col in metric_subset:
+        meta_df[col] = None
         
-    release_path = os.path.join(META_RELEASE_DIR, f'HEST_meta_v{str(version)}')
+    meta_df['inter_spot_dist'] = None
+    meta_df['spot_diameter'] = None
+    meta_df['nb_genes'] = None
+    meta_df['image_filename'] = None
+    meta_df['magnification'] = None
+
+    for index, row in tqdm(meta_df.iterrows(), total=len(meta_df)):
+        path = _get_path_from_meta_row(row)
+        f = open(os.path.join(path, 'processed', 'metrics.json'))
+        metrics = json.load(f)
+        for col in metric_subset:
+            meta_df.loc[index][col] = metrics.get(col)
+        meta_df.loc[index]['image_filename'] = _sample_id_to_filename(row['id'])
+        meta_df.loc[index]['subseries'] = _get_nan(meta_df.loc[index], 'tissue') + _get_nan(meta_df.loc[index], 'disease_comment') + _get_nan(meta_df.loc[index], 'subseries')
+        
+        meta_df.loc[index]['magnification'] = pixel_size_to_mag(meta_df.loc[index]['pixel_size_um_estimated'])
+        
+        #TODO remove
+        adata = sc.read_h5ad(os.path.join(path, 'processed', 'aligned_adata.h5ad'))
+        
+        #if row['st_technology'] == 'Visium':
+        #    meta_df.loc[index]['inter_spot_dist'] = 100.
+        #    meta_df.loc[index]['spot_diameter'] = 55.
+        #elif row['st_technology'] == 'Spatial Transcriptomics':
+        #    meta_df.loc[index]['inter_spot_dist'] = 200.
+        #    meta_df.loc[index]['spot_diameter'] = 100.
+        #    if row['dataset_title'] == "Single Cell and Spatial Analysis of Human Squamous Cell Carcinoma [ST]":
+        #        meta_df.loc[index]['inter_spot_dist'] = 110.
+        #        meta_df.loc[index]['spot_diameter'] = 150.                
+        meta_df.loc[index]['nb_genes'] = len(adata.var_names)
+        
+        
+    version_s = str(version).replace('.', '_')
+    release_path = os.path.join(META_RELEASE_DIR, f'HEST_v{version_s}.csv')
     if os.path.exists(release_path):
         raise Exception(f'meta already exists at path {release_path}')
-    meta_df.to_csv(META_RELEASE_DIR, index=False)
+    
+    release_col_selection = [
+        'dataset_title',
+        'id',
+        'image_filename',
+        'organ',
+        'disease_state',
+        'oncotree_code',
+        'species',
+        'st_technology',
+        'data_publication_date',
+        'license',
+        'study_link',
+        'download_page_link1',
+        'inter_spot_dist',
+        'spot_diameter',
+        'spots_under_tissue',
+        'nb_genes',
+        'treatment_comment',
+        'pixel_size_um_embedded', 
+        'pixel_size_um_estimated', 
+        'magnification',
+        'fullres_px_width',
+        'fullres_px_height',
+        'subseries'
+    ]
+    #release_col_selection += metric_subset
+    meta_df = meta_df[release_col_selection]
+    meta_df = meta_df[meta_df['pixel_size_um_estimated'].isna() | meta_df['pixel_size_um_estimated'] < 1.15]
+    meta_df = meta_df[(meta_df['species'] == 'Mus musculus') | (meta_df['species'] == 'Homo sapiens')]  
+    meta_df.to_csv(release_path, index=False)
 
 
 def _extract_tar_gz(file_path, extract_path):
@@ -350,14 +459,6 @@ def _find_first_file_endswith(dir, suffix, exclude='', anywhere=False):
         return None
     else:
         return os.path.join(dir, matching[0])
-   
-   
-def _get_path_from_meta_row(row, root_path):
-    tech = 'visium' if 'visium' in row['10x Instrument(s)'].lower() else 'xenium'
-    if pd.isnull(row['subseries']):
-        return os.path.join(root_path, tech, row['dataset_title'])
-    else:
-        return os.path.join(root_path, tech, row['dataset_title'], row['subseries'])
     
 
 def _get_name_from_meta_row(row):
@@ -444,59 +545,17 @@ def write_wsi(img, save_path, meta_dict, use_embedded_size=False):
     
     
     with tifffile.TiffWriter(save_path, bigtiff=True) as tif:
-        """xtratags = {
-            'EstimatedPhysicalSizeX': f"{pixel_size} µm",
-            'EstimatedPhysicalSizeY': f"{pixel_size} µm",
-            'EmbeddedPhysicalSizeX': f"{pixel_size_embedded} µm",
-            'EmbeddedPhysicalSizeY': f"{pixel_size_embedded} µm",            
-        }
-        extratags = json.dumps(extratags)"""
-        
-        #metadata = {
-        # 'PhysicalSizeX': pixel_size,
-        # 'PhysicalSizeXUnit': 'µm',
-        # 'PhysicalSizeY': pixel_size,
-        # 'PhysicalSizeYUnit': 'µm'
-        #}
         options = dict(
             tile=(256, 256), 
             compression='deflate', 
             #metadata=metadata,
             resolution=(
-                1. / (pixel_size * 1e4),
-                1. / (pixel_size * 1e4)
-            )
+                1. / (pixel_size * 1e-4),
+                1. / (pixel_size * 1e-4),
+                'CENTIMETER'
+            ),
         )
-        #tif.write(img, subifds=3, description=extratags, **options)
-        tif.write(img, subifds=3, **options)
-
-        # save pyramid levels to the two subifds
-        # in production use resampling to generate sub-resolutions
-        tif.write(img[::2, ::2], subfiletype=1, **options)
-        tif.write(img[::4, ::4], subfiletype=1, **options)
-        tif.write(img[::8, ::8], subfiletype=1, **options)
-
-
-    
-def process_all(meta_df, root_path, save_plots=True):
-    #path_list = [] 
-    #for root, d_names, f_names in os.walk(root_dir):
-    #    if len(f_names) == 0 or os.path.basename(root) == 'spatial':
-    #        continue
-    #    path_list.append(root)
-    
-    adata_list = []
-    img_list = []
-    raw_bc_matrices = []
-    sample_names = []
-    tissue_positions_df_list = []
-    for _, row in tqdm(meta_df.iterrows()):
-        if not row['image']:
-            continue
-        path = _get_path_from_meta_row(row, root_path)
-        name = _get_name_from_meta_row(row)
-        sample_names.append(name)
-        read_and_save(path, save_plots)
+        tif.write(img, **options)
 
 
 def _find_biggest_img(path):
@@ -676,7 +735,7 @@ def cart_dist(start_spot, end_spot):
     return d
       
       
-def _find_pixel_size_from_spot_coords(my_df, inter_spot_dist=100., grid_pattern=False):
+def _find_pixel_size_from_spot_coords(my_df, inter_spot_dist=100., packing: SpotPacking = SpotPacking.ORANGE_CRATE_PACKING):
     df = my_df.copy()
     
     
@@ -693,7 +752,7 @@ def _find_pixel_size_from_spot_coords(my_df, inter_spot_dist=100., grid_pattern=
             end_spot = df.loc[b]
             dist_px = cart_dist(start_spot, end_spot)
             
-            div = 1 if grid_pattern else 2
+            div = 1 if packing == SpotPacking.GRID_PACKING else 2
             dist_col = abs(df.loc[b, 'array_col'] - y) // div
             
             approx_nb += 1
@@ -778,6 +837,75 @@ def _find_slide_version(alignment_df: str, adata: sc.AnnData) -> str:
         
     spatial_aligned = match_spatial_aligned.reindex(adata.obs.index)
     return spatial_aligned
+            
+
+def _sample_id_to_filename(id):
+    return id + '.tif'            
+
+            
+def _process_row(dest, row, cp_downscaled, cp_spatial, cp_pyramidal, cp_pixel_vis, cp_adata):
+    try:
+        path = _get_path_from_meta_row(row)
+    except Exception:
+        print(f'error with path {path}')
+        return
+    path = os.path.join(path, 'processed')
+    if isinstance(row['id'], float):
+        my_id = row['id']
+        raise Exception(f'invalid sample id {my_id}')
+    
+    path_fullres = os.path.join(path, 'aligned_fullres_HE.tif')
+    if not os.path.exists(path_fullres):
+        print(f"couldn't find {path}")
+        return
+    print(f"create pyramidal tiff for {row['id']}")
+    if cp_pyramidal:
+        dst = os.path.join(dest, 'pyramidal', _sample_id_to_filename(row['id']))
+        #vips_pyr_cmd = f'LD_LIBRARY_PATH="/mnt/sdb1/paul/vips-8.15.2/mybuild/lib/x86_64-linux-gnu/" /mnt/sdb1/paul/vips-8.15.2/mybuild/bin/vips tiffsave "{path_fullres}" "{dst}" --pyramid --tile --tile-width=256 --tile-height=256 --compression=deflate --bigtiff --subifd'
+        bigtiff_option = '' if isinstance(row['bigtiff'], float) or not row['bigtiff']  else '--bigtiff'
+        vips_pyr_cmd = f'vips tiffsave "{path_fullres}" "{dst}" --pyramid --tile --tile-width=256 --tile-height=256 --compression=deflate {bigtiff_option}'
+        subprocess.call(vips_pyr_cmd, shell=True)
+    if cp_downscaled:
+        path_downscaled = os.path.join(path, 'downscaled_fullres.jpeg')
+        os.makedirs(os.path.join(dest, 'downscaled'), exist_ok=True)
+        path_dest_downscaled = os.path.join(dest, 'downscaled', row['id'] + '_downscaled_fullres.jpeg')
+        shutil.copy(path_downscaled, path_dest_downscaled)
+    if cp_spatial:
+        path_spatial = os.path.join(path, 'spatial_plots.png')
+        os.makedirs(os.path.join(dest, 'spatial_plots'), exist_ok=True)
+        path_dest_spatial = os.path.join(dest, 'spatial_plots', row['id'] + '_spatial_plots.png')
+        shutil.copy(path_spatial, path_dest_spatial)
+    if cp_pixel_vis:
+        path_pixel_vis = os.path.join(path, 'pixel_size_vis.png')
+        os.makedirs(os.path.join(dest, 'pixel_vis'), exist_ok=True)
+        path_dest_pixel_vis = os.path.join(dest, 'pixel_vis', row['id'] + '_pixel_size_vis.png')
+        if not os.path.exists(path_pixel_vis):
+            print(f"couldn't find {path_pixel_vis}")
+        else:
+            shutil.copy(path_pixel_vis, path_dest_pixel_vis)
+    if cp_adata:
+        path_adata = os.path.join(path, 'aligned_adata.h5ad')
+        os.makedirs(os.path.join(dest, 'adata'), exist_ok=True)
+        path_dest_adata = os.path.join(dest, 'adata', row['id'] + '.h5ad')
+        shutil.copy(path_adata, path_dest_adata)        
+        
+            
+def copy_processed_images(dest: str, meta_df: pd.DataFrame, cp_spatial=True, cp_downscaled=True, cp_pyramidal=True, cp_pixel_vis=True, cp_adata=True, n_job=6):
+    with concurrent.futures.ThreadPoolExecutor(max_workers=n_job) as executor:
+        # Submit tasks to the executor
+        future_results = [executor.submit(_process_row, dest, row, cp_downscaled, cp_spatial, cp_pyramidal, cp_pixel_vis, cp_adata) for _, row in meta_df.iterrows()]
+
+        # Retrieve results as they complete
+        for future in concurrent.futures.as_completed(future_results):
+            result = future.result()
+            print(result)  # Example: Print the processed result
+    
+    
+    #for _, row in tqdm(meta_df.iterrows(), total=len(meta_df)):
+    #     _process_row(dest, row, cp_downscaled, cp_spatial, cp_pyramidal, cp_pixel_vis)
+    
+    
+    #copy_processed_images(dest, meta_df, cp_spatial=True, cp_downscaled=True, cp_fullres=True)
             
 
 def _find_alignment_barcodes(alignment_df: str, barcode_path: str) -> pd.DataFrame:
@@ -1207,6 +1335,8 @@ def GSE236787_split_to_h5(path):
 
 
 def _plot_center_square(width, height, length, color, text, offset=0):
+    if length > width * 4 and length > height * 4:
+        return
     margin_x = (width - length) / 2
     margin_y = (height - length) / 2
     plt.text(width // 2, (height // 2) + offset, text, fontsize=12, ha='center', va='center', color=color)
@@ -1219,8 +1349,6 @@ def _plot_center_square(width, height, length, color, text, offset=0):
 def _plot_verify_pixel_size(downscaled_img, down_fact, pixel_size_embedded, pixel_size_estimated, path):
     plt.imshow(downscaled_img)
 
-    length_estimated = (6500. / pixel_size_estimated) * down_fact
-
     width = downscaled_img.shape[1]
     height = downscaled_img.shape[0]
     
@@ -1228,7 +1356,9 @@ def _plot_verify_pixel_size(downscaled_img, down_fact, pixel_size_embedded, pixe
         length_embedded = (6500. / pixel_size_embedded) * down_fact
         _plot_center_square(width, height, length_embedded, 'red', '6.5m, embedded', offset=50)
         
-    _plot_center_square(width, height, length_estimated, 'blue', '6.5m, estimated')
+    if pixel_size_estimated is not None:
+        length_estimated = (6500. / pixel_size_estimated) * down_fact
+        _plot_center_square(width, height, length_estimated, 'blue', '6.5m, estimated')
     
     plt.savefig(path)
     plt.close()
@@ -1244,14 +1374,14 @@ def _save_scalefactors(adata: sc.AnnData, path):
         json.dump(dict, json_file)
 
 
-def xenium_to_pseudo_visium(df: pd.DataFrame, pixel_size):
+def xenium_to_pseudo_visium(df: pd.DataFrame, pixel_size_he):
     y_max = df['y_location'].max()
     y_min = df['y_location'].min()
     x_max = df['x_location'].max()
     x_min = df['x_location'].min()
     
-    m = math.ceil((y_max - y_min) / (100 / pixel_size))
-    n = math.ceil((x_max - x_min) / (100 / pixel_size))
+    m = math.ceil((y_max - y_min) / (100 / pixel_size_he))
+    n = math.ceil((x_max - x_min) / (100 / pixel_size_he))
     
     features = df['feature_name'].unique()
     
@@ -1259,8 +1389,8 @@ def xenium_to_pseudo_visium(df: pd.DataFrame, pixel_size):
     #spot_grid = pd.DataFrame(0, index=range(m * n), columns=features)
     
     # a is the row and b is the column in the pseudo visium grid
-    a = np.floor((df['x_location'] - x_min) / (100. / pixel_size)).astype(int)
-    b = np.floor((df['y_location'] - y_min) / (100. / pixel_size)).astype(int)
+    a = np.floor((df['x_location'] - x_min) / (100. / pixel_size_he)).astype(int)
+    b = np.floor((df['y_location'] - y_min) / (100. / pixel_size_he)).astype(int)
     
     c = b * n + a
     features = df['feature_name']
@@ -1279,8 +1409,8 @@ def xenium_to_pseudo_visium(df: pd.DataFrame, pixel_size):
     expression_df = pd.DataFrame(spot_grid_np, columns=spot_grid.columns)
     
     coord_df = expression_df.copy()
-    coord_df['x'] = x_min + (coord_df.index % n) * (100. / pixel_size) + (50. / pixel_size)
-    coord_df['y'] = y_min + np.floor(coord_df.index / n) * (100. / pixel_size) + (50. / pixel_size)
+    coord_df['x'] = x_min + (coord_df.index % n) * (100. / pixel_size_he) + (50. / pixel_size_he)
+    coord_df['y'] = y_min + np.floor(coord_df.index / n) * (100. / pixel_size_he) + (50. / pixel_size_he)
     coord_df = coord_df[['x', 'y']]
     
     expression_df.index = [str(i) for i in expression_df.index]

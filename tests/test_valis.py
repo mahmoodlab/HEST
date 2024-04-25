@@ -1,6 +1,6 @@
 import pandas as pd
-from src.hiSTloader.old_st import *
-from src.hiSTloader.helpers import extract_patch_expression_pairs, visualize_patches, extract_image_patches, download_from_meta_df
+from src.hest.old_st import *
+from src.hest.helpers import extract_patch_expression_pairs, visualize_patches, extract_image_patches, download_from_meta_df
 from valis import registration
 import tifffile
 from kwimage.im_cv2 import imresize

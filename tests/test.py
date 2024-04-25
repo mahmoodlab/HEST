@@ -5,7 +5,7 @@ import tifffile
 import numpy as np
 from kwimage.im_cv2 import imresize
 
-from src.hiSTloader import read_10x_visium, extract_image_patches, visualize_patches, filter_st_data, extract_patch_expression_pairs, read_10x_xenium
+from src.hest import read_10x_visium, extract_image_patches, visualize_patches, filter_st_data, extract_patch_expression_pairs, read_10x_xenium
 
 
 #adata, df, img = read_10x_visium('/mnt/ssd/paul/data/visium/10x/Adult Mouse Olfactory Bulb/Visium_Mouse_Olfactory_Bulb_filtered_feature_bc_matrix.h5',
