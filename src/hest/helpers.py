@@ -34,6 +34,10 @@ import spatialdata_plot
 from packaging import version
 import subprocess
 import concurrent.futures
+import pyvips
+from .vst_save_utils import initsave_hdf5
+from scipy.spatial import distance
+from sklearn.neighbors import KDTree
 
 
 Image.MAX_IMAGE_PIXELS = 93312000000
@@ -43,6 +47,154 @@ class SpotPacking(Enum):
     ORANGE_CRATE_PACKING = 0
     GRID_PACKING = 1
     
+    
+def mask_spots(
+    adata: sc.AnnData,
+    src_pixel_size: float,
+    tissue_mask: np.ndarray = None,
+    spot_diameter_um: float = 55.
+) -> sc.AnnData:
+    
+    if not(0 <= tissue_mask.min() and tissue_mask.max() <= 1):
+        raise ValueError("tissue_mask values aren't between 0 and 1")
+    
+    filtered_adata = adata.copy()
+    
+    spot_dia_pxl = spot_diameter_um * src_pixel_size
+    spot_rad_pxl = round(spot_dia_pxl / 2)
+    
+    for _, row in tqdm(adata.obs.iterrows(), total=len(adata.obs)):
+        
+        barcode_spot = row.index
+
+        # Extract H&E patch
+        xImage = row['pxl_col_in_fullres']
+        yImage = row['pxl_row_in_fullres']
+    
+        mask_patch = tissue_mask[yImage - spot_rad_pxl: yImage + spot_rad_pxl,
+                            xImage - spot_rad_pxl: xImage + spot_rad_pxl, :]
+        
+        circle_patch = np.zeros(mask_patch.shape)
+        
+        #mask_patch_area = patch_size_pxl ** 2
+        #if (mask_patch.sum() / mask_patch_area) < 0.95:
+        #    continue
+        
+        x, y = np.meshgrid(np.arange(spot_rad_pxl), np.arange(spot_rad_pxl))
+
+        # Calculate the distances from each point to the circle's center
+        distances = np.sqrt((x - spot_rad_pxl)**2 + (y - spot_rad_pxl)**2)
+
+        # Create a mask for the circle's region using the distances and radius
+        circle_region_mask = distances <= spot_rad_pxl
+
+        # Set the circle's region in the image array to 1
+        circle_patch[circle_region_mask] = 1
+        spot_area_pxl = np.pi * spot_rad_pxl**2
+        inter_pct = (circle_patch & mask_patch) / spot_area_pxl
+        if inter_pct < 0.95:
+            print(f'filter out barcode {barcode_spot}')
+            filtered_adata = filtered_adata[filtered_adata.obs_names != barcode_spot]
+            
+    return filtered_adata
+    
+    
+    
+def patchify(
+    patch_save_dir: str,
+    adata: sc.AnnData, 
+    img: np.ndarray, 
+    src_pixel_size: float,
+    name: str = None,
+    patch_size_um: float=100,
+    tissue_mask: np.ndarray = None,
+    target_pixel_size: float=0.5,
+    verbose=0
+):
+    
+    # minimum intersection percecentage with the tissue mask to keep a patch
+    TISSUE_INTER_THRESH = 0.05
+    
+    scale_factor = src_pixel_size / target_pixel_size
+    patch_size_pxl = round(patch_size_um * src_pixel_size)
+    patch_count = 0
+    
+    mode_HE = 'w'
+    for index0, row in tqdm(adata.obs.iterrows(), total=len(adata.obs)):
+        
+        barcode_spot = row.name
+
+        xImage = int(row['pxl_col_in_fullres'])
+        yImage = int(row['pxl_row_in_fullres'])
+        
+        
+        if not(0 <= xImage and xImage < img.shape[1] and 0 <= yImage and yImage < img.shape[0]):
+            if verbose:
+                print('Warning, spot is out of the image, skipping')
+            continue
+        
+        if not(0 <= yImage - patch_size_pxl // 2 and yImage + patch_size_pxl // 2 < img.shape[1] and \
+            0 <= xImage - patch_size_pxl // 2 and xImage + patch_size_pxl // 2 < img.shape[0]):
+            if verbose:
+                print('Warning, patch is out of the image, skipping')
+            continue
+        
+        image_patch = img[yImage - patch_size_pxl // 2: yImage + patch_size_pxl // 2,
+                              xImage - patch_size_pxl // 2: xImage + patch_size_pxl // 2, :]
+        
+        if tissue_mask is not None:
+            patch_mask = tissue_mask[yImage - patch_size_pxl // 2: yImage + patch_size_pxl // 2,
+                              xImage - patch_size_pxl // 2: xImage + patch_size_pxl // 2]
+            patch_area = patch_mask.shape[0] ** 2
+            pixel_count = patch_mask.sum()
+
+            if pixel_count / patch_area < TISSUE_INTER_THRESH:
+                continue
+        
+        patch_count += 1
+        image_patch = cv2.resize(image_patch, (round(scale_factor * patch_size_pxl), round(scale_factor * patch_size_pxl)))
+        
+        #image = Image.fromarray(image_patch)
+        #image.save(f'/mnt/sdb1/paul/test_patch/{barcode_spot}.png')
+        
+        # Save ref patches
+        output_datafile = os.path.join(patch_save_dir, name + '.h5')
+
+        asset_dict = { 'img': np.expand_dims(image_patch, axis=0),  # (1 x w x h x 3)
+                        'coords': np.expand_dims([yImage, xImage], axis=0),   # (1 x 2)
+                        'barcode': np.expand_dims([barcode_spot], axis=0)
+                        }
+    
+        attr_dict = {}
+        attr_dict['img'] = {'patch_size': patch_size_pxl,
+                            'factor': scale_factor}
+
+        initsave_hdf5(output_datafile, asset_dict, attr_dict, mode=mode_HE)
+        mode_HE = 'a'
+
+        # Save both raw and smoothed version of spot gene expression
+        #output_datafile = os.path.join(gene_save_dir, name + '.h5')
+        #gene_exp_raw = gene_matrix_pp[index0, :]
+        #gene_exp_smooth = smooth_gene_exp(barcode_spot, df_alphabetic, df_in_tissue, gene_matrix_pp) 
+
+
+        #asset_dict = { 'raw': np.expand_dims(gene_exp_raw, axis=0),  # (1 x NumOfGenes)
+        #                'smooth': np.expand_dims(gene_exp_smooth, axis=0),  # (1 x NumOfGenes)
+        #                'coords': np.expand_dims([yImage, xImage], axis=0),   # (1 x 3)
+        #                'barcode': np.expand_dims([barcode_spot], axis=0)
+        #                }
+
+        #initsave_hdf5(output_datafile, asset_dict, mode=mode_gene)
+        #mode_gene = 'a'
+        
+    if verbose:
+        print(f'found {patch_count} valid patches')
+        
+        
+        
+
+        
+
 
 def _copy_to_right_subfolder(dataset_title):
     prefix = f'/mnt/sdb1/paul/data/samples/ST/{dataset_title}'
@@ -134,6 +286,7 @@ def create_joined_gene_plots(meta, gene_plot=False):
         plot_dir = 'gene_bar_plots'
     common_genes = None
     n = len(meta)
+    max_col = 2
     for index, row in meta.iterrows():
         path = _get_path_from_meta_row(row)
         gene_files = np.array(os.listdir(os.path.join(path, 'processed', plot_dir)))
@@ -146,7 +299,7 @@ def create_joined_gene_plots(meta, gene_plot=False):
     os.makedirs(my_dir, exist_ok=True)
     for gene in tqdm(common_genes):
         if gene_plot:
-            fig, axes = plt.subplots(1, n)
+            fig, axes = plt.subplots(int(np.ceil(n / max_col)), max_col)
         else:
             fig, axes = plt.subplots(n, 1)
         i = 0
@@ -154,8 +307,14 @@ def create_joined_gene_plots(meta, gene_plot=False):
             path = _get_path_from_meta_row(row)
             gene_path = os.path.join(path, 'processed', plot_dir, gene)
             image = Image.open(gene_path)
-            axes[i].imshow(image)
-            axes[i].axis('off')
+            if gene_plot:
+                row = i // max_col
+                col = i % max_col
+                axes[row][col].imshow(image)
+                axes[row][col].axis('off')
+            else:
+                axes[i].imshow(image)
+                axes[i].axis('off')
             i += 1
         plt.savefig(os.path.join(my_dir, f'{gene}_subplot.png'), bbox_inches='tight', pad_inches=0, dpi=600)
         plt.subplots_adjust(wspace=0.1)
@@ -174,6 +333,59 @@ def split_join_adata_by_col(path, adata_path, col):
         except:
             sample_adata.__dict__['_raw'].__dict__['_var'] = sample_adata.__dict__['_raw'].__dict__['_var'].rename(columns={'_index': 'features'})
             sample_adata.write_h5ad(os.path.join(path, f'{sample}.h5ad'))
+            
+            
+            
+def pool_xenium_by_cell(dir_path: str, cellvit_geojson: pd.DataFrame, pixel_size) -> sc.AnnData:
+    
+    with open(cellvit_geojson) as f:
+        arr = json.load(f)    
+        neoplastics = [item for item in arr if item.get('properties', {}).get('classification')['name'] == 'Neoplastic'][0]['geometry']
+        neoplastic_coords = neoplastics['coordinates']
+        
+            
+    df_cells = pd.read_parquet(os.path.join(dir_path, 'cells.parquet'))
+    
+    with open(os.path.join(dir_path, 'gene_panel.json')) as f:
+        dic = json.load(f)
+        targets = dic['payload']['targets']
+        genes = [target['type']['data']['name'] for target in targets]
+        
+    Y = np.column_stack((df_cells['x_centroid'], df_cells['y_centroid'])) / pixel_size
+    y_tree = KDTree(Y)
+    neoplastic_matches = y_tree.query(neoplastic_coords, k = 1, return_distance = False)
+    
+    neoplastic_coords_df = pd.DataFrame(neoplastic_coords, columns=['cellvit_x', 'cellvit_y'])
+    neoplastic_coords_df['xenium_idx'] = neoplastic_matches
+    df_cells['xenium_idx'] = df_cells.index
+    
+    unique_cell_index = np.unique(neoplastic_matches)
+    
+    assert (len(unique_cell_index) / len(neoplastic_matches)) > 0.9
+    
+    # assign each xenium cell to it s cellvit cell
+    cellvit_xenium_joined = pd.merge(neoplastic_coords_df, df_cells, how='inner', on='xenium_idx')
+    
+    
+    df_transcripts = pd.read_parquet(os.path.join(dir_path, 'transcripts.parquet'))
+    
+    joined = pd.merge(df_transcripts, cellvit_xenium_joined, how='inner', on='cell_id')
+    
+    genes_bytes = [gene.encode('utf-8') for gene in genes]
+    gene_arr = np.zeros((len(unique_cell_index), len(genes)))
+    
+    cols = pd.Index(genes_bytes).get_indexer(joined['feature_name'])
+    rows = pd.Index(unique_cell_index).get_indexer(joined['xenium_idx'])
+    
+    
+    np.add.at(gene_arr, (rows, cols), 1)
+    
+    gene_df = pd.DataFrame(gene_arr, columns=genes, index=unique_cell_index)
+    gene_df['xenium_idx'] = gene_df.index
+    gene_df = pd.merge(gene_df, cellvit_xenium_joined, how='inner', on='xenium_idx')
+    gene_df = gene_df.rename(columns={'cell_id': 'xenium_cell_id', 'x_centroid': 'xenium_x_centroid', 'y_centroid': 'xenium_y_centroid'})
+    
+    return gene_df
             
             
 def GSE205707_split_to_h5ad(path):
@@ -535,27 +747,27 @@ def filter_adata(adata):
     return filtered_adata
 
 
-def write_wsi(img, save_path, meta_dict, use_embedded_size=False):
+def write_wsi(img, save_path, meta_dict, use_embedded_size=False, pyramidal=False):
     pixel_size = meta_dict['pixel_size_um_estimated']
-    #pixel_size_embedded = meta_dict['pixel_size_um_embedded']
-    #if use_embedded_size:
-    #    pixel_size = pixel_size_embedded
     if pixel_size is None:
         pixel_size = meta_dict['pixel_size_um_embedded']
     
+    if pyramidal:
+        pyvips_img = pyvips.Image.new_from_array(img)
     
-    with tifffile.TiffWriter(save_path, bigtiff=True) as tif:
-        options = dict(
-            tile=(256, 256), 
-            compression='deflate', 
-            #metadata=metadata,
-            resolution=(
-                1. / (pixel_size * 1e-4),
-                1. / (pixel_size * 1e-4),
-                'CENTIMETER'
-            ),
-        )
-        tif.write(img, **options)
+        pyvips_img.tiffsave(save_path, bigtiff=True, pyramid=True, tile=True, tile_width=256, tile_height=256, compression='deflate')
+    else:
+        with tifffile.TiffWriter(save_path, bigtiff=True) as tif:
+            options = dict(
+                tile=(256, 256), 
+                compression='deflate', 
+                resolution=(
+                    1. / (pixel_size * 1e-4),
+                    1. / (pixel_size * 1e-4),
+                    'CENTIMETER'
+                ),
+            )
+            tif.write(img, **options)
 
 
 def _find_biggest_img(path):
@@ -1374,11 +1586,15 @@ def _save_scalefactors(adata: sc.AnnData, path):
         json.dump(dict, json_file)
 
 
-def xenium_to_pseudo_visium(df: pd.DataFrame, pixel_size_he):
-    y_max = df['y_location'].max()
-    y_min = df['y_location'].min()
-    x_max = df['x_location'].max()
-    x_min = df['x_location'].min()
+def xenium_to_pseudo_visium(df: pd.DataFrame, pixel_size_he, pixel_size_morph):
+    # convert transcripts position from um to pixel
+    df["x_location_pxl"] = df["x_location"] / pixel_size_morph
+    df["y_location_pxl"] = df["y_location"] / pixel_size_morph
+    
+    y_max = df['y_location_pxl'].max()
+    y_min = df['y_location_pxl'].min()
+    x_max = df['x_location_pxl'].max()
+    x_min = df['x_location_pxl'].min()
     
     m = math.ceil((y_max - y_min) / (100 / pixel_size_he))
     n = math.ceil((x_max - x_min) / (100 / pixel_size_he))
@@ -1389,8 +1605,8 @@ def xenium_to_pseudo_visium(df: pd.DataFrame, pixel_size_he):
     #spot_grid = pd.DataFrame(0, index=range(m * n), columns=features)
     
     # a is the row and b is the column in the pseudo visium grid
-    a = np.floor((df['x_location'] - x_min) / (100. / pixel_size_he)).astype(int)
-    b = np.floor((df['y_location'] - y_min) / (100. / pixel_size_he)).astype(int)
+    a = np.floor((df['x_location_pxl'] - x_min) / (100. / pixel_size_he)).astype(int)
+    b = np.floor((df['y_location_pxl'] - y_min) / (100. / pixel_size_he)).astype(int)
     
     c = b * n + a
     features = df['feature_name']

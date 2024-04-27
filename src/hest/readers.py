@@ -46,9 +46,9 @@ class HESTData:
     
     def _verify_format(self, adata):
         assert 'spatial' in adata.obsm
-        for field in ['in_tissue', 'array_row', 'array_col']:
-            if field not in adata.obs.columns:
-                raise ValueError('{field} column missing in adata.obs')
+        #for field in ['in_tissue', 'array_row', 'array_col']:
+        #    if field not in adata.obs.columns:
+        #        raise ValueError('{field} column missing in adata.obs')
         try:
             adata.uns['spatial']['ST']['images']['downscaled_fullres']
         except KeyError:
@@ -206,6 +206,7 @@ class STData(HESTData):
 class XeniumData(HESTData):
     def __init__(self, adata: sc.AnnData, img: np.ndarray, meta: Dict):
         super().__init__(adata, img, meta, spot_size=55., spot_inter_dist=100.)
+        self.save_positions = False
         
 
 class Reader:
@@ -223,8 +224,6 @@ class Reader:
         """
         
         hest_object = self._auto_read(path)
-
-        os.makedirs(os.path.join(path, 'processed'), exist_ok=True)
         
         hest_object.adata.var["mito"] = hest_object.adata.var_names.str.startswith("MT-")
         sc.pp.calculate_qc_metrics(hest_object.adata, qc_vars=["mito"], inplace=True)
@@ -354,8 +353,6 @@ class VisiumReader(Reader):
             custom_adata=custom_adata,
             use_adata_align=use_adata_align
         )
-        
-        os.makedirs(os.path.join(path, 'processed'), exist_ok=True)
         
         st_object.adata.var["mito"] = st_object.adata.var_names.str.startswith("MT-")
         sc.pp.calculate_qc_metrics(st_object.adata, qc_vars=["mito"], inplace=True)
@@ -580,8 +577,6 @@ class STReader(Reader):
         
         sc.pp.calculate_qc_metrics(st_object.adata, inplace=True)
         
-        os.makedirs(os.path.join(path, 'processed'), exist_ok=True) 
-        
         st_object.save_positions = False
         
         return st_object
@@ -715,18 +710,15 @@ class XeniumReader(Reader):
                 alignment_path = os.path.join(path, file)
         
         st_object = self.read(
-            path=path,
+            img_path=os.path.join(path, img_filename),
+            experiment_path=os.path.join(path, 'xenium.experiment'),
+            alignment_file_path=alignment_path,
             feature_matrix_path=os.path.join(path, 'cell_feature_matrix.h5'), 
-            transcripts_path=os.path.join(path, 'transcripts.parquet'), 
-            img_path=os.path.join(path, img_filename), 
-            alignment_file_path=alignment_path
+            transcripts_path=os.path.join(path, 'transcripts.parquet'),
+            cells_csv_path=os.path.join(path, 'cells.csv')
         )
         
-        os.makedirs(os.path.join(path, 'processed'), exist_ok=True)
-        
         sc.pp.calculate_qc_metrics(st_object.adata, inplace=True)
-        
-        #write_wsi(st_object.img, os.path.join(path, 'processed', ALIGNED_HE_FILENAME), self.meta, use_embedded_size=True)
         
         return st_object
     
@@ -745,119 +737,127 @@ class XeniumReader(Reader):
         
         pixel_size_estimated = pixel_size_morph * cart_dist
         return pixel_size_estimated
-         
+    
+
+    def __read_cache(self, cur_dir, dict):
+        adata = sc.read_h5ad(os.path.join(cur_dir, 'cached_pseudo_visium.h5ad'))
+        cached_metrics = json.load(open(os.path.join(cur_dir, 'cached_metrics.json')))
+        dict['pixel_size_um_embedded'] = cached_metrics['pixel_size_um_embedded']
+        dict['pixel_size_um_estimated'] = cached_metrics['pixel_size_um_estimated']
+        return adata, dict
+    
+    
+    def __align(self, alignment_file_path, pixel_size_morph, df_transcripts):
+        alignment_file = pd.read_csv(alignment_file_path, header=None)
+        alignment_matrix = alignment_file.values
+        #convert alignment matrix from pixel to um
+        alignment_matrix[0][2] *= pixel_size_morph
+        alignment_matrix[1][2] *= pixel_size_morph
+        he_to_morph_matrix = alignment_matrix
+        alignment_matrix = np.linalg.inv(alignment_matrix)
+        coords = np.column_stack((df_transcripts["x_location"].values, df_transcripts["y_location"].values, np.ones((len(df_transcripts),))))
+        aligned = (alignment_matrix @ coords.T).T
+        df_transcripts['y_location'] = aligned[:,1]
+        df_transcripts['x_location'] = aligned[:,0]
+        pixel_size_estimated = self.__xenium_estimate_pixel_size(pixel_size_morph, he_to_morph_matrix)    
+        return df_transcripts, pixel_size_estimated    
+    
+    
+    def __plot_genes(self, adata, cur_dir):
+        print('saving gene plots...')
+        FIGSIZE = (15, 5)
+        old_figsize = rcParams["figure.figsize"]
+        rcParams["figure.figsize"] = FIGSIZE
+        os.makedirs(os.path.join(cur_dir, 'gene_plots'), exist_ok=True)
+        os.makedirs(os.path.join(cur_dir, 'gene_bar_plots'), exist_ok=True)
+
+        gene_names = [name for name in adata.var_names if ('BLANK' not in name and 'NegControl' not in name)]
+
+        adata_df = adata.to_df()
+        for gene_name in tqdm(gene_names):
+            col = adata_df[gene_name]
+            plt.close()
+            #sc.pl.spatial(adata, show=None, img_key="downscaled_fullres", color=gene_name)
+            plt.hist(col.values, bins=50, range=(0, 2000))
+
+            # Add labels and title
+            plt.ylabel(f'{gene_name} count per spot')
+            
+            plt.savefig(os.path.join(cur_dir, 'gene_bar_plots', f'{gene_name}.png'))
+            plt.close()  # Close the plot to free memory
+        rcParams["figure.figsize"] = old_figsize
     
     
     def read(
         self,
-        path: str, 
-        feature_matrix_path: str, 
-        transcripts_path: str,
         img_path: str,
-        alignment_file_path: str,
+        experiment_path: str,
+        alignment_file_path: str = None,
+        feature_matrix_path: str = None, 
+        transcripts_path: str = None,
+        cells_csv_path: str = None,
         plot_genes: bool = False,
-        use_cache: bool = False
+        use_cache: bool = False,
+        pseudo_visium: bool = False
     ) -> XeniumData:
-        basedir = os.path.dirname(img_path)
+        if not pseudo_visium and (feature_matrix_path is None or cells_csv_path is None):
+            raise ValueError('a feature_matrix_path needs to be specified if not using pseudo-visium pooling')
         
-        experiment_path = _find_first_file_endswith(path, 'experiment.xenium')
-        with open(experiment_path) as f:
-            pixel_size_embedded = json.load(f)['pixel_size']
+        if pseudo_visium and feature_matrix_path is None or transcripts_path is None:
+            raise ValueError('a feature_matrix_path and a transcripts_path need to be specified if using pseudo-visium pooling')
         
-        
-        dict = {}
-        dict['pixel_size_um_embedded'] = pixel_size_embedded
-        dict['pixel_size_um_estimated'] = None
         
         cur_dir = os.path.dirname(transcripts_path)   
         
-        adata = sc.read_10x_h5(
-            filename=feature_matrix_path
-        )
-        
         img, pixel_size_embedded = _load_image(img_path)
         
+        dict = {}
+        dict['pixel_size_um_embedded'] = pixel_size_embedded
+
         experiment_file = open(os.path.join(cur_dir, 'experiment.xenium'))
         dict_exp = json.load(experiment_file)
-
-        pixel_size_morph = dict_exp['pixel_size']
-        dict['spot_diameter'] = 55.
-        dict['inter_spot_dist'] = 100.
-        
+        with open(experiment_path) as f:
+            pixel_size_morph = json.load(f)['pixel_size']
         dict = {**dict, **dict_exp}
         
         if os.path.exists(os.path.join(cur_dir, 'cached_pseudo_visium.h5ad')) and use_cache:
-            adata = sc.read_h5ad(os.path.join(cur_dir, 'cached_pseudo_visium.h5ad'))
-            cached_metrics = json.load(open(os.path.join(cur_dir, 'cached_metrics.json')))
-            dict['pixel_size_um_embedded'] = cached_metrics['pixel_size_um_embedded']
-            dict['pixel_size_um_estimated'] = cached_metrics['pixel_size_um_estimated']
+            adata, dict = self.__read_cache(cur_dir, dict)
         else:
-            
+        
             df_transcripts = pd.read_parquet(transcripts_path)
             
             if alignment_file_path is not None:
                 print('found an alignment file, aligning transcripts...')
-                alignment_file = pd.read_csv(alignment_file_path, header=None)
-                alignment_matrix = alignment_file.values
-                #convert alignment matrix from pixel to um
-                alignment_matrix[0][2] *= pixel_size_morph
-                alignment_matrix[1][2] *= pixel_size_morph
-                he_to_morph_matrix = alignment_matrix
-                alignment_matrix = np.linalg.inv(alignment_matrix)
-                coords = np.column_stack((df_transcripts["x_location"].values, df_transcripts["y_location"].values, np.ones((len(df_transcripts),))))
-                aligned = (alignment_matrix @ coords.T).T
-                df_transcripts['y_location'] = aligned[:,1]
-                df_transcripts['x_location'] = aligned[:,0]
-                pixel_size_estimated = self.__xenium_estimate_pixel_size(pixel_size_morph, he_to_morph_matrix)
+                df_transcripts, pixel_size_estimated = self.__align(alignment_file_path, pixel_size_morph, df_transcripts)
                 dict['pixel_size_um_estimated'] = pixel_size_estimated
             else:
                 dict['pixel_size_um_estimated'] = pixel_size_morph
-                
+                            
             
-            # convert transcripts position from um to pixel
-            df_transcripts["x_location"] = df_transcripts["x_location"] / pixel_size_morph
-            df_transcripts["y_location"] = df_transcripts["y_location"] / pixel_size_morph
-            
-            
-            
-            
-            adata = xenium_to_pseudo_visium(df_transcripts, dict['pixel_size_um_estimated'])
+            if pseudo_visium:
+                adata = xenium_to_pseudo_visium(df_transcripts, dict['pixel_size_um_estimated'], pixel_size_morph)
+                dict['spot_diameter'] = 55.
+                dict['inter_spot_dist'] = 100.
+                dict['spots_under_tissue'] = len(adata.obs)
+            else:
+                adata = sc.read_10x_h5(feature_matrix_path)
+                df = pd.read_csv(cells_csv_path)
+                df.set_index(adata.obs_names, inplace=True)
+                adata.obs = df.copy()
+                adata.obsm["spatial"] = adata.obs[["x_centroid", "y_centroid"]].copy().to_numpy()
+                dict['cells_under_tissue'] = len(adata.obs)
         
             _register_downscale_img(adata, img, dict['pixel_size_um_estimated'])
             
             adata.write_h5ad(os.path.join(cur_dir, 'cached_pseudo_visium.h5ad'))
             with open(os.path.join(cur_dir, 'cached_metrics.json'), 'w') as f:
                 json.dump(dict, f)
-            
-        dict['spots_under_tissue'] = len(adata.obs)
         
         if plot_genes:
-            print('saving gene plots...')
-            FIGSIZE = (15, 5)
-            old_figsize = rcParams["figure.figsize"]
-            rcParams["figure.figsize"] = FIGSIZE
-            os.makedirs(os.path.join(cur_dir, 'gene_plots'), exist_ok=True)
-            os.makedirs(os.path.join(cur_dir, 'gene_bar_plots'), exist_ok=True)
-
-            gene_names = [name for name in adata.var_names if ('BLANK' not in name and 'NegControl' not in name)]
-
-            adata_df = adata.to_df()
-            for gene_name in tqdm(gene_names):
-                col = adata_df[gene_name]
-                plt.close()
-                #sc.pl.spatial(adata, show=None, img_key="downscaled_fullres", color=gene_name)
-                plt.hist(col.values, bins=50, range=(0, 2000))
-
-                # Add labels and title
-                plt.ylabel(f'{gene_name} count per spot')
-                
-                plt.savefig(os.path.join(cur_dir, 'gene_bar_plots', f'{gene_name}.png'))
-                plt.close()  # Close the plot to free memory
-            rcParams["figure.figsize"] = old_figsize
+            self.__plot_genes(adata, cur_dir)
             
 
-        st_object =  XeniumData(adata, img, dict)
-        st_object.save_positions = False
+        st_object = XeniumData(adata, img, dict)
         return st_object
     
 
@@ -879,11 +879,12 @@ def read_and_save(path, save_plots=True, plot_genes=False):
     st_object = reader.auto_read(path)
     print(st_object)
     save_path = os.path.join(path, 'processed')
+    os.makedirs(save_path, exist_ok=True)
     st_object.save(save_path)
     if save_plots:
         st_object.save_spatial_plot(save_path)
     if plot_genes:
-        st_object.plot_genes(save_path, top_k=300)
+        st_object.plot_genes(save_path, top_k=800)
         
         
 def process_meta_df(meta_df, save_spatial_plots=True, plot_genes=False):

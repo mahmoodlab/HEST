@@ -1,5 +1,5 @@
 import pandas as pd
-from src.hest.helpers import  create_meta_release, copy_processed_images, create_joined_gene_plots
+from src.hest.helpers import  create_meta_release, copy_processed_images, create_joined_gene_plots, mask_spots, patchify, pool_xenium_by_cell
 from src.hest.readers import read_and_save, process_meta_df
 from packaging import version
 from PIL import Image
@@ -7,6 +7,7 @@ import tifffile
 import openslide
 import numpy as np
 from openslide.deepzoom import DeepZoomGenerator
+import scanpy as sc
 
 def main():
 
@@ -31,13 +32,12 @@ def main():
     #meta_df = meta_df[meta_df['dataset_title'] == 'Spatially resolved clonal copy number alterations in benign and malignant tissueJus']
     #meta_df = meta_df[meta_df['dataset_title'] == 'FFPE Human Breast using the Entire Sample Area']
     #meta_df = meta_df[meta_df['check_image'] == "TRUE"] 
-    #meta_df = meta_df[((meta_df['dataset_title'] == 'FFPE Human Breast using the Entire Sample Area') & (meta_df['subseries'] == 'Replicate 1')) |
-    #             ((meta_df['dataset_title'] == 'FFPE Human Breast with Pre-designed Panel') & (meta_df['subseries'] == 'Tissue sample 1')) |
-    #              ((meta_df['dataset_title'] == 'High resolution mapping of the tumor microenvironment using integrated single-cell, spatial and in situ analysis [Xenium]') & (meta_df['subseries'] != 'Breast Cancer, Xenium In Situ Spatial Gene Expression Rep 2'))]
+    meta_df = meta_df[((meta_df['dataset_title'] == 'FFPE Human Breast using the Entire Sample Area') & (meta_df['subseries'] == 'Replicate 1')) |
+                 ((meta_df['dataset_title'] == 'FFPE Human Breast with Pre-designed Panel') & (meta_df['subseries'] == 'Tissue sample 1')) |
+                  ((meta_df['dataset_title'] == 'High resolution mapping of the tumor microenvironment using integrated single-cell, spatial and in situ analysis [Xenium]') & (meta_df['subseries'] != 'Breast Cancer, Xenium In Situ Spatial Gene Expression Rep 2'))]
     #meta_df = meta_df[(meta_df['dataset_title'] == 'mousemodel_Heptablastoma spatial transcriptomics') & (meta_df['subseries'] == 'NEJ146-D')]
     #meta_df = meta_df[meta_df['dataset_title'] == 'mousemodel_Heptablastoma spatial transcriptomics' ]
     
-    #create_joined_gene_plots(meta_df)
     #meta_df = meta_df[(meta_df['dataset_title'] == "Spatiotemporal dynamics of molecular pathology in amyotrophic lateral sclerosis")] 
     """meta_df = meta_df[(meta_df['id'] == "NCBI758") | 
                       (meta_df['id'] == "TENX123") | 
@@ -51,9 +51,43 @@ def main():
                       (meta_df['id'] == "NCBI657") | 
                       (meta_df['id'] == "TENX125")]"""
     #meta_df = meta_df[meta_df['bigtiff'].notna() & meta_df['bigtiff'] != "TRUE"]
-    meta_df = meta_df[(meta_df['id'] == "TENX138")]
+    #meta_df = meta_df[(meta_df['id'] == "TENX138")]
+    #meta_df = meta_df[meta_df['id'].str.startswith('GIT')]
+    #meta_df = meta_df[(meta_df['id'] == "NCBI783") | (meta_df['id'] == "NCBI785")]
+    meta_df = meta_df[(meta_df['id'] == "TENX99")]
 
     dest = '/mnt/sdb1/paul/images'
+    
+    adata = sc.read_10x_h5('/mnt/sdb1/paul/data/samples/xenium/FFPE Human Breast with Pre-designed Panel/Tissue sample 1/cell_feature_matrix.h5')
+    
+    df = pd.read_csv(
+        "/mnt/sdb1/paul/data/samples/xenium/FFPE Human Breast with Pre-designed Panel/Tissue sample 1/cells.csv"
+    )
+    #df = pool_xenium_by_cell('/mnt/sdb1/paul/data/samples/xenium/FFPE Human Breast using the Entire Sample Area/Tissue sample 1', '/mnt/sdb1/paul/TENX95_cell_detection.geojson', 
+    #                         0.2125)
+   #df.to_parquet('TENX95_pool.parquet')
+    
+    
+    #create_joined_gene_plots(meta_df, gene_plot=True)
+    #adata = sc.read_h5ad('/mnt/sdb1/paul/images/adata/NCBI792.h5ad')
+    #src_pixel_size = 0.988180746
+    #tissue_mask = np.load('/mnt/sdb1/paul/fullres_mask.npy')
+    #img = tifffile.imread('/mnt/sdb1/paul/images/pyramidal/NCBI792.tif')
+    
+    #mask_spots(adata, src_pixel_size, tissue_mask, 55.)
+    """patchify(
+        patch_save_dir='/mnt/sdb1/paul',
+        gene_save_dir='/mnt/sdb1/paul',
+        smoothed_save_dir='/mnt/sdb1/paul',
+        adata=adata, 
+        img=img, 
+        src_pixel_size=src_pixel_size,
+        name='test',
+        patch_size_um=100.,
+        tissue_mask=tissue_mask,
+        target_pixel_size=0.5,
+        verbose=1
+    )"""
     
     
     # copy_processed_images(dest, meta_df, cp_spatial=False, cp_downscaled=False,)
@@ -61,12 +95,12 @@ def main():
     #open_fiftyone()
     
     #process_meta_df(meta_df[516:], save_spatial_plots=True, plot_genes=False)
-    process_meta_df(meta_df, save_spatial_plots=True, plot_genes=False)
-    #with tifffile.TiffFile('/mnt/sdb1/paul/data/samples/visium/Spatial transcriptomics landscape of non-communicable inflammatory skin diseases/Patient 28, 33 lesional psoriasis, lichen planus, rep 1 [21L008964]/processed/aligned_fullres_HE.tif') as tif:
-        # Get the TIFF file header
-    #    header = tif.pages[0].tags
+    #process_meta_df(meta_df, save_spatial_plots=True, plot_genes=False)
+
     
-    #process_meta_df(meta_df, save_spatial_plots=True)
+    #process_meta_df(meta_df, save_spatial_plots=True, plot_genes=True)
+    
+    #pool_xenium_by_cell()
     
     #img = tifffile.imread('/mnt/sdb1/paul/data/samples/visium/Bern ST/20220401-2_7/20220401-2_7.ome.tif')
     #write_wsi2(img, '/mnt/sdb1/paul/test.tif')
