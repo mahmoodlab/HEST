@@ -28,9 +28,6 @@ from scipy import sparse
 
 from .autoalign import autoalign_with_fiducials
 import seaborn as sns
-import spatialdata_io
-from spatialdata._io import write_image
-import spatialdata_plot
 from packaging import version
 import subprocess
 import concurrent.futures
@@ -1005,9 +1002,12 @@ def _get_scalefactors(path: str):
     return d
     
 
-def _alignment_file_to_df(path):
-    f = open(path)
-    data = json.load(f)
+def _alignment_file_to_df(path, alignment_json=None):
+    if alignment_json is not None:
+        data = alignment_json
+    else:
+        f = open(path)
+        data = json.load(f)
     
     df = pd.DataFrame(data['oligo'])
     
@@ -1193,6 +1193,11 @@ def write_10X_h5(adata, file):
     grp.create_dataset("shape", data=np.array(list(adata.X.shape)[::-1], dtype=f'<i{int_max(adata.X.shape)}'))
 
 
+def check_arg(arg, arg_name, values):
+    if arg not in values:
+       raise ValueError(f"{arg_name} must be one of {values}")
+        
+
 def _helper_mex(path, filename):
     # zip if needed
     file = _find_first_file_endswith(path, filename.strip('.gz'))
@@ -1294,8 +1299,8 @@ def _align_tissue_positions(
     return spatial_aligned
 
 
-def _alignment_file_to_tissue_positions(alignment_file_path, adata):
-    alignment_df = _alignment_file_to_df(alignment_file_path)
+def _alignment_file_to_tissue_positions(alignment_file_path, adata, alignment_json=None):
+    alignment_df = _alignment_file_to_df(alignment_file_path, alignment_json)
     alignment_df = alignment_df.rename(columns={
         'tissue': 'in_tissue',
         'row': 'array_row',
@@ -1352,7 +1357,8 @@ def _GSE206391_copy_dir(path):
             param = f'mv "{whole_path}" "{path}/"*{sample_name}*'
             subprocess.Popen(param, shell=True)
 
-def GSE234047_to_h5(path):
+def GSE234047_to_adata(path):
+    path = _find_first_file_endswith(path, '_counts.csv')
             
     df = pd.read_csv(path)
     df.index = df['barcode']
@@ -1391,7 +1397,8 @@ def GSE184384_to_h5(path):
     return adata
 
 
-def GSE180128_to_h5(path):
+def GSE180128_to_adata(path):
+    path = _find_first_file_endswith(path, '.csv')
     df = pd.read_csv(path)
     #df.index = df['barcode']
     #columns_drop = ['barcode', 'prediction_celltype', 'Bipolar', 'Cone', 'Endothelial', 'Fibroblast', 'Immune', 'Interneuron', 'Melanocyte', 'Muller.Astrocyte', 'Pericyte.SMC', 'RGC', 'Rod', 'RPE.x', 'Schwann', 'res_ss', 'region', 'tissue', 'percent_CNV', 'image']
@@ -1446,6 +1453,7 @@ def GSE167096_to_adata(path):
 
 
 def GSE203165_to_adata(path):
+    path = _find_first_file_endswith(path, 'raw_counts.txt')
     matrix = pd.read_csv(path, sep='\t', index_col=0)
     matrix = matrix.transpose()
     adata = sc.AnnData(matrix)
@@ -1481,7 +1489,7 @@ def infer_row_col_from_barcodes(barcodes_df, adata):
     return spatial_aligned
 
 
-def GSE217828_to_custom(path):
+def GSE217828_to_adata(path):
     raw_counts_path = _find_first_file_endswith(path, 'raw_count.csv')
     raw_counts = pd.read_csv(raw_counts_path)
     raw_counts = raw_counts.transpose()

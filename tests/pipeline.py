@@ -1,12 +1,10 @@
 import pandas as pd
-from src.hest.helpers import  create_meta_release, copy_processed_images, create_joined_gene_plots, mask_spots, patchify, pool_xenium_by_cell
+from src.hest.utils import  create_meta_release, copy_processed_images, create_joined_gene_plots, mask_spots, patchify, pool_xenium_by_cell
 from src.hest.readers import read_and_save, process_meta_df
 from packaging import version
 from PIL import Image
 import tifffile
-import openslide
 import numpy as np
-from openslide.deepzoom import DeepZoomGenerator
 import scanpy as sc
 
 def main():
@@ -63,9 +61,13 @@ def main():
     df = pd.read_csv(
         "/mnt/sdb1/paul/data/samples/xenium/FFPE Human Breast with Pre-designed Panel/Tissue sample 1/cells.csv"
     )
+    
+    df.set_index(adata.obs_names, inplace=True)
+    adata.obs = df.copy()
+    adata.obsm["spatial"] = adata.obs[["x_centroid", "y_centroid"]].copy().to_numpy()
     #df = pool_xenium_by_cell('/mnt/sdb1/paul/data/samples/xenium/FFPE Human Breast using the Entire Sample Area/Tissue sample 1', '/mnt/sdb1/paul/TENX95_cell_detection.geojson', 
     #                         0.2125)
-   #df.to_parquet('TENX95_pool.parquet')
+    #df.to_parquet('TENX95_pool.parquet')
     
     
     #create_joined_gene_plots(meta_df, gene_plot=True)

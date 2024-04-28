@@ -5,7 +5,17 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "hest"
 version = "0.0.1"
-dependencies = []
+authors = [
+  { name="Paul Doucet", email="pdoucet@bwh.harvard.edu" },
+]
+dependencies = [
+    "ultralytics == 8.2.4",
+    "pyvips == 2.2.3",
+    "scanpy == 1.10.1",
+    "kwimage == 0.9.25"
+]
+
+requires-python = ">=3.9"
 
 [tool.setuptools.packages.find]
 # All the following settings are optional:

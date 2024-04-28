@@ -1,6 +1,6 @@
 __version__ = "0.0.1"
 
-from .helpers import *
+from .utils import *
 from .readers import *
 
 __all__ = [
@@ -8,5 +8,6 @@ __all__ = [
     'XeniumReader', 
     'VisiumReader', 
     'STReader', 
-    'autoalign_with_fiducials'
+    'autoalign_with_fiducials',
+    'write_10X_h5'
 ]

@@ -7,10 +7,9 @@ from PIL import Image
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import os
-from tqdm import tqdm
 from kwimage.im_cv2 import imresize
 import matplotlib.collections as mc
-import tifffile
+from typing import Dict
 
 orientations = {
     'hourglass': 0,
@@ -79,26 +78,13 @@ def _get_fiducials_center(template):
     return dict
 
 
-template65 = SpotGridTemplate('template65.json', '6.5mm', ratio=19./1477)
+template65 = SpotGridTemplate('spot_templates/template65.json', '6.5mm', ratio=19./1477)
 
-template11 = SpotGridTemplate('template11.json', '11mm', ratio=20./2622)
+template11 = SpotGridTemplate('spot_templates/template11.json', '11mm', ratio=20./2622)
 
 
 
-def _spots_to_file(path, spots, fiducials, template):
-    dict = {}
-    arr_spots = []
-    template_dict = template.raw_dict
-    for i in range(len(template_dict['oligo'])):
-        oligo = template_dict['oligo'][i]
-        arr_spots.append({
-            'tissue': True,
-            'row': oligo['row'],
-            'col': oligo['col'],
-            'imageX': spots[i][0],
-            'imageY': spots[i][1]
-        })
-    dict['oligo'] = arr_spots
+def _spots_to_file(path, dict):
     json_object = json.dumps(dict)
     with open(path, 'w') as f:
         f.write(json_object)
@@ -203,7 +189,23 @@ def _match_template_type(img, boxes):
         return template65, np.mean(edge_lengths)
 
 
-def autoalign_with_fiducials(fullres_img, save_dir, name=''):
+def _spots_to_json(template, spots):
+    dict = {}
+    arr_spots = []
+    template_dict = template.raw_dict
+    for i in range(len(template_dict['oligo'])):
+        oligo = template_dict['oligo'][i]
+        arr_spots.append({
+            'tissue': True,
+            'row': oligo['row'],
+            'col': oligo['col'],
+            'imageX': spots[i][0],
+            'imageY': spots[i][1]
+        })
+    dict['oligo'] = arr_spots
+
+
+def autoalign_with_fiducials(fullres_img, save_dir=None, name='') -> Dict:
 
     img, factor = _resize_to_target(fullres_img)
     result = model(img)[0]
@@ -274,37 +276,24 @@ def autoalign_with_fiducials(fullres_img, save_dir, name=''):
     aligned_spots = warp_mat @ spots.T
     aligned_spots = aligned_spots.T
                     
-
-    #filename = path.split('/')[-1].split('.')[0]
-    save_path = os.path.join(save_dir, name + 'autoalignment.png')
-
-
-    _alignment_plot_to_file(boxes_to_match, 
-                            template, 
-                            edge_len, 
-                            aligned_spots, 
-                            factor,
-                            aligned_fiducials,
-                            img,
-                            save_path)
-
-    _spots_to_file(os.path.join(save_dir, name + 'autoalignment.json'), aligned_spots, aligned_fiducials, template)
-
-
-def main():
-    path_image = '/home/paul/Documents/us.bwh/detector/val/test_rotated.png'
-    input_dir = '/home/paul/Documents/us.bwh/detector/test'
-    for path in tqdm(os.listdir(input_dir)):
-        if path.endswith('.txt'):
-            continue
-        Image.MAX_IMAGE_PIXELS = None
-        path_image = os.path.join(input_dir, path)
-        #full_res_img = np.array(Image.open(path_image))
-        full_res_img = tifffile.imread(path_image)
-        autoalign_with_fiducials(full_res_img, 
-                            '/home/paul/Documents/us.bwh/detector/aligned')
-
-
-if __name__ == "__main__":
-    main()
     
+    dict =  _spots_to_json(template, spots)
+    
+    if save_dir is not None:
+        save_path = os.path.join(save_dir, name + 'autoalignment.png')
+
+        _alignment_plot_to_file(boxes_to_match, 
+                                template, 
+                                edge_len, 
+                                aligned_spots, 
+                                factor,
+                                aligned_fiducials,
+                                img,
+                                save_path)
+
+
+        _spots_to_file(os.path.join(save_dir, name + 'autoalignment.json'), dict)
+        
+        
+    return dict
+
