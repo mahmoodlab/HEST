@@ -44,6 +44,27 @@ class SpotPacking(Enum):
     ORANGE_CRATE_PACKING = 0
     GRID_PACKING = 1
     
+
+def mask_and_patchify(meta_df):
+    for index, row in tqdm(meta_df.iterrows(), total=len(meta_df)):
+        path = _get_path_from_meta_row(row)
+        id = row['id']
+        img_path = f'/media/ssd2/hest/pyramidal/{id}.tif'
+        mask_path = f'/media/ssd2/hest/masks/{id}_mask.npy'
+        adata_path = f'/media/ssd2/hest/adata/{id}.h5ad'
+        adata = sc.read_h5ad(adata_path)
+        pixel_size = path['pixel_size_estimated']
+        mask = np.load(mask_path)
+        img = tifffile.imread(img_path)
+        patchify('/media/ssd2/hest/patches',
+                           adata,
+                           img,
+                           pixel_size,
+                           id,
+                           mask)
+        
+    
+    
     
 def mask_spots(
     adata: sc.AnnData,
@@ -103,7 +124,7 @@ def patchify(
     img: np.ndarray, 
     src_pixel_size: float,
     name: str = None,
-    patch_size_um: float=100,
+    patch_size_um: float=112,
     tissue_mask: np.ndarray = None,
     target_pixel_size: float=0.5,
     verbose=0
