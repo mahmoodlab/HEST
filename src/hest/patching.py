@@ -218,6 +218,7 @@ def scale_holes_dim(contours, scale):
     """
     return [[np.array(hole * scale, dtype = 'int32') for hole in holes] for holes in contours]
 
+
 def mask_and_patchify(meta_df: pd.DataFrame):
     for index, row in tqdm(meta_df.iterrows(), total=len(meta_df)):
         #path = _get_path_from_meta_row(row)
