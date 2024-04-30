@@ -109,7 +109,6 @@ def _get_orientation(box, boxes):
     else:
         return 4
 
-model = YOLO('best.pt')
 
 def _resize_to_target(img):
     TARGET_PIXEL_EDGE = 1000
@@ -206,6 +205,7 @@ def _spots_to_json(template, spots):
 
 
 def autoalign_with_fiducials(fullres_img, save_dir=None, name='') -> Dict:
+    model = YOLO('best.pt')
 
     img, factor = _resize_to_target(fullres_img)
     result = model(img)[0]

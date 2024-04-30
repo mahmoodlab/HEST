@@ -39,22 +39,22 @@ def initsave_hdf5(output_fpath, asset_dict, attr_dict= None, mode='a', static_sh
                 if verbose:
                     print(key, data_shape, chunk_shape, max_shape)
 
-                #dset = f.create_dataset(key, 
-                #                        shape=data_shape, 
-                #                        maxshape=max_shape, 
-                #                        chunks=chunk_shape, 
-                ##                        dtype=data_type)
-                #    
-                #dset[:] = val
+                dset = f.create_dataset(key, 
+                                        shape=data_shape, 
+                                        maxshape=max_shape, 
+                                        chunks=chunk_shape, 
+                                        dtype=data_type)
+                    
+                dset[:] = val
 
                 ### Save attribute dictionary
-                #if attr_dict is not None:
-                #    if key in attr_dict.keys():
-                #        for attr_key, attr_val in attr_dict[key].items():
-                #            dset.attrs[attr_key] = attr_val
-            #else:
-            #    dset = f[key]
-            #    dset.resize(len(dset) + data_shape[0], axis=0)
-            #    dset[-data_shape[0]:] = val
+                if attr_dict is not None:
+                    if key in attr_dict.keys():
+                        for attr_key, attr_val in attr_dict[key].items():
+                            dset.attrs[attr_key] = attr_val
+            else:
+                dset = f[key]
+                dset.resize(len(dset) + data_shape[0], axis=0)
+                dset[-data_shape[0]:] = val
                 
     return output_fpath
