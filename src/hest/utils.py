@@ -25,6 +25,7 @@ import h5py
 import shutil
 import gzip
 from scipy import sparse
+from typing import List
 
 from .autoalign import autoalign_with_fiducials
 import seaborn as sns
@@ -36,11 +37,59 @@ from .vst_save_utils import initsave_hdf5
 from scipy.spatial import distance
 from sklearn.neighbors import KDTree
 
-import openslide
+#import openslide
 
 
 
 Image.MAX_IMAGE_PIXELS = 93312000000
+
+def get_k_mean_expressed_genes_from_df(meta_df: pd.DataFrame, k: int, save_dir: str=None) -> List[str]:
+    adata_list = []
+    for index, row in meta_df.iterrows():
+        id = row['id']
+        adata = sc.read_h5ad(f"/media/ssd2/hest/adata/{id}.h5ad")
+        adata_list.append(adata)
+    return get_k_mean_expressed_genes(adata_list, k, save_dir=save_dir)
+
+
+def get_k_mean_expressed_genes(adata_list: List[sc.AnnData], k: int, save_dir: str=None) -> List[str]:
+    
+    common_genes = None
+    stacked_expressions = None
+
+    # Get the common genes
+    for adata in adata_list:
+        curr_genes = np.array(adata.to_df().columns)
+        if common_genes is None:
+            common_genes = curr_genes
+        else:
+            common_genes = np.intersect1d(common_genes, curr_genes)
+
+    for adata in adata_list:
+        #curr_genes = np.array(adata.to_df().columns)
+        #if common_genes is None:
+        #    common_genes = curr_genes
+        #else:
+        ##    if not np.array_equal(common_genes, curr_genes):
+        #        raise Exception("The gene panel must be the same for all the samples")
+
+        if stacked_expressions is None:
+            stacked_expressions = adata.to_df()[common_genes]
+        else:
+            stacked_expressions = pd.concat([stacked_expressions, adata.to_df()[common_genes]])
+
+    nb_spots = len(stacked_expressions)
+    mean_expression = stacked_expressions.sum() / nb_spots
+    
+    top_k = mean_expression.nlargest(k).index
+
+    if save_dir is not None:
+        json_dict = {'genes': list(top_k)}
+        with open(save_dir, mode='w') as json_file:
+            json.dump(json_dict, json_file)
+
+    return top_k
+
 
 
 class SpotPacking(Enum):
