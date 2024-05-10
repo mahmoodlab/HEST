@@ -1,198 +1,32 @@
-from abc import abstractmethod
-from dataclasses import dataclass
-import os
 import json
-from typing import Tuple, Dict
-import numpy as np
-import scanpy as sc
-import pandas as pd
+import math
+import os
 import shutil
 import traceback
-from PIL import Image
+from abc import abstractmethod
+from typing import Dict, Tuple
+
+import cv2
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import pyvips
+import scanpy as sc
 from matplotlib import rcParams
+from PIL import Image
 from tqdm import tqdm
-from src.hest.utils import _find_first_file_endswith, _helper_mex, _txt_matrix_to_adata, \
-    _raw_count_to_adata, GSE234047_to_adata, GSE180128_to_adata, GSE203165_to_adata, _load_image, \
-    _align_tissue_positions, _alignment_file_to_tissue_positions, autoalign_with_fiducials, \
-    _find_pixel_size_from_spot_coords, _register_downscale_img, _metric_file_do_dict, \
-    align_ST_counts_with_transform, raw_counts_to_pixel, _find_biggest_img, write_10X_h5, _save_scalefactors, \
-    _plot_verify_pixel_size, xenium_to_pseudo_visium, write_wsi, GSE167096_to_adata, GSE217828_to_adata, \
-    align_dev_human_heart, align_her2, align_eval_qual_dataset, _get_path_from_meta_row, SpotPacking, check_arg
 
-
-ALIGNED_HE_FILENAME = 'aligned_fullres_HE.tif'
-    
-    
-"""class HESTMeta:
-    def __init__(self, pixel_size_um_embedded, pixel_size_um_estimated, ):
-        self.additional = {}
-        self.pixel_size_estimated = pixel_size_um_estimated
-        self.pixel_size_embedded = pixel_size_um_estimated
-        self.adata_nb_col = adata_nb_col
-        self.fullres_px_width = fullres_px_width
-        self.fullres_px_height = fullres_px_height"""
-    
-    
-@dataclass(frozen=True)
-class HESTData:
-    """
-    Object representing a single Spatial Transcriptomics sample along with a full resolution H&E image and metadatas
-    """
-    h5_path = None
-    spatial_path = None
-    save_positions = True
-    
-    
-    def _verify_format(self, adata):
-        assert 'spatial' in adata.obsm
-        #for field in ['in_tissue', 'array_row', 'array_col']:
-        #    if field not in adata.obs.columns:
-        #        raise ValueError('{field} column missing in adata.obs')
-        try:
-            adata.uns['spatial']['ST']['images']['downscaled_fullres']
-        except KeyError:
-            raise ValueError('Downscaled image missing in adata.obs')
-            
-    
-    
-    def __init__(
-        self, 
-        adata: sc.AnnData,
-        img: np.ndarray, 
-        meta: Dict, 
-        spot_size: float, 
-        spot_inter_dist: float
-    ):
-        """
-        Args:
-            adata (sc.AnnData): Spatial Transcriptomics data in a scanpy Anndata object
-                adata must contain a downscaled image in ['spatial']['ST']['images']['downscaled_fullres']
-                and the following collomns in adata.obs: ['in_tissue', 'array_row', 'array_col']
-            img (np.ndarray): Full resolution image corresponding to the ST data
-            meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
-        """
-        self.adata = adata
-        
-        self.img = img
-        self.meta = meta
-        self._verify_format(adata)
-        self.pixel_size_embedded = meta['pixel_size_um_embedded']
-        self.pixel_size_estimated = meta['pixel_size_um_estimated']
-        self.spots_under_tissue = meta['spots_under_tissue']
-        
-        
-    
-    def __repr__(self):
-        rep = f"""'pixel_size_um_embedded' is {self.pixel_size_embedded}
-        'pixel_size_um_estimated' is {self.pixel_size_estimated}
-        'spots_under_tissue' is {self.spots_under_tissue}"""
-        return rep
-        
-    
-    def save_spatial_plot(self, save_path: str):
-        """Save the spatial plot from that STObject
-
-        Args:
-            save_path (str): _description_
-        """
-        print("Plotting spatial plots...")
-             
-        sc.pl.spatial(self.adata, show=None, img_key="downscaled_fullres", color=['total_counts'], title=f"in_tissue spots")
-        
-        filename = f"spatial_plots.png"
-        
-        # Save the figure
-        plt.savefig(os.path.join(save_path, filename))
-        plt.close()  # Close the plot to free memory
-        print(f"H&E overlay spatial plots saved in {save_path}")
-    
-        
-    def save(self, path: str):
-        try:
-            self.adata.write(os.path.join(path, 'aligned_adata.h5ad'))
-        except:
-            #traceback.print_exc()
-            # workaround from https://github.com/theislab/scvelo/issues/255
-            self.adata.__dict__['_raw'].__dict__['_var'] = self.adata.__dict__['_raw'].__dict__['_var'].rename(columns={'_index': 'features'})
-            self.adata.write(os.path.join(path, 'aligned_adata.h5ad'))
-        
-        if self.h5_path is not None:
-            shutil.copy(self.h5_path, os.path.join(path, 'filtered_feature_bc_matrix.h5'))
-        else:
-            write_10X_h5(self.adata, os.path.join(path, 'filtered_feature_bc_matrix.h5'))
-        
-        if self.spatial_path is not None:
-            shutil.copytree(self.spatial_path, os.path.join(path, 'spatial'), dirs_exist_ok=True)
-        else:
-            os.makedirs(os.path.join(path, 'spatial'), exist_ok=True)
-            _save_scalefactors(self.adata, os.path.join(path, 'spatial/scalefactors_json.json'))
-
-        df = self.adata.obs
-        
-        if self.save_positions:
-            tissue_positions = df[['in_tissue', 'array_row', 'array_col', 'pxl_row_in_fullres', 'pxl_col_in_fullres']]
-            tissue_positions.to_csv(os.path.join(path, 'spatial/tissue_positions.csv'), index=True, index_label='barcode')
-        
-        self.meta['adata_nb_col'] = len(self.adata.var_names)
-        self.meta['fullres_px_width'] = self.img.shape[1]
-        self.meta['fullres_px_height'] = self.img.shape[0]
-        with open(os.path.join(path, 'metrics.json'), 'w') as json_file:
-            json.dump(self.meta, json_file) 
-        
-        downscaled_img = self.adata.uns['spatial']['ST']['images']['downscaled_fullres']
-        down_fact = self.adata.uns['spatial']['ST']['scalefactors']['tissue_downscaled_fullres_scalef']
-        down_img = Image.fromarray(downscaled_img)
-        down_img.save(os.path.join(path, 'downscaled_fullres.jpeg'))
-        
-        pixel_size_embedded = self.meta['pixel_size_um_embedded']
-        pixel_size_estimated = self.meta['pixel_size_um_estimated']
-        
-        
-        _plot_verify_pixel_size(downscaled_img, down_fact, pixel_size_embedded, pixel_size_estimated, os.path.join(path, 'pixel_size_vis.png'))
-        use_embedded = not self.save_positions
-        
-        write_wsi(self.img, os.path.join(path, ALIGNED_HE_FILENAME), self.meta, use_embedded_size=use_embedded)
-        
-        
-    def plot_genes(self, path, top_k=300, plot_spatial=True):
-        #self.adata.obs['in_tissue_cat'] = self.adata.obs['in_tissue_cat'].astype('category')
-        #sc.tl.rank_genes_groups(self.adata, groupby='in_tissue', method='wilcoxon')
-        sums = np.array(np.sum(self.adata.X, axis=0))[0]
-
-        # Sort genes based on variability
-        top_genes_mask = np.argsort(-sums)[:top_k]  # Sort in descending order
-        top_genes = self.adata.var_names[top_genes_mask]
-        
-        
-        print('saving gene plots...')
-        FIGSIZE = (15, 5)
-        old_figsize = rcParams["figure.figsize"]
-        os.makedirs(os.path.join(path, 'gene_plots'), exist_ok=True)
-        if os.path.exists(os.path.join(path, 'gene_bar_plots')):
-            # Remove the directory if it exists
-            shutil.rmtree(os.path.join(path, 'gene_bar_plots'))
-        os.makedirs(os.path.join(path, 'gene_bar_plots'), exist_ok=True)
-
-        #gene_names = [name for name in self.adata.var_names if ('BLANK' not in name and 'NegControl' not in name)]
-        gene_names = top_genes
-
-        adata_df = self.adata.to_df()
-        for gene_name in tqdm(gene_names):
-            col = adata_df[gene_name]
-            plt.close()
-            if plot_spatial:
-                sc.pl.spatial(self.adata, show=None, img_key="downscaled_fullres", color=gene_name) 
-                plt.savefig(os.path.join(path, 'gene_plots', f'{gene_name}.png'))
-                plt.close()  # Close the plot to free memory     
-            else:
-                rcParams["figure.figsize"] = FIGSIZE
-                plt.hist(col.values, bins=50, range=(0, 2000))
-                # Add labels and title
-                plt.ylabel(f'{gene_name} count per spot')            
-                plt.savefig(os.path.join(path, 'gene_bar_plots', f'{gene_name}.png'))
-                plt.close()  # Close the plot to free memory
-        rcParams["figure.figsize"] = old_figsize
+from src.hest.custom_readers import (GSE167096_to_adata, GSE180128_to_adata,
+                                     GSE203165_to_adata, GSE217828_to_adata, GSE234047_to_adata, align_ST_counts_with_transform,
+                                     align_dev_human_heart, align_eval_qual_dataset, align_her2, raw_count_to_adata, raw_counts_to_pixel)
+from src.hest.HESTData import HESTData
+from src.hest.utils import (ALIGNED_HE_FILENAME, SpotPacking,
+                            get_path_from_meta_row, autoalign_visium,
+                            check_arg, find_biggest_img,
+                            find_first_file_endswith,
+                            find_pixel_size_from_spot_coords, helper_mex,
+                            load_image, metric_file_do_dict,
+                            register_downscale_img)
 
 
 class VisiumHESTData(HESTData): 
@@ -202,6 +36,7 @@ class VisiumHESTData(HESTData):
 class STHESTData(HESTData):
     def __init__(self, adata: sc.AnnData, img: np.ndarray, meta: Dict):
         super().__init__(adata, img, meta, spot_size=100., spot_inter_dist=200.)
+        self.save_positions = False
         
 class XeniumHESTData(HESTData):
     def __init__(self, adata: sc.AnnData, img: np.ndarray, meta: Dict):
@@ -220,7 +55,7 @@ class Reader:
             path (st): path to the directory containing all the necessary files
 
         Returns:
-            STObject: STObject that was read
+            HESTData: STObject that was read
         """
         
         hest_object = self._auto_read(path)
@@ -252,25 +87,41 @@ def read_visium_positions_old(tissue_position_list_path):
 
 
 class VisiumReader(Reader):
+    """10x Genomics Visium reader"""
+    
+    def auto_read(self, path) -> VisiumHESTData:
+        """
+        Automatically detect the file names and determine a reading strategy based on the
+        detected files. For more control on the reading process, consider using `read()` instead
+        
+        
+
+        Args:
+            path (st): path to the directory containing all the necessary files
+
+        Returns:
+            VisiumHESTObject: STObject that was read
+        """
+        super().auto_read(path)
+        
     
     def _auto_read(self, path) -> VisiumHESTData:
         custom_adata = None
-        img_filename = _find_biggest_img(path)
+        img_filename = find_biggest_img(path)
         
-        # move files to right folders
-        tissue_positions_path = _find_first_file_endswith(path, 'tissue_positions_list.csv')
+        tissue_positions_path = find_first_file_endswith(path, 'tissue_positions_list.csv')
         if tissue_positions_path is None:
-            tissue_positions_path = _find_first_file_endswith(path, 'tissue_positions.csv')
-        scalefactors_path = _find_first_file_endswith(path, 'scalefactors_json.json')
-        hires_path = _find_first_file_endswith(path, 'tissue_hires_image.png')
-        lowres_path = _find_first_file_endswith(path, 'tissue_lowres_image.png')
-        spatial_coord_path = _find_first_file_endswith(path, 'spatial')
-        raw_count_path = _find_first_file_endswith(path, 'raw_count.txt')
+            tissue_positions_path = find_first_file_endswith(path, 'tissue_positions.csv')
+        scalefactors_path = find_first_file_endswith(path, 'scalefactors_json.json')
+        hires_path = find_first_file_endswith(path, 'tissue_hires_image.png')
+        lowres_path = find_first_file_endswith(path, 'tissue_lowres_image.png')
+        spatial_coord_path = find_first_file_endswith(path, 'spatial')
+        raw_count_path = find_first_file_endswith(path, 'raw_count.txt')
         if spatial_coord_path is None and (tissue_positions_path is not None or \
                 scalefactors_path is not None or hires_path is not None or \
                 lowres_path is not None or spatial_coord_path is not None):
             os.makedirs(os.path.join(path, 'spatial'), exist_ok=True)
-            spatial_coord_path = _find_first_file_endswith(path, 'spatial')
+            spatial_coord_path = find_first_file_endswith(path, 'spatial')
         
         if tissue_positions_path is not None:
             shutil.move(tissue_positions_path, spatial_coord_path)
@@ -282,33 +133,33 @@ class VisiumReader(Reader):
             shutil.move(lowres_path, spatial_coord_path)
         
             
-        filtered_feature_path = _find_first_file_endswith(path, 'filtered_feature_bc_matrix.h5')
-        raw_feature_path = _find_first_file_endswith(path, 'raw_feature_bc_matrix.h5')
-        alignment_path = _find_first_file_endswith(path, 'alignment_file.json')
+        filtered_feature_path = find_first_file_endswith(path, 'filtered_feature_bc_matrix.h5')
+        raw_feature_path = find_first_file_endswith(path, 'raw_feature_bc_matrix.h5')
+        alignment_path = find_first_file_endswith(path, 'alignment_file.json')
         if alignment_path is None:
-            alignment_path = _find_first_file_endswith(path, 'alignment.json')
+            alignment_path = find_first_file_endswith(path, 'alignment.json')
         if alignment_path is None:
-            alignment_path = _find_first_file_endswith(path, 'alignment', anywhere=True)
+            alignment_path = find_first_file_endswith(path, 'alignment', anywhere=True)
         if alignment_path is None and os.path.exists(os.path.join(path, 'spatial')):
-            alignment_path = _find_first_file_endswith(os.path.join(path, 'spatial'), 'autoalignment.json')
+            alignment_path = find_first_file_endswith(os.path.join(path, 'spatial'), 'autoalignment.json')
         if alignment_path is None:
-            json_path = _find_first_file_endswith(path, '.json')
+            json_path = find_first_file_endswith(path, '.json')
             if json_path is not None:
                 f = open(json_path)
                 meta = json.load(f)
                 if 'oligo' in meta:
                     alignment_path = json_path
-        mex_path = _find_first_file_endswith(path, 'mex')
+        mex_path = find_first_file_endswith(path, 'mex')
         
-        mtx_path = _find_first_file_endswith(path, 'matrix.mtx.gz')
-        mtx_path = mtx_path if mtx_path is not None else  _find_first_file_endswith(path, 'matrix.mtx')
-        features_path = _find_first_file_endswith(path, 'features.tsv.gz')
-        features_path = features_path if features_path is not None else  _find_first_file_endswith(path, 'features.tsv')
-        barcodes_path = _find_first_file_endswith(path, 'barcodes.tsv.gz')
-        barcodes_path = barcodes_path if barcodes_path is not None else  _find_first_file_endswith(path, 'barcodes.tsv')
+        mtx_path = find_first_file_endswith(path, 'matrix.mtx.gz')
+        mtx_path = mtx_path if mtx_path is not None else  find_first_file_endswith(path, 'matrix.mtx')
+        features_path = find_first_file_endswith(path, 'features.tsv.gz')
+        features_path = features_path if features_path is not None else  find_first_file_endswith(path, 'features.tsv')
+        barcodes_path = find_first_file_endswith(path, 'barcodes.tsv.gz')
+        barcodes_path = barcodes_path if barcodes_path is not None else  find_first_file_endswith(path, 'barcodes.tsv')
         if mex_path is None and (mtx_path is not None or features_path is not None or barcodes_path is not None):
             os.makedirs(os.path.join(path, 'mex'), exist_ok=True)
-            mex_path = _find_first_file_endswith(path, 'mex')
+            mex_path = find_first_file_endswith(path, 'mex')
             shutil.move(mtx_path, mex_path)
             shutil.move(features_path, mex_path)
             shutil.move(barcodes_path, mex_path)
@@ -330,25 +181,25 @@ class VisiumReader(Reader):
             autoalign = 'never'
             
         if 'Spatiotemporal mapping of immune and stem cell dysregulation after volumetric muscle loss' in path:
-            my_path = _find_first_file_endswith(path, '.h5ad')
+            my_path = find_first_file_endswith(path, '.h5ad')
             custom_adata = sc.read_h5ad(my_path)
             
         if 'The neurons that restore walking after paralysis [spatial transcriptomics]' in path:
-            my_path = _find_first_file_endswith(path, '.h5ad')
+            my_path = find_first_file_endswith(path, '.h5ad')
             custom_adata = sc.read_h5ad(my_path)           
             
         if 'GENE EXPRESSION WITHIN A HUMAN CHOROIDAL NEOVASCULAR MEMBRANE USING SPATIAL TRANSCRIPTOMICS' in path:
             custom_adata = GSE234047_to_adata(path)
             
         if raw_count_path is not None:
-            custom_adata = _raw_count_to_adata(raw_count_path)
+            custom_adata = raw_count_to_adata(raw_count_path)
             
-        seurat_h5_path = _find_first_file_endswith(path, 'seurat.h5ad')
+        seurat_h5_path = find_first_file_endswith(path, 'seurat.h5ad')
         
         if img_filename is None:
             raise Exception(f"Couldn't detect an image in the directory {path}")
         
-        metric_file_path = _find_first_file_endswith(path, 'metrics_summary.csv')
+        metric_file_path = find_first_file_endswith(path, 'metrics_summary.csv')
         
         st_object = self.read(
             filtered_bc_matrix_path=filtered_feature_path,
@@ -363,9 +214,6 @@ class VisiumReader(Reader):
             autoalign=autoalign,
             save_autoalign=True
         )
-        
-        st_object.adata.var["mito"] = st_object.adata.var_names.str.startswith("MT-")
-        sc.pp.calculate_qc_metrics(st_object.adata, qc_vars=["mito"], inplace=True)
         
         st_object.h5_path = filtered_feature_path
         st_object.spatial_path = spatial_coord_path
@@ -419,7 +267,7 @@ class VisiumReader(Reader):
             ValueError: on invalid arguments
 
         Returns:
-            VisiumData: visium spatial data with spots aligned based on the provided arguments
+            VisiumHESTData: visium spatial data with spots aligned based on the provided arguments
         """
         
         print('alignment file is ', alignment_file_path)
@@ -431,9 +279,9 @@ class VisiumReader(Reader):
         elif raw_bc_matrix_path is not None:
             adata = sc.read_10x_h5(raw_bc_matrix_path)
         elif mex_path is not None:
-            _helper_mex(mex_path, 'barcodes.tsv.gz')
-            _helper_mex(mex_path, 'features.tsv.gz')
-            _helper_mex(mex_path, 'matrix.mtx.gz')
+            helper_mex(mex_path, 'barcodes.tsv.gz')
+            helper_mex(mex_path, 'features.tsv.gz')
+            helper_mex(mex_path, 'matrix.mtx.gz')
                 
             adata = sc.read_10x_mtx(mex_path)
         elif custom_adata is not None:
@@ -446,7 +294,7 @@ class VisiumReader(Reader):
         adata.var_names_make_unique()
         print(adata)
 
-        img, pixel_size_embedded = _load_image(img_path)
+        img, pixel_size_embedded = load_image(img_path)
         
         
         print('trim the barcodes')
@@ -456,8 +304,8 @@ class VisiumReader(Reader):
             adata.obs.index = [idx + '-1' for idx in adata.obs.index]
 
                
-        tissue_positions_path = _find_first_file_endswith(spatial_coord_path, 'tissue_positions.csv', exclude='aligned_tissue_positions.csv')
-        tissue_position_list_path = _find_first_file_endswith(spatial_coord_path, 'tissue_positions_list.csv')
+        tissue_positions_path = find_first_file_endswith(spatial_coord_path, 'tissue_positions.csv', exclude='aligned_tissue_positions.csv')
+        tissue_position_list_path = find_first_file_endswith(spatial_coord_path, 'tissue_positions_list.csv')
         
         tissue_position_exists = tissue_positions_path is not None or tissue_position_list_path is not None
             
@@ -468,8 +316,8 @@ class VisiumReader(Reader):
             os.makedirs(os.path.join(os.path.dirname(img_path), 'spatial'), exist_ok=True)
             if save_autoalign:
                 autoalign_save_dir = os.path.join(os.path.dirname(img_path), 'spatial')
-            align_json = autoalign_with_fiducials(img, autoalign_save_dir)
-            spatial_aligned = _alignment_file_to_tissue_positions('', adata, align_json)
+            align_json = autoalign_visium(img, autoalign_save_dir)
+            spatial_aligned = self._alignment_file_to_tissue_positions('', adata, align_json)
         
         elif tissue_position_exists:
             # SpaceRanger >= 2.0
@@ -480,7 +328,7 @@ class VisiumReader(Reader):
                 tissue_positions = read_visium_positions_old(tissue_position_list_path)
 
             tissue_positions.index = [idx[:18] for idx in tissue_positions.index]
-            spatial_aligned = _align_tissue_positions(
+            spatial_aligned = self._align_tissue_positions(
                 alignment_file_path, 
                 tissue_positions, 
                 adata
@@ -489,28 +337,28 @@ class VisiumReader(Reader):
             assert np.array_equal(spatial_aligned.index, adata.obs.index)
 
         elif alignment_file_path is not None:
-            spatial_aligned = _alignment_file_to_tissue_positions(alignment_file_path, adata)
+            spatial_aligned = self._alignment_file_to_tissue_positions(alignment_file_path, adata)
 
-            
-            col1 = spatial_aligned['pxl_col_in_fullres'].values
-            col2 = spatial_aligned['pxl_row_in_fullres'].values
-            
-            matrix = np.vstack((col1, col2)).T
-            
-            adata.obsm['spatial'] = matrix
         else:
             spatial_aligned = adata.obs[['in_tissue', 'array_row', 'array_col', 'pxl_col_in_fullres', 'pxl_row_in_fullres']]
 
+        col1 = spatial_aligned['pxl_col_in_fullres'].values
+        col2 = spatial_aligned['pxl_row_in_fullres'].values
+        
+        matrix = np.vstack((col1, col2)).T
+        
+        adata.obsm['spatial'] = matrix
 
-        pixel_size, spot_estimate_dist = _find_pixel_size_from_spot_coords(spatial_aligned)
+
+        pixel_size, spot_estimate_dist = find_pixel_size_from_spot_coords(spatial_aligned)
 
         adata.obs = spatial_aligned
             
-        _register_downscale_img(adata, img, pixel_size)
+        register_downscale_img(adata, img, pixel_size)
         
         dict = {}
         if metric_file_path is not None:
-            dict = _metric_file_do_dict(metric_file_path)
+            dict = metric_file_do_dict(metric_file_path)
             
         dict['pixel_size_um_embedded'] = pixel_size_embedded
         dict['pixel_size_um_estimated'] = pixel_size
@@ -524,8 +372,150 @@ class VisiumReader(Reader):
 
         return VisiumHESTData(adata, img, dict)
     
+
+    def _alignment_file_to_df(self, path, alignment_json=None):
+        if alignment_json is not None:
+            data = alignment_json
+        else:
+            f = open(path)
+            data = json.load(f)
+        
+        df = pd.DataFrame(data['oligo'])
+        
+        if 'cytAssistInfo' in data:
+            transform = np.array(data['cytAssistInfo']['transformImages'])
+            transform = np.linalg.inv(transform)
+            matrix = np.column_stack((df['imageX'], df['imageY'], np.ones((len(df['imageX']),))))
+            matrix = (transform @ matrix.T).T
+            df['imageX'] = matrix[:, 0]
+            df['imageY'] = matrix[:, 1]
+
+
+        return df
+    
+
+    def _alignment_file_to_tissue_positions(self, alignment_file_path, adata, alignment_json=None):
+        alignment_df = self._alignment_file_to_df(alignment_file_path, alignment_json)
+        alignment_df = alignment_df.rename(columns={
+            'tissue': 'in_tissue',
+            'row': 'array_row',
+            'col': 'array_col',
+            'imageX': 'pxl_col_in_fullres',
+            'imageY': 'pxl_row_in_fullres'
+        })
+        alignment_df['in_tissue'] = [True for _ in range(len(alignment_df))]
+
+        spatial_aligned = self._find_visium_slide_version(alignment_df, adata)
+        return spatial_aligned
+    
+
+    def _find_alignment_barcodes(self, alignment_df: str, barcode_path: str) -> pd.DataFrame:
+        barcode_coords = pd.read_csv(barcode_path, sep='\t', header=None)
+        barcode_coords = barcode_coords.rename(columns={
+            0: 'barcode',
+            1: 'array_col',
+            2: 'array_row'
+        })
+        barcode_coords['barcode'] += '-1'
+        
+        # space rangers provided barcode coords are 1 indexed whereas alignment file are 0 indexed
+        barcode_coords['array_col'] -= 1
+        barcode_coords['array_row'] -= 1
+
+        spatial_aligned = pd.merge(alignment_df, barcode_coords, on=['array_row', 'array_col'], how='inner')
+
+        spatial_aligned.index = spatial_aligned['barcode']
+
+        spatial_aligned = spatial_aligned[['in_tissue', 'array_row', 'array_col', 'pxl_col_in_fullres', 'pxl_row_in_fullres']]
+
+        return spatial_aligned    
+    
+
+    def _find_visium_slide_version(self, alignment_df: str, adata: sc.AnnData) -> str:
+        highest_nb_match = -1
+        version_file_name = None
+        barcode_dir = './barcode_coords/'
+        for barcode_path in os.listdir(barcode_dir):
+            spatial_aligned = self._find_alignment_barcodes(alignment_df, os.path.join(barcode_dir, barcode_path))
+            nb_match = len(pd.merge(spatial_aligned, adata.obs, left_index=True, right_index=True))
+            if nb_match > highest_nb_match:
+                highest_nb_match = nb_match
+                match_spatial_aligned = spatial_aligned
+            #if len(spatial_aligned[spatial_aligned.index.isin(adata.obs.index)]) > highest_nb_match:
+        
+        if highest_nb_match == 0:
+            raise Exception(f"Couldn't find a visium having the following spot barcodes: {adata.obs.index}")
+            
+        spatial_aligned = match_spatial_aligned.reindex(adata.obs.index)
+        return spatial_aligned
+    
+
+    def _align_tissue_positions(
+        self,
+        alignment_file_path, 
+        tissue_positions, 
+        adata
+    ):
+        if alignment_file_path is not None:
+
+            alignment_df = self._alignment_file_to_df(alignment_file_path)
+            
+            if len(alignment_df) > 0:
+                alignment_df = alignment_df.rename(columns={
+                    'row': 'array_row',
+                    'col': 'array_col',
+                    'imageX': 'pxl_col_in_fullres', # TODO had a problem here for the prostate dataset
+                    'imageY': 'pxl_row_in_fullres'
+                })
+                tissue_positions = tissue_positions.rename(columns={
+                    'pxl_col_in_fullres': 'pxl_col_in_fullres_old',
+                    'pxl_row_in_fullres': 'pxl_row_in_fullres_old'
+                })
+            
+                alignment_df = alignment_df[['array_row', 'array_col', 'pxl_col_in_fullres', 'pxl_row_in_fullres']]
+                tissue_positions['barcode'] = tissue_positions.index
+                df_merged = alignment_df.merge(tissue_positions, on=['array_row', 'array_col'], how='inner')
+                df_merged.index = df_merged['barcode']
+                df_merged = df_merged.drop('barcode', axis=1)
+                df_merged = df_merged.loc[adata.obs.index]
+                df_merged = df_merged.reindex(adata.obs.index)
+                
+                col1 = df_merged['pxl_col_in_fullres'].values
+                col2 = df_merged['pxl_row_in_fullres'].values
+                matrix = (np.vstack((col1, col2))).T
+                
+                adata.obsm['spatial'] = matrix 
+                
+                spatial_aligned = df_merged
+                
+            else:
+                col1 = tissue_positions['pxl_col_in_fullres'].values
+                col2 = tissue_positions['pxl_row_in_fullres'].values        
+                    
+                spatial_aligned = tissue_positions.reindex(adata.obs.index)
+        else:
+            spatial_aligned = tissue_positions
+            spatial_aligned = spatial_aligned.loc[adata.obs.index]
+        return spatial_aligned
+    
     
 class STReader(Reader):
+    
+    def auto_read(self, path) -> STHESTData:
+        """
+        Automatically detect the file names and determine a reading strategy based on the
+        detected files. For more control on the reading process, consider using `read()` instead
+        
+        
+
+        Args:
+            path (st): path to the directory containing all the necessary files
+
+        Returns:
+            STHESTData: STObject that was read
+        """
+        super().auto_read(path)
+
     
     def _auto_read(self, path) -> STHESTData:
         packing = SpotPacking.GRID_PACKING
@@ -534,7 +524,7 @@ class STReader(Reader):
         inter_spot_dist = 200
         spot_diameter = 100
 
-        img_path = _find_biggest_img(path)
+        img_path = find_biggest_img(path)
         
         for file in os.listdir(path):
             if 'meta' in file:
@@ -568,7 +558,7 @@ class STReader(Reader):
             spot_diameter = 150.
 
         #if 'Spatial Transcriptomics of human fetal liver' in path:
-        #    GSE167096_count_path = _find_first_file_endswith(path, 'table_symbol.txt')
+        #    GSE167096_count_path = find_first_file_endswith(path, 'table_symbol.txt')
         #    custom_adata = GSE167096_to_h5(GSE167096_count_path)
             
             
@@ -598,11 +588,23 @@ class STReader(Reader):
             spot_diameter=spot_diameter,
             custom_adata=custom_adata)
         
-        sc.pp.calculate_qc_metrics(st_object.adata, inplace=True)
-        
-        st_object.save_positions = False
-        
         return st_object
+    
+    
+    def auto_read(self, path) -> STHESTData:
+        """
+        Automatically detect the file names and determine a reading strategy based on the
+        detected files. For more control on the reading process, consider using `read()` instead
+        
+        
+
+        Args:
+            path (st): path to the directory containing all the necessary files
+
+        Returns:
+            STHESTData: STHESTData that was read
+        """
+        super().auto_read(path)
     
     
     def _GSE144239_to_adata(self, raw_counts_path, spot_coord_path):
@@ -622,10 +624,10 @@ class STReader(Reader):
     def _ADT_to_adata(self, img_path, raw_counts_path):
         basedir = os.path.dirname(img_path)
         # combine spot coordinates into a single dataframe
-        pre_adt_path= _find_first_file_endswith(basedir, 'pre-ADT.tsv')
-        post_adt_path = _find_first_file_endswith(basedir, 'postADT.tsv')
+        pre_adt_path= find_first_file_endswith(basedir, 'pre-ADT.tsv')
+        post_adt_path = find_first_file_endswith(basedir, 'postADT.tsv')
         if post_adt_path is None:
-            post_adt_path = _find_first_file_endswith(basedir, 'post-ADT.tsv')
+            post_adt_path = find_first_file_endswith(basedir, 'post-ADT.tsv')
         counts = pd.read_csv(raw_counts_path, index_col=0, sep='\t')
         pre_adt = pd.read_csv(pre_adt_path, sep='\t')
         post_adt = pd.read_csv(post_adt_path, sep='\t')
@@ -654,7 +656,7 @@ class STReader(Reader):
         custom_adata=None
     ) -> STHESTData:
         #raw_counts = pd.read_csv(raw_counts_path, sep='\t')
-        img, pixel_size_embedded = _load_image(img_path)
+        img, pixel_size_embedded = load_image(img_path)
         
         if custom_adata is not None:
             adata = custom_adata
@@ -689,6 +691,7 @@ class STReader(Reader):
                 col2 = merged['Y'].values
                     
                 matrix = (np.vstack((col1, col2))).T
+                
             else:
                 matrix = raw_counts_to_pixel(raw_counts, img)
                 raw_counts = raw_counts.transpose()
@@ -702,9 +705,15 @@ class STReader(Reader):
         my_df['array_row'] = [round(float(idx.split('x')[0])) for idx in my_df.index]
         my_df['array_col'] = [round(float(idx.split('x')[1])) for idx in my_df.index]
         
+        adata.obs['array_row'] = my_df['array_row']
+        adata.obs['array_col'] = my_df['array_col']
+        adata.obs['pxl_col_in_fullres'] = my_df['pxl_col_in_fullres']
+        adata.obs['pxl_row_in_fullres'] = my_df['pxl_row_in_fullres']
+        adata.obs['in_tissue'] = [True for _ in range(len(adata.obs))]
+        
         # TODO might not be precise if we use round on the column and row
-        pixel_size, spot_estimate_dist = _find_pixel_size_from_spot_coords(my_df, inter_spot_dist=inter_spot_dist, packing=packing)
-        _register_downscale_img(adata, img, pixel_size, spot_size=spot_diameter)
+        pixel_size, spot_estimate_dist = find_pixel_size_from_spot_coords(my_df, inter_spot_dist=inter_spot_dist, packing=packing)
+        register_downscale_img(adata, img, pixel_size, spot_size=spot_diameter)
         
         dict = {}
         dict['pixel_size_um_embedded'] = pixel_size_embedded
@@ -720,12 +729,33 @@ class STReader(Reader):
         print(f"'pixel_size_um_estimated' is {pixel_size} estimated by averaging over {spot_estimate_dist} spots")
         print(f"'spots_under_tissue' is {len(adata.obs)}")
         
+        # make all the indices the same length (important when saving to h5)
+        assert 'x' in adata.obs.index[0]
+        adata.obs.index = [idx.split('x')[0].zfill(3) + 'x' + idx.split('x')[1].zfill(3) for idx in adata.obs.index]
+        
         return STHESTData(adata, img, dict)
     
     
 class XeniumReader(Reader):
+    """ 10x Xenium reader """
+    
+    def auto_read(self, path) -> XeniumHESTData:
+        """
+        Automatically detect the file names and determine a reading strategy based on the
+        detected files. For more control on the reading process, consider using `read()` instead
+        
+        
+
+        Args:
+            path (st): path to the directory containing all the necessary files
+
+        Returns:
+            XeniumHESTData: XeniumHESTData that was read
+        """
+        super().auto_read(path)
+    
     def _auto_read(self, path) -> XeniumHESTData:
-        img_filename = _find_biggest_img(path)
+        img_filename = find_biggest_img(path)
                 
         alignment_path = None
         for file in os.listdir(path):
@@ -734,14 +764,12 @@ class XeniumReader(Reader):
         
         st_object = self.read(
             img_path=os.path.join(path, img_filename),
-            experiment_path=os.path.join(path, 'xenium.experiment'),
+            experiment_path=os.path.join(path, 'experiment.xenium'),
             alignment_file_path=alignment_path,
             feature_matrix_path=os.path.join(path, 'cell_feature_matrix.h5'), 
             transcripts_path=os.path.join(path, 'transcripts.parquet'),
             cells_csv_path=os.path.join(path, 'cells.csv')
         )
-        
-        sc.pp.calculate_qc_metrics(st_object.adata, inplace=True)
         
         return st_object
     
@@ -794,7 +822,7 @@ class XeniumReader(Reader):
         os.makedirs(os.path.join(cur_dir, 'gene_plots'), exist_ok=True)
         os.makedirs(os.path.join(cur_dir, 'gene_bar_plots'), exist_ok=True)
 
-        gene_names = [name for name in adata.var_names if ('BLANK' not in name and 'NegControl' not in name)]
+        gene_names = [name for name in adata.var_names if ('BLANK' not in name and 'NegControl' not in name and 'DEPRECATED' not in name)]
 
         adata_df = adata.to_df()
         for gene_name in tqdm(gene_names):
@@ -821,7 +849,7 @@ class XeniumReader(Reader):
         cells_csv_path: str = None,
         plot_genes: bool = False,
         use_cache: bool = False,
-        pseudo_visium: bool = False
+        pseudo_visium: bool = True
     ) -> XeniumHESTData:
         if not pseudo_visium and (feature_matrix_path is None or cells_csv_path is None):
             raise ValueError('a feature_matrix_path needs to be specified if not using pseudo-visium pooling')
@@ -832,15 +860,14 @@ class XeniumReader(Reader):
         
         cur_dir = os.path.dirname(transcripts_path)   
         
-        img, pixel_size_embedded = _load_image(img_path)
+        img, pixel_size_embedded = load_image(img_path)
         
         dict = {}
         dict['pixel_size_um_embedded'] = pixel_size_embedded
-
-        experiment_file = open(os.path.join(cur_dir, 'experiment.xenium'))
-        dict_exp = json.load(experiment_file)
+        
         with open(experiment_path) as f:
-            pixel_size_morph = json.load(f)['pixel_size']
+            dict_exp = json.load(f)
+            pixel_size_morph = dict_exp['pixel_size']
         dict = {**dict, **dict_exp}
         
         if os.path.exists(os.path.join(cur_dir, 'cached_pseudo_visium.h5ad')) and use_cache:
@@ -870,7 +897,7 @@ class XeniumReader(Reader):
                 adata.obsm["spatial"] = adata.obs[["x_centroid", "y_centroid"]].copy().to_numpy()
                 dict['cells_under_tissue'] = len(adata.obs)
         
-            _register_downscale_img(adata, img, dict['pixel_size_um_estimated'])
+            register_downscale_img(adata, img, dict['pixel_size_um_estimated'])
             
             adata.write_h5ad(os.path.join(cur_dir, 'cached_pseudo_visium.h5ad'))
             with open(os.path.join(cur_dir, 'cached_metrics.json'), 'w') as f:
@@ -885,6 +912,7 @@ class XeniumReader(Reader):
     
 
 def reader_factory(path: str) -> Reader:
+    """For internal use, determine the reader based on the path"""
     path = path.lower()
     if 'visium-hd' in path:
         raise NotImplementedError('implement visium-hd')
@@ -896,21 +924,103 @@ def reader_factory(path: str) -> Reader:
         return STReader()
         
     
-def read_and_save(path, save_plots=True, plot_genes=False):
+def read_and_save(path: str, save_plots=True, plot_genes=False, pyramidal=True):
+    """For internal use, determine the appropriate reader based on the raw data path, and
+    automatically process the data at that location, then the processed files are dumped
+    to processed/
+
+    Args:
+        path (str): path of the raw data
+        save_plots (bool, optional): whenever to save the spatial plots. Defaults to True.
+        plot_genes (bool, optional): whenever to plot the genes. Defaults to False.
+        pyramidal (bool, optional): whenever to save as pyramidal. Defaults to True.
+    """
     print(f'Reading from {path}...')
     reader = reader_factory(path)
     st_object = reader.auto_read(path)
     print(st_object)
     save_path = os.path.join(path, 'processed')
     os.makedirs(save_path, exist_ok=True)
-    st_object.save(save_path)
+    st_object.save(save_path, pyramidal)
     if save_plots:
         st_object.save_spatial_plot(save_path)
     if plot_genes:
         st_object.plot_genes(save_path, top_k=800)
         
         
-def process_meta_df(meta_df, save_spatial_plots=True, plot_genes=False):
-    for index, row in tqdm(meta_df.iterrows(), total=len(meta_df)):
-        path = _get_path_from_meta_row(row)
-        adata = read_and_save(path, save_plots=save_spatial_plots, plot_genes=plot_genes)
+def xenium_to_pseudo_visium(df: pd.DataFrame, pixel_size_he: float, pixel_size_morph: float) -> sc.AnnData:
+    """Convert a xenium transcripts dataframe to a 10x Visium type spot grid with
+    55um diameter spots 100um apart
+
+    Args:
+        df (pd.DataFrame): xenium transcipts dataframe containing columns:
+        - 'x_location' and 'y_location' indicating the um coordinates of each transcripts in the morphology image
+        - 'feature_name' indicating the transcript name
+        pixel_size_he (float): pixel_size in um on the he image
+        pixel_size_morph (float): pixel_size in um on the xenium morphology image
+
+    Returns:
+        sc.AnnData: _description_
+    """
+    # convert transcripts position from um to pixel
+    df["x_location_pxl"] = df["x_location"] / pixel_size_morph
+    df["y_location_pxl"] = df["y_location"] / pixel_size_morph
+    
+    y_max = df['y_location_pxl'].max()
+    y_min = df['y_location_pxl'].min()
+    x_max = df['x_location_pxl'].max()
+    x_min = df['x_location_pxl'].min()
+    
+    m = math.ceil((y_max - y_min) / (100 / pixel_size_he))
+    n = math.ceil((x_max - x_min) / (100 / pixel_size_he))
+    
+    features = df['feature_name'].unique()
+    
+    spot_grid = pd.DataFrame(0, index=range(m * n), columns=features)
+    #spot_grid = pd.DataFrame(0, index=range(m * n), columns=features)
+    
+    # a is the row and b is the column in the pseudo visium grid
+    a = np.floor((df['x_location_pxl'] - x_min) / (100. / pixel_size_he)).astype(int)
+    b = np.floor((df['y_location_pxl'] - y_min) / (100. / pixel_size_he)).astype(int)
+    
+    c = b * n + a
+    features = df['feature_name']
+    
+    cols = spot_grid.columns.get_indexer(features)
+    
+    spot_grid_np = spot_grid.values.astype(np.uint16)
+    #spot_grid_np[c, cols] += 1
+    np.add.at(spot_grid_np, (c, cols), 1)
+    
+    
+    if isinstance(spot_grid.columns.values[0], bytes):
+        spot_grid.columns = [i.decode('utf-8') for i in spot_grid.columns]
+    
+
+    expression_df = pd.DataFrame(spot_grid_np, columns=spot_grid.columns)
+    
+    coord_df = expression_df.copy()
+    coord_df['x'] = x_min + (coord_df.index % n) * (100. / pixel_size_he) + (50. / pixel_size_he)
+    coord_df['y'] = y_min + np.floor(coord_df.index / n) * (100. / pixel_size_he) + (50. / pixel_size_he)
+    coord_df = coord_df[['x', 'y']]
+    
+    expression_df.index = [str(i) for i in expression_df.index]
+    
+    adata = sc.AnnData(expression_df)
+    adata.obsm['spatial'] = coord_df[['x', 'y']].values
+    adata.obs['in_tissue'] = [True for _ in range(len(adata.obs))]
+    adata.obs['pxl_col_in_fullres'] = coord_df['x'].values
+    adata.obs['pxl_row_in_fullres'] = coord_df['y'].values
+    adata.obs['array_col'] = np.arange(len(adata.obs)) % n
+    adata.obs['array_row'] = np.arange(len(adata.obs)) // n
+    adata.obs.index = [str(row).zfill(3) + 'x' + str(col).zfill(3) for row, col in  zip(adata.obs['array_row'], adata.obs['array_col'])]
+    
+    
+    return adata
+
+
+def process_meta_df(meta_df, save_spatial_plots=True, plot_genes=False, pyramidal=True):
+    """Internal use method, process all the raw ST data in the meta_df"""
+    for _, row in tqdm(meta_df.iterrows(), total=len(meta_df)):
+        path = get_path_from_meta_row(row)
+        _ = read_and_save(path, save_plots=save_spatial_plots, plot_genes=plot_genes, pyramidal=pyramidal)

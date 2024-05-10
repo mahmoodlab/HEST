@@ -2,14 +2,14 @@
 # Utils for h5 file saving
 ####
 
-import h5py
 import os
 import pdb
+
+import h5py
 import numpy as np
 
+
 def initsave_hdf5(output_fpath, asset_dict, attr_dict= None, mode='a', static_shape=None, chunk_as_max_shape=False, verbose=0):
-    """
-    """
     with h5py.File(output_fpath, mode) as f:
         for key, val in asset_dict.items():
             data_shape = val.shape
@@ -55,6 +55,7 @@ def initsave_hdf5(output_fpath, asset_dict, attr_dict= None, mode='a', static_sh
             else:
                 dset = f[key]
                 dset.resize(len(dset) + data_shape[0], axis=0)
+                #assert dset.dtype == val.dtype
                 dset[-data_shape[0]:] = val
                 
     return output_fpath

@@ -1,19 +1,32 @@
+import sys
+
 import pandas as pd
 
-import sys
-sys.path.append("/media/ssd2/hest/hest")
+sys.path.append("/mnt/ssd/paul/ST-histology-loader")
 
-from src.hest.utils import create_meta_release, copy_processed_images, create_joined_gene_plots, get_k_mean_expressed_genes_from_df
-from src.hest.patching import mask_spots, mask_and_patchify, create_splits
-from src.hest.readers import read_and_save, process_meta_df
+import cProfile
+from cProfile import Profile
+from pstats import SortKey, Stats
+
+import numpy as np
+import pyvips
+import scanpy as sc
+import tifffile
 from packaging import version
 from PIL import Image
-import tifffile
-import numpy as np
-import scanpy as sc
-import cProfile
-from pstats import SortKey, Stats
-from cProfile import Profile
+
+from src.hest.HESTData import create_splits, create_benchmark_data
+from src.hest.readers import process_meta_df
+from src.hest.utils import copy_processed_images, get_k_genes_from_df
+
+
+
+
+def create_gene_panels(name_to_meta):
+    
+    for key, val in name_to_meta.items():
+        get_k_genes_from_df(val, k=50, save_dir=f"/mnt/sdb1/paul/{key}/var_50genes.json", criteria='var')
+
 
 def main():
 
@@ -27,115 +40,107 @@ def main():
     ]
 
     #meta = '/media/ssd2/hest/HEST_v0_0_1.csv'
-    meta = '/media/ssd2/hest/ST H&E datasets - Combined data.csv'
+    #meta = '/media/ssd2/hest/ST H&E datasets - Combined data.csv'
+    meta = '/mnt/sdb1/paul/data/samples/ST H&E datasets - Combined data.csv'
+    #meta = '/mnt/sdb1/paul/meta_releases/HEST_v0_0_1.csv'
     meta_df = pd.read_csv(meta)
 
-    if meta == '/media/ssd2/hest/HEST_v0_0_1.csv':
+    if meta.endswith('HEST_v0_0_1.csv'):
         meta_df['image'] = [True for _ in range(len(meta_df))]
     #meta_df = meta_df[meta_df['Products'] == 'Spatial Gene Expression']
     meta_df = meta_df[meta_df['image'] == True]
-    #meta_df = meta_df[meta_df['Products'] != 'HD Spatial Gene Expression']
+    meta_df = meta_df[meta_df['st_technology'] != 'Visium HD']
     #meta_df = meta_df[meta_df['st_instrument'] != 'Xenium Analyzer']
     meta_df = meta_df[~meta_df['dataset_title'].isin(exclude_list)]
-    #meta_df = meta_df[meta_df['st_technology'] != 'Xenium']
-    #meta_df = meta_df[meta_df['dataset_title'] == 'Spatially resolved clonal copy number alterations in benign and malignant tissueJus']
-    #meta_df = meta_df[meta_df['dataset_title'] == 'Spatially resolved clonal copy number alterations in benign and malignant tissueJus']
-    #meta_df = meta_df[meta_df['dataset_title'] == 'FFPE Human Breast using the Entire Sample Area']
-    #meta_df = meta_df[meta_df['check_image'] == "TRUE"] 
-    #meta_df = meta_df[((meta_df['dataset_title'] == 'FFPE Human Breast using the Entire Sample Area') & (meta_df['subseries'] == 'Replicate 1')) |
-    #             ((meta_df['dataset_title'] == 'FFPE Human Breast with Pre-designed Panel') & (meta_df['subseries'] == 'Tissue sample 1')) |
-    #              ((meta_df['dataset_title'] == 'High resolution mapping of the tumor microenvironment using integrated single-cell, spatial and in situ analysis [Xenium]') & (meta_df['subseries'] != 'Breast Cancer, Xenium In Situ Spatial Gene Expression Rep 2'))]
-    #meta_df = meta_df[(meta_df['dataset_title'] == 'mousemodel_Heptablastoma spatial transcriptomics') & (meta_df['subseries'] == 'NEJ146-D')]
-    #meta_df = meta_df[meta_df['dataset_title'] == 'mousemodel_Heptablastoma spatial transcriptomics' ]
-    
-    #meta_df = meta_df[(meta_df['dataset_title'] == "Spatiotemporal dynamics of molecular pathology in amyotrophic lateral sclerosis")] 
-    """meta_df = meta_df[(meta_df['id'] == "NCBI758") | 
-                      (meta_df['id'] == "TENX123") | 
-                      (meta_df['id'] == "TENX66") | 
-                      (meta_df['id'] == "TENX70") | 
-                      (meta_df['id'] == "TENX81") | 
-                      (meta_df['id'] == "MEND60") | 
-                      (meta_df['id'] == "NCBI654") | 
-                      (meta_df['id'] == "NCBI655") | 
-                      (meta_df['id'] == "NCBI656") | 
-                      (meta_df['id'] == "NCBI657") | 
-                      (meta_df['id'] == "TENX125")]"""
     #meta_df = meta_df[meta_df['bigtiff'].notna() & meta_df['bigtiff'] != "TRUE"]
     #meta_df = meta_df[(meta_df['id'] == "TENX138")]
     #meta_df = meta_df[meta_df['id'].str.startswith('GIT')]
     #meta_df = meta_df[(meta_df['id'] == "NCBI783") | (meta_df['id'] == "NCBI785")]
-    #meta_df = meta_df[(meta_df['id'] == "TENX137")]
+    #meta_df = meta_df[(meta_df['id'] == "SPA100")]
 
     #meta_df = meta_df[(meta_df['use_train'] == 'TRUE')]
+    #img = pyvips.Image.tiffload('/mnt/sdb1/paul/images/pyramidal/NCBI844.tif')
 
     dest = '/mnt/sdb1/paul/images'
     
     #df = pool_xenium_by_cell('/mnt/sdb1/paul/data/samples/xenium/FFPE Human Breast using the Entire Sample Area/Tissue sample 1', '/mnt/sdb1/paul/TENX95_cell_detection.geojson', 
     #                         0.2125)
     #df.to_parquet('TENX95_pool.parquet')
-    
-    
-    #create_joined_gene_plots(meta_df, gene_plot=True)
-    #adata = sc.read_h5ad('/mnt/sdb1/paul/images/adata/NCBI792.h5ad')
-    #src_pixel_size = 0.988180746
-    #tissue_mask = np.load('/mnt/sdb1/paul/fullres_mask.npy')
-    #img = tifffile.imread('/mnt/sdb1/paul/images/pyramidal/NCBI792.tif')
-    
-    #mask_spots(adata, src_pixel_size, tissue_mask, 55.)
-    """patchify(
-        patch_save_dir='/mnt/sdb1/paul',
-        gene_save_dir='/mnt/sdb1/paul',
-        smoothed_save_dir='/mnt/sdb1/paul',
-        adata=adata, 
-        img=img, 
-        src_pixel_size=src_pixel_size,
-        name='test',
-        patch_size_um=100.,
-        tissue_mask=tissue_mask,
-        target_pixel_size=0.5,
-        verbose=1
-    )"""
 
-    meta_df = meta_df[(meta_df['dataset_title'] == "Multimodal decoding of human liver regeneration [st_human]")] 
+    #df = pool_xenium_by_cell('/mnt/sdb1/paul/data/samples/xenium/FFPE Human Breast using the Entire Sample Area/Replicate 1', '/mnt/sdb1/paul/TENX99_cell_detection.geojson', 
+    #                         0.2125)
+    #df.to_parquet('TENX99_pool.parquet')
     
-    process_meta_df(meta_df)
-    #meta_df = meta_df[(meta_df['dataset_title'] == "Spatial deconvolution of HER2-positive breast cancer delineates tumor-associated cell type interactions")] 
-    #splits = meta_df.groupby('patient')['id'].agg(list).to_dict()
-    #create_splits('/media/ssd2/hest/splits', splits, len(splits))
-    #pyvips.tiffload('/media/ssd2/hest/pyramidal/TENX137.tif')
-    #mask_and_patchify(meta_df[261:])
-    """with Profile() as profile:
-        mask_and_patchify(meta_df[0:1])
-        (
-            Stats(profile)
-            .strip_dirs()
-            .sort_stats(SortKey.TIME)
-            .print_stats()
-        )"""
-   #cProfile.run('mask_and_patchify(global_namespace["meta_df"][:1])')
-    #mask_and_patchify(meta_df[:1])
-    #top_k = get_k_mean_expressed_genes_from_df(meta_df, k=250, save_dir='BC1_250genes.json')
+    #df = pool_xenium_by_cell('/mnt/sdb1/paul/data/samples/xenium/High resolution mapping of the tumor microenvironment using integrated single-cell, spatial and in situ analysis [Xenium]/Breast Cancer, Xenium In Situ Spatial Gene Expression Rep 1/', '/mnt/sdb1/paul/NCBI785_cell_detection.geojson', 
+    #                         0.2125)#0.3639107956749145)
+    #df.to_parquet('NCBI785_pool.parquet')
+    
+    #df = pool_xenium_by_cell('/mnt/sdb1/paul/data/samples/xenium/High resolution mapping of the tumor microenvironment using integrated single-cell, spatial and in situ analysis [Xenium]/Breast Cancer, Xenium In Situ Spatial Gene Expression', '/mnt/sdb1/paul/NCBI783_cell_detection.geojson', 
+    #                         0.27395985597740874)
+    #df.to_parquet('NCBI783_pool.parquet')
+    
+    #meta_df = meta_df[(meta_df['dataset_title'] == "Multimodal decoding of human liver regeneration [st_human]") | (meta_df['dataset_title'] == "Multimodal decoding of human liver regeneration [st_mouse]")] 
+    #root = '/mnt/sdb1/paul/data/samples/visium/Charting the Heterogeneity of Colorectal Cancer Consensus Molecular Subtypes using Spatial Transcriptomics: datasets/A595688_Rep1/processed/'
+    ##read_HESTData(root + '/aligned_adata.h5ad', 
+    #             '/mnt/sdb1/paul/images/pyramidal/ZEN42.tif', 
+    #              root + '/metrics.json')
     
     
-    # copy_processed_images(dest, meta_df, cp_spatial=False, cp_downscaled=False,)
+    name_to_meta = {
+        'IDC_ILC': meta_df[(meta_df['id'] == "TENX99") | (meta_df['id'] == "TENX95") | (meta_df['id'] == "NCBI785") | (meta_df['id'] == "NCBI783") | (meta_df['id'] == "TENX94")],
+        #'BC2': meta_df[(meta_df['dataset_title'] == "Integrating spatial gene expression and breast tumour morphology via deep learning")], #BC2
+        'SCC': meta_df[(meta_df['dataset_title'] == "Single Cell and Spatial Analysis of Human Squamous Cell Carcinoma [ST]")], #SCC
+        #'BC1': meta_df[(meta_df['dataset_title'] == "Spatial deconvolution of HER2-positive breast cancer delineates tumor-associated cell type interactions")], #BC1
+        'PAAD': meta_df[(meta_df['id'] == "TENX126") | (meta_df['id'] == "TENX116")],
+        'FHPTLD': meta_df[(meta_df['id'] == "TENX124") | (meta_df['id'] == "TENX125")],
+        'SKCM': meta_df[(meta_df['id'] == "TENX117") | (meta_df['id'] == "TENX115")],
+        'CRC_COAD': meta_df[(meta_df['oncotree_code'] == 'COAD') & (meta_df['dataset_title'] == "Charting the Heterogeneity of Colorectal Cancer Consensus Molecular Subtypes using Spatial Transcriptomics: datasets")],
+        'CRC_READ':meta_df[(meta_df['oncotree_code'] == 'READ') & (meta_df['dataset_title'] == "Charting the Heterogeneity of Colorectal Cancer Consensus Molecular Subtypes using Spatial Transcriptomics: datasets")],
+        'IDC': meta_df[(meta_df['id'] == "TENX99") | (meta_df['id'] == "TENX95") | (meta_df['id'] == "NCBI785") | (meta_df['id'] == "NCBI783")],
+        'PRAD': meta_df[meta_df['dataset_title'] == 'Spatially resolved clonal copy number alterations in benign and malignant tissueJus'],
+        'LYMPH_IDC': meta_df[meta_df['dataset_title'] == 'Single cell profiling of primary and paired metastatic lymph node tumors in breast cancer patients'],
+        'CCRCC': meta_df[meta_df['dataset_title'] == 'Tertiary lymphoid structures generate and propagate anti-tumor antibody-producing plasma cells in renal cell cancer'],
+        'HCC': meta_df[meta_df['dataset_title'] == 'Identification of TREM1+CD163+ myeloid cells as a deleterious immune subset in HCC [Spatial Transcriptomics]']
+    }
+    
+    #meta_df = meta_df[meta_df['id'] == "TENX94"] #name_to_meta['IDC_ILC']
+    #name_to_meta
+    
+    create_gene_panels(name_to_meta)
+    
+    #bc1_splits = meta_df.groupby('patient')['id'].agg(list).to_dict()
+    #create_splits('/mnt/sdb1/paul/bc2_splits', bc1_splits, K=8)
+    #test = sc.read_h5ad('/mnt/sdb1/paul/BC1/adata/SPA154.h5ad')
+    
+    
+    #process_meta_df(meta_df, pyramidal=False)
+    #get_k_genes_from_df(meta_df, k=50, save_dir="/mnt/sdb1/paul/SKCM/var_50genes.json", criteria='var')
+    
+    #copy_processed_images(dest, meta_df, cp_pyramidal=False)
+    
+    #pyvips.tiffload('/media/ssd2/hest/pyramidal/TENX137.tif'
+    #create_benchmark_data(meta_df, save_dir='/mnt/sdb1/paul/IDC_ILC', K=None, adata_folder='/mnt/sdb1/paul/images/adata', use_mask=True)
+    #create_benchmark_data(meta_df, save_dir='/mnt/sdb1/paul/CCRCC', K=12, adata_folder='/mnt/sdb1/paul/images/adata', use_mask=False)
+    #create_benchmark_data(meta_df, save_dir='/mnt/sdb1/paul/SCC', K=4, adata_folder='/mnt/sdb1/paul/images/adata', use_mask=False)
+    
+    #create_benchmark_data(meta_df, save_dir='/mnt/sdb1/paul/HCC', K=2, adata_folder='/mnt/sdb1/paul/images/adata', use_mask=True)
+    #create_benchmark_data(meta_df, save_dir='/mnt/sdb1/paul/LYMPH_IDC', K=4, adata_folder='/mnt/sdb1/paul/images/adata', use_mask=False)
+    #create_benchmark_data(meta_df, save_dir='/mnt/sdb1/paul/PRAD', K=2, adata_folder='/mnt/sdb1/paul/images/adata', use_mask=False)
+    #create_benchmark_data(meta_df, save_dir='/mnt/sdb1/paul/CRC_READ', K=2, adata_folder='/mnt/sdb1/paul/images/adata', use_mask=False)
+    #create_benchmark_data(meta_df, save_dir='/mnt/sdb1/paul/CRC_COAD', K=3, adata_folder='/mnt/sdb1/paul/images/adata', use_mask=False)
+    #create_benchmark_data(meta_df, save_dir='/mnt/sdb1/paul/SKCM', K=2, adata_folder='/mnt/sdb1/paul/images/adata', use_mask=True)
+    #create_benchmark_data(meta_df, save_dir='/mnt/sdb1/paul/FHPTLD', K=2, adata_folder='/mnt/sdb1/paul/images/adata', use_mask=True)
+    #create_benchmark_data(meta_df, save_dir='/mnt/sdb1/paul/PAAD', K=2, adata_folder='/mnt/sdb1/paul/images/adata', use_mask=True)
+    #create_benchmark_data(meta_df, save_dir='/mnt/sdb1/paul/BC1', K=8, adata_folder='/mnt/sdb1/paul/images/adata', use_mask=False)
+    #create_benchmark_data(meta_df, save_dir='/mnt/sdb1/paul/BC2', K=8, adata_folder='/mnt/sdb1/paul/images/adata', use_mask=False)
+    #create_benchmark_data(meta_df, save_dir='/mnt/sdb1/paul/SCC', K=4, adata_folder='/mnt/sdb1/paul/images/adata')
+    #create_benchmark_data(meta_df, save_dir='/mnt/sdb1/paul/IDC', K=4, adata_folder='/mnt/sdb1/paul/images/adata', use_mask=True)
+    #create_benchmark_data(meta_df, save_dir='/mnt/sdb1/paul/CRC', K=7, adata_folder='/mnt/sdb1/paul/images/adata', use_mask=False)
+    #create_benchmark_data(meta_df, save_dir='/mnt/sdb1/paul/PROST1', K=2, adata_folder='/mnt/sdb1/paul/images/adata', use_mask=False)
+    #mask_and_patchify(meta_df, '/mnt/sdb1/paul/patches', use_mask=False)
 
-    #open_fiftyone()
     
-    #process_meta_df(meta_df[516:], save_spatial_plots=True, plot_genes=False)
-    #process_meta_df(meta_df, save_spatial_plots=True, plot_genes=False)
-
-    
-    #process_meta_df(meta_df, save_spatial_plots=True, plot_genes=True)
-    
-    #pool_xenium_by_cell()
-    
-    #img = tifffile.imread('/mnt/sdb1/paul/data/samples/visium/Bern ST/20220401-2_7/20220401-2_7.ome.tif')
-    #write_wsi2(img, '/mnt/sdb1/paul/test.tif')
-    #create_joined_gene_plots(meta_df, gene_plot=True)
-    #copy_processed_images(dest, meta_df, cp_spatial=False, cp_downscaled=False, cp_pyramidal=False, cp_pixel_vis=False)
-    #copy_processed_images(dest, meta_df, cp_spatial=True, cp_downscaled=True, cp_pyramidal=True)
-    
-    #create_meta_release(meta_df, version.Version('0.0.1'))
+    #create_meta_release(meta_df, version.Version('0.0.2'))
 
 if __name__ == "__main__":
     main()

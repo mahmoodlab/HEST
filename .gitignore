@@ -6,3 +6,7 @@ best.pt
 .vscode/launch.json
 dist
 src/hest.egg-info
+docs
+make.bat
+Makefile
+*.parquet

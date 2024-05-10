@@ -1,15 +1,16 @@
-from ultralytics import YOLO
+import json
+import os
+from typing import Dict
+
+import cv2
+import matplotlib.collections as mc
+import matplotlib.patches as patches
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import json
-import cv2
-from PIL import Image
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-import os
 from kwimage.im_cv2 import imresize
-import matplotlib.collections as mc
-from typing import Dict
+from PIL import Image
+from ultralytics import YOLO
 
 orientations = {
     'hourglass': 0,
@@ -76,11 +77,6 @@ def _get_fiducials_center(template):
             mean_y = mean_y - 0.001*mean_y
         dict[fidName] = [mean_x, mean_y]
     return dict
-
-
-template65 = SpotGridTemplate('spot_templates/template65.json', '6.5mm', ratio=19./1477)
-
-template11 = SpotGridTemplate('spot_templates/template11.json', '11mm', ratio=20./2622)
 
 
 
@@ -182,6 +178,10 @@ def _match_template_type(img, boxes):
     ratio = np.mean(edge_lengths) / np.mean(fid_widths)
 
 
+    template65 = SpotGridTemplate('spot_templates/template65.json', '6.5mm', ratio=19./1477)
+
+    template11 = SpotGridTemplate('spot_templates/template11.json', '11mm', ratio=20./2622)
+
     if ratio > 25:
         return template11, np.mean(edge_lengths)
     else:
@@ -204,7 +204,7 @@ def _spots_to_json(template, spots):
     dict['oligo'] = arr_spots
 
 
-def autoalign_with_fiducials(fullres_img, save_dir=None, name='') -> Dict:
+def autoalign_visium(fullres_img, save_dir=None, name='') -> Dict:
     model = YOLO('best.pt')
 
     img, factor = _resize_to_target(fullres_img)
