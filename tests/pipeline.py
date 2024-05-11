@@ -16,7 +16,7 @@ from packaging import version
 from PIL import Image
 
 from src.hest.HESTData import create_benchmark_data, create_splits
-from src.hest.readers import process_meta_df
+from src.hest.readers import process_meta_df, VisiumHDReader
 from src.hest.utils import copy_processed_images, get_k_genes_from_df
 
 
@@ -60,6 +60,11 @@ def main():
     #img = pyvips.Image.tiffload('/mnt/sdb1/paul/images/pyramidal/NCBI844.tif')
 
     dest = '/mnt/sdb1/paul/images'
+    
+    reader = VisiumHDReader()
+    st = reader.auto_read('/mnt/sdb1/paul/data/samples/visium-hd/Visium HD Spatial Gene Expression Library, Mouse Brain (FFPE)')
+    
+    st.save_spatial_plot('./')
     
     #df = pool_xenium_by_cell('/mnt/sdb1/paul/data/samples/xenium/FFPE Human Breast using the Entire Sample Area/Tissue sample 1', '/mnt/sdb1/paul/TENX95_cell_detection.geojson', 
     #                         0.2125)

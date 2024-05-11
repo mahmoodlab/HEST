@@ -19,7 +19,7 @@ from tqdm import tqdm
 from src.hest.custom_readers import (GSE167096_to_adata, GSE180128_to_adata,
                                      GSE203165_to_adata, GSE217828_to_adata, GSE234047_to_adata, align_ST_counts_with_transform,
                                      align_dev_human_heart, align_eval_qual_dataset, align_her2, raw_count_to_adata, raw_counts_to_pixel)
-from src.hest.HESTData import HESTData
+from src.hest.HESTData import HESTData, VisiumHDHESTData, VisiumHESTData, XeniumHESTData, STHESTData
 from src.hest.utils import (ALIGNED_HE_FILENAME, SpotPacking,
                             get_path_from_meta_row, autoalign_visium,
                             check_arg, find_biggest_img,
@@ -27,21 +27,6 @@ from src.hest.utils import (ALIGNED_HE_FILENAME, SpotPacking,
                             find_pixel_size_from_spot_coords, helper_mex,
                             load_image, metric_file_do_dict,
                             register_downscale_img)
-
-
-class VisiumHESTData(HESTData): 
-    def __init__(self, adata: sc.AnnData, img: np.ndarray, meta: Dict):
-        super().__init__(adata, img, meta, spot_size=55., spot_inter_dist=100.)
-        
-class STHESTData(HESTData):
-    def __init__(self, adata: sc.AnnData, img: np.ndarray, meta: Dict):
-        super().__init__(adata, img, meta, spot_size=100., spot_inter_dist=200.)
-        self.save_positions = False
-        
-class XeniumHESTData(HESTData):
-    def __init__(self, adata: sc.AnnData, img: np.ndarray, meta: Dict):
-        super().__init__(adata, img, meta, spot_size=55., spot_inter_dist=100.)
-        self.save_positions = False
         
 
 class Reader:
@@ -86,6 +71,154 @@ def read_visium_positions_old(tissue_position_list_path):
     return tissue_positions
 
 
+class VisiumHDReader(Reader):
+    """10x Genomics Visium-HD reader"""
+
+    def auto_read(self, path) -> VisiumHDHESTData:
+        """
+        Automatically detect the file names and determine a reading strategy based on the
+        detected files. For more control on the reading process, consider using `read()` instead
+        
+        
+
+        Args:
+            path (st): path to the directory containing all the necessary files
+
+        Returns:
+            VisiumHDHESTObject: STObject that was read
+        """
+        return super().auto_read(path)
+        
+    
+    def __bin_to_128um(self, adata: sc.AnnData, pixel_size: float) -> sc.AnnData:
+        y_max = adata.obs['pxl_row_in_fullres'].max()
+        y_min = adata.obs['pxl_row_in_fullres'].min()
+        x_max = adata.obs['pxl_col_in_fullres'].max()
+        x_min = adata.obs['pxl_col_in_fullres'].min()
+        
+        m = math.ceil((y_max - y_min) / (128 / pixel_size))
+        n = math.ceil((x_max - x_min) / (128 / pixel_size))
+
+        features = adata.var_names
+        
+        spot_grid = pd.DataFrame(0, index=range(m * n), columns=features)
+        
+        # a is the row and b is the column in the pseudo visium grid
+        a = np.floor((adata.obs['pxl_col_in_fullres'] - x_min) / (128. / pixel_size)).astype(int)
+        b = np.floor((adata.obs['pxl_row_in_fullres'] - y_min) / (128. / pixel_size)).astype(int)
+        
+        c = b * n + a
+        c = np.array(c)
+        spot_grid_np = spot_grid.values.astype(np.float32)
+        
+        expr_np = adata.to_df().values
+        
+        #my_c = c[:len(c)//4]
+        #my_df = adata.to_df()[:len(adata.to_df())//4]
+        
+        spot_grid_np[c] += expr_np
+        
+        
+        #spot_grid = adata.to_df().apply(lambda row: spot_grid.loc[c[index]] += row, axis=1)
+        #for index, row in tqdm(adata.to_df().iterrows(), total=len(adata.to_df())):
+        #    spot_grid.loc[c[index]] += row
+        
+        
+        #cols = spot_grid.columns.get_indexer(features)
+        
+        #spot_grid_np = spot_grid.values.astype(np.uint16)
+        #spot_grid_np[c, cols] += 1
+        #np.add.at(spot_grid_np, (c, cols), 1)
+        
+        
+        #if isinstance(spot_grid.columns.values[0], bytes):
+        #    spot_grid.columns = [i.decode('utf-8') for i in spot_grid.columns]
+        
+
+        expression_df = pd.DataFrame(spot_grid_np, columns=spot_grid.columns)
+        
+        row_sums = expression_df.sum(axis=1)
+
+        # Filter rows where the sum is not equal to zero
+        expression_df = expression_df[row_sums > 1e-8]
+        
+        
+        #coord_df = expression_df.copy()
+        pos_x = x_min + (expression_df.index % n) * (128. / pixel_size) + (64. / pixel_size)
+        pos_y = y_min + np.floor(expression_df.index / n) * (128. / pixel_size) + (64. / pixel_size)
+        
+        #spot_grid.index = [str(i) for i in expression_df.index]
+        
+        adata = sc.AnnData(expression_df)
+        adata.obsm['spatial'] = np.column_stack((pos_x, pos_y))
+        adata.obs['in_tissue'] = [True for _ in range(len(adata.obs))]
+        adata.obs['pxl_col_in_fullres'] = pos_x
+        adata.obs['pxl_row_in_fullres'] = pos_y
+        adata.obs['array_col'] = np.arange(len(adata.obs)) % n
+        adata.obs['array_row'] = np.arange(len(adata.obs)) // n
+        adata.obs.index = [str(row).zfill(4) + 'x' + str(col).zfill(4) for row, col in  zip(adata.obs['array_row'], adata.obs['array_col'])]
+        
+        return adata
+        
+        
+    
+    def _auto_read(self, path) -> VisiumHDHESTData:
+        img_filename = find_biggest_img(path)
+        
+        square_16um_path = find_first_file_endswith(path, 'square_016um')
+        
+        metrics_path = find_first_file_endswith(path, 'metrics_summary.csv')
+        
+        st_object = self.read(
+            img_path=os.path.join(path, img_filename),
+            square_16um_path=square_16um_path,
+            metrics_path=metrics_path
+        )
+        
+        return st_object
+        
+    
+    def read(
+        self, 
+        img_path: str, 
+        square_16um_path: str, 
+        metrics_path: str = None
+    ) -> VisiumHDHESTData:
+        img, pixel_size_embedded = load_image(img_path)
+        
+        spatial_path = find_first_file_endswith(square_16um_path, 'spatial')
+        tissue_positions_path = find_first_file_endswith(spatial_path, 'tissue_positions.parquet')
+        filtered_bc_matrix_path = find_first_file_endswith(square_16um_path, 'filtered_feature_bc_matrix.h5')
+        
+        tissue_positions = pd.read_parquet(tissue_positions_path)
+        tissue_positions.index = tissue_positions['barcode']
+        tissue_positions = tissue_positions.drop('barcode', axis=1)
+         
+        adata = sc.read_10x_h5(filtered_bc_matrix_path)
+        
+        aligned_spots = pd.merge(adata.obs, tissue_positions, how='inner', left_index=True, right_index=True)
+        adata.obs = aligned_spots
+        adata.obsm['spatial'] = adata.obs[['pxl_col_in_fullres', 'pxl_row_in_fullres']].values
+        
+        meta = {}
+        if metrics_path is not None:
+            meta = metric_file_do_dict(metrics_path) 
+            
+            
+        pixel_size, _ = find_pixel_size_from_spot_coords(adata.obs, inter_spot_dist=16, packing=SpotPacking.GRID_PACKING)
+        
+        adata = self.__bin_to_128um(adata, pixel_size)
+            
+        meta['pixel_size_um_embedded'] = pixel_size_embedded
+        meta['pixel_size_um_estimated'] = pixel_size
+        meta['spots_under_tissue'] = len(adata.obs)
+            
+        register_downscale_img(adata, img, pixel_size, spot_size=128)
+        
+        
+        return VisiumHDHESTData(adata, img, meta)
+        
+        
 class VisiumReader(Reader):
     """10x Genomics Visium reader"""
     
@@ -102,7 +235,7 @@ class VisiumReader(Reader):
         Returns:
             VisiumHESTObject: STObject that was read
         """
-        super().auto_read(path)
+        return super().auto_read(path)
         
     
     def _auto_read(self, path) -> VisiumHESTData:
@@ -515,7 +648,7 @@ class STReader(Reader):
         Returns:
             STHESTData: STObject that was read
         """
-        super().auto_read(path)
+        return super().auto_read(path)
 
     
     def _auto_read(self, path) -> STHESTData:
@@ -753,7 +886,7 @@ class XeniumReader(Reader):
         Returns:
             XeniumHESTData: XeniumHESTData that was read
         """
-        super().auto_read(path)
+        return super().auto_read(path)
     
     def _auto_read(self, path) -> XeniumHESTData:
         img_filename = find_biggest_img(path)
@@ -916,13 +1049,15 @@ def reader_factory(path: str) -> Reader:
     """For internal use, determine the reader based on the path"""
     path = path.lower()
     if 'visium-hd' in path:
-        raise NotImplementedError('implement visium-hd')
+        raise VisiumHDReader()
     elif 'visium' in path:
         return VisiumReader()
     elif 'xenium' in path:
         return XeniumReader()
     elif 'st' in path:
         return STReader()
+    else:
+        raise NotImplementedError('')
         
     
 def read_and_save(path: str, save_plots=True, plot_genes=False, pyramidal=True):

@@ -103,7 +103,7 @@ class HESTData:
         """
         print("Plotting spatial plots...")
              
-        sc.pl.spatial(self.adata, show=None, img_key="downscaled_fullres", color=['total_counts'], title=f"in_tissue spots")
+        sc.pl.spatial(self.adata, show=None, img_key="downscaled_fullres", color=['total_counts'], title=f"in_tissue spots", alpha=0.4)
         
         filename = f"spatial_plots.png"
         
@@ -468,6 +468,25 @@ class HESTData:
         image_vis.save(os.path.join(save_dir, 'vis', f'{name}_vis.png'))
         asset_dict = self.get_segmentation()
         save_pkl(os.path.join(save_dir, f'{name}_mask.pkl'), asset_dict)
+
+
+class VisiumHESTData(HESTData): 
+    def __init__(self, adata: sc.AnnData, img: np.ndarray, meta: Dict):
+        super().__init__(adata, img, meta, spot_size=55., spot_inter_dist=100.)
+
+class VisiumHDHESTData(HESTData): 
+    def __init__(self, adata: sc.AnnData, img: np.ndarray, meta: Dict):
+        super().__init__(adata, img, meta, spot_size=128., spot_inter_dist=128.)        
+        
+class STHESTData(HESTData):
+    def __init__(self, adata: sc.AnnData, img: np.ndarray, meta: Dict):
+        super().__init__(adata, img, meta, spot_size=100., spot_inter_dist=200.)
+        self.save_positions = False
+        
+class XeniumHESTData(HESTData):
+    def __init__(self, adata: sc.AnnData, img: np.ndarray, meta: Dict):
+        super().__init__(adata, img, meta, spot_size=55., spot_inter_dist=100.)
+        self.save_positions = False
 
 
 def read_HESTData(adata_path: str, pyramidal_tiff_path: str, metrics_path: str) -> HESTData:
