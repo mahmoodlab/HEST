@@ -5,7 +5,9 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 from scipy import sparse
-from .utils import find_first_file_endswith, split_join_adata_by_col, write_10X_h5
+
+from .utils import (find_first_file_endswith, split_join_adata_by_col,
+                    write_10X_h5)
 
 
 def join_object_to_adatas_GSE214989(path):

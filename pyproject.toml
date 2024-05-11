@@ -9,10 +9,11 @@ authors = [
   { name="Paul Doucet", email="pdoucet@bwh.harvard.edu" },
 ]
 dependencies = [
-    "ultralytics == 8.2.4",
-    "pyvips == 2.2.3",
-    "scanpy == 1.10.1",
-    "kwimage == 0.9.25"
+    "ultralytics >= 8.2.4",
+    "pyvips >= 2.2.3",
+    "scanpy >= 1.10.1",
+    "kwimage >= 0.9.25",
+    "imagecodecs >= 2024.1.1"
 ]
 
 requires-python = ">=3.9"

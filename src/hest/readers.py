@@ -255,11 +255,12 @@ class VisiumReader(Reader):
             metric_file_path (str, optional): path to a metrics_summary.csv file. Defaults to None.
             custom_adata (sc.AnnData, optional): a scanpy spatial AnnData object. Defaults to None.
             autoalign (str, optional): whenever to use an automated object detector to align the spots based on the fiducials in the full res image. Defaults to 'auto'.
-            
-            - 'auto': use the autoaligner if no tissue_positions are detected in the spatial folder and if an alignment file is not passed
-            - 'always': force autoalignment
-            - 'never': do not use autalignment
-            
+                
+                - `auto`: use the autoaligner if no tissue_positions are detected in the spatial folder and if an alignment file is not passed
+                
+                - `always`: force autoalignment
+                
+                - `never`: do not use autalignment
             save_autoalign (bool, optional): whenever to save the autoalignment file and visualization plot in a spatial/ folder. Defaults to False.
 
 

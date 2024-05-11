@@ -15,11 +15,9 @@ import tifffile
 from packaging import version
 from PIL import Image
 
-from src.hest.HESTData import create_splits, create_benchmark_data
+from src.hest.HESTData import create_benchmark_data, create_splits
 from src.hest.readers import process_meta_df
 from src.hest.utils import copy_processed_images, get_k_genes_from_df
-
-
 
 
 def create_gene_panels(name_to_meta):
@@ -103,10 +101,10 @@ def main():
         'HCC': meta_df[meta_df['dataset_title'] == 'Identification of TREM1+CD163+ myeloid cells as a deleterious immune subset in HCC [Spatial Transcriptomics]']
     }
     
-    #meta_df = meta_df[meta_df['id'] == "TENX94"] #name_to_meta['IDC_ILC']
+    meta_df = name_to_meta['CCRCC']  #meta_df[meta_df['id'] == "TENX94"] #name_to_meta['IDC_ILC']
     #name_to_meta
     
-    create_gene_panels(name_to_meta)
+    #create_gene_panels(name_to_meta)
     
     #bc1_splits = meta_df.groupby('patient')['id'].agg(list).to_dict()
     #create_splits('/mnt/sdb1/paul/bc2_splits', bc1_splits, K=8)
@@ -119,6 +117,7 @@ def main():
     #copy_processed_images(dest, meta_df, cp_pyramidal=False)
     
     #pyvips.tiffload('/media/ssd2/hest/pyramidal/TENX137.tif'
+    #create_benchmark_data(meta_df, save_dir='/mnt/sdb1/paul/CCRCC', K=6, adata_folder='/mnt/sdb1/paul/images/adata', use_mask=False)
     #create_benchmark_data(meta_df, save_dir='/mnt/sdb1/paul/IDC_ILC', K=None, adata_folder='/mnt/sdb1/paul/images/adata', use_mask=True)
     #create_benchmark_data(meta_df, save_dir='/mnt/sdb1/paul/CCRCC', K=12, adata_folder='/mnt/sdb1/paul/images/adata', use_mask=False)
     #create_benchmark_data(meta_df, save_dir='/mnt/sdb1/paul/SCC', K=4, adata_folder='/mnt/sdb1/paul/images/adata', use_mask=False)

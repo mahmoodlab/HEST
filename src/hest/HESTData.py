@@ -9,6 +9,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import pyvips
 import scanpy as sc
 import skimage.color as sk_color
 import skimage.filters as sk_filters
@@ -17,12 +18,12 @@ from matplotlib import rcParams
 from matplotlib.collections import PatchCollection
 from PIL import Image
 from tqdm import tqdm
-import pyvips
 
-from src.hest.masking import (apply_otsu_thresholding, mask_to_contours,
-                              save_pkl, scale_contour_dim, keep_largest_area)
-from src.hest.utils import (ALIGNED_HE_FILENAME, plot_verify_pixel_size,
-                            save_scalefactors, write_10X_h5, tiff_save, _get_path_from_meta_row)
+from src.hest.masking import (apply_otsu_thresholding, keep_largest_area,
+                              mask_to_contours, save_pkl, scale_contour_dim)
+from src.hest.utils import (ALIGNED_HE_FILENAME, get_path_from_meta_row,
+                            plot_verify_pixel_size, save_scalefactors,
+                            tiff_save, write_10X_h5)
 
 from .vst_save_utils import initsave_hdf5
 
@@ -479,13 +480,12 @@ def read_HESTData(adata_path: str, pyramidal_tiff_path: str, metrics_path: str) 
 
 def mask_and_patchify(meta_df: pd.DataFrame, save_dir: str, use_mask=True):
     for index, row in tqdm(meta_df.iterrows(), total=len(meta_df)):
-        #path = _get_path_from_meta_row(row)
         id = row['id']
         img_path = f'/mnt/sdb1/paul/images/pyramidal/{id}.tif'
         adata_path = f'/mnt/sdb1/paul/images/adata/{id}.h5ad'
         adata = sc.read_h5ad(adata_path)
         #pixel_size = row['pixel_size_um_estimated']
-        metrics_path = os.path.join(_get_path_from_meta_row(row), 'processed', 'metrics.json')
+        metrics_path = os.path.join(get_path_from_meta_row(row), 'processed', 'metrics.json')
         
         #mask = np.load(mask_path)
         #mask = np.transpose(mask, (1, 0))

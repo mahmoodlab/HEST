@@ -204,7 +204,20 @@ def _spots_to_json(template, spots):
     dict['oligo'] = arr_spots
 
 
-def autoalign_visium(fullres_img, save_dir=None, name='') -> Dict:
+def autoalign_visium(fullres_img: np.ndarray, save_dir: str=None, name='') -> Dict:
+    """Automatically find the spot alignment based on an image with apparent Visium fiducials
+
+    Args:
+        fullres_img (np.ndarray): image with apparent Visium fiducials
+        save_dir (str, optional): directory where the alignment file will be saved. Defaults to None.
+        name (str, optional): name of the samples, will be concatenated to the alignment filename. Defaults to ''.
+
+    Raises:
+        Exception: if cannot find alignment
+
+    Returns:
+        Dict: spot alignment as a dictionary
+    """
     model = YOLO('best.pt')
 
     img, factor = _resize_to_target(fullres_img)

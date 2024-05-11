@@ -1,2 +1,2 @@
 # ST-histology-loader
-hest provides a flexible approach for loading the many Spatial Transcriptomics data formats (Visium, Xeniu, ST...) and for aligning them with their associated histology image.
+hest provides a flexible approach for loading the different Spatial Transcriptomics data formats supporting H&E (Visium/Visium-HD, Xenium and ST) and for automatically aligning them with their associated histology image. Hest was used for assembling the HEST-1k dataset, processing challenging ST datasets from a wide variety of sources.
