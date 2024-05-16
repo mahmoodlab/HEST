@@ -1,0 +1,10 @@
+{
+    "conch_v1_official": "/mnt/sdb1/paul/fm_v1/conch/pytorch_model.bin",
+    "uni_v1_official": "/mnt/sdb1/paul/fm_v1/uni/pytorch_model.bin",
+    "ciga": "/mnt/sdb1/paul/fm_v1/ciga/tenpercent_resnet18.ckpt",
+    "ctranspath": "/mnt/sdb1/paul/fm_v1/ctranspath/ctranspath.pth",
+    "remedis": "/mnt/sdb1/paul/fm_v1/remedis/path-152x2-remedis-m_torch.pth",
+    "phikon_official_hf": "/mnt/sdb1/paul/fm_v1/phikon/ibot_vit_base_pancan.pth",
+    "kimianet": "/mnt/sdb1/paul/fm_v1/kimianet/KimiaNetPyTorchWeights.pth",
+    "ibot_uni": "/mnt/sdb1/paul/fm_v1/ibot_uni/checkpoint0051.pth"
+}

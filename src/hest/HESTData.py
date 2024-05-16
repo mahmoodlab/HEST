@@ -284,7 +284,7 @@ class HESTData:
             return Image.fromarray(img)
 
 
-    def _compute_mask(self):
+    def _compute_mask(self, keep_largest=False):
         #width, height = self.wsi.dimensions
         height, width = self.img.shape[:2]
         TARGET_WIDTH = 2000
@@ -294,7 +294,8 @@ class HESTData:
         #Image.fromarray(thumbnail).save('thumb.png')
         mask = apply_otsu_thresholding(thumbnail).astype(np.uint8)
         mask = 1 - mask
-        mask = keep_largest_area(mask)
+        if keep_largest:
+            mask = keep_largest_area(mask)
         self.tissue_mask = np.round(cv2.resize(mask, (height, width))).astype(np.uint8)
         self.contours_tissue, self.contours_holes = mask_to_contours(self.tissue_mask)
 
@@ -311,7 +312,8 @@ class HESTData:
         verbose=0,
         dump_visualization=True,
         use_mask=True,
-        load_in_memory=True
+        load_in_memory=True,
+        keep_largest=False
     ):
 
         #TODO change
@@ -345,7 +347,7 @@ class HESTData:
         downscale_vis = TARGET_VIS_SIZE / img_width
 
         if self.tissue_mask is None and use_mask:
-            self._compute_mask()
+            self._compute_mask(keep_largest)
         elif not use_mask:
             self.tissue_mask = np.ones((img_height, img_width)).astype(np.uint8)
 
@@ -497,7 +499,8 @@ def read_HESTData(adata_path: str, pyramidal_tiff_path: str, metrics_path: str) 
     return HESTData(adata, image, metrics, spot_inter_dist=metrics['inter_spot_dist'], spot_size=metrics['spot_diameter'])
         
 
-def mask_and_patchify(meta_df: pd.DataFrame, save_dir: str, use_mask=True):
+def mask_and_patchify(meta_df: pd.DataFrame, save_dir: str, use_mask=True, keep_largest=None):
+    i = 0
     for index, row in tqdm(meta_df.iterrows(), total=len(meta_df)):
         id = row['id']
         img_path = f'/mnt/sdb1/paul/images/pyramidal/{id}.tif'
@@ -512,22 +515,26 @@ def mask_and_patchify(meta_df: pd.DataFrame, save_dir: str, use_mask=True):
         #wsi = WSI(img_path)
 
 
+        keep_largest_args = keep_largest[i] if keep_largest is not None else False
+
         hest_obj.dump_patches(save_dir,
                            adata,
                            hest_obj.meta['pixel_size_um_estimated'],
                            id,
                            verbose=1,
-                           use_mask=use_mask)
+                           use_mask=use_mask,
+                           keep_largest=keep_largest_args)
+        i += 1
         
 
-def create_benchmark_data(meta_df, save_dir:str, K, adata_folder, use_mask):
+def create_benchmark_data(meta_df, save_dir:str, K, adata_folder, use_mask, keep_largest=None):
     os.makedirs(save_dir, exist_ok=True)
     if K is not None:
         splits = meta_df.groupby('patient')['id'].agg(list).to_dict()
         create_splits(os.path.join(save_dir, 'splits'), splits, K=K)
     
     os.makedirs(os.path.join(save_dir, 'patches'), exist_ok=True)
-    mask_and_patchify(meta_df, os.path.join(save_dir, 'patches'), use_mask=use_mask)
+    mask_and_patchify(meta_df, os.path.join(save_dir, 'patches'), use_mask=use_mask, keep_largest=keep_largest)
     
     os.makedirs(os.path.join(save_dir, 'adata'), exist_ok=True)
     for index, row in meta_df.iterrows():

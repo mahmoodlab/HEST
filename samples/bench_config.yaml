@@ -1,0 +1,32 @@
+source_dataroot: '/mnt/ssd/paul/ST-histology-loader/bench_data'
+results_dir: '/mnt/sdb1/paul/ST_pred_results/'
+embed_dataroot: '/mnt/sdb1/paul/ST_data_emb'
+enc_names: ['plip']
+precision: 'fp32'
+batch_size: 128
+num_workers: 1
+encoders: [
+  "ibot_uni",
+  "kimianet",
+  "plip",
+  "uni_v1_official",
+  "resnet50_trunc",
+  "ciga",
+  "ctranspath",
+  "phikon_official_hf",
+  "remedis",
+  "conch_v1_official",
+]
+datasets: [
+  "PAAD"
+  #"IDC",
+  #"PRAD",
+  #"PAAD",
+  #"SKCM",
+  #"COAD",
+  #"READ",
+  #"CCRCC",
+  #"HCC",
+  #"LYMPH_IDC",
+  #"EPM",
+]

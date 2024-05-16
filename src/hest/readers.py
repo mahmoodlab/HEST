@@ -17,7 +17,7 @@ from PIL import Image
 from tqdm import tqdm
 
 from src.hest.custom_readers import (GSE167096_to_adata, GSE180128_to_adata,
-                                     GSE203165_to_adata, GSE217828_to_adata, GSE234047_to_adata, align_ST_counts_with_transform,
+                                     GSE203165_to_adata, GSE217828_to_adata, GSE234047_to_adata, GSE238145_to_adata, align_ST_counts_with_transform,
                                      align_dev_human_heart, align_eval_qual_dataset, align_her2, raw_count_to_adata, raw_counts_to_pixel)
 from src.hest.HESTData import HESTData, VisiumHDHESTData, VisiumHESTData, XeniumHESTData, STHESTData
 from src.hest.utils import (ALIGNED_HE_FILENAME, SpotPacking,
@@ -323,6 +323,9 @@ class VisiumReader(Reader):
             
         if 'GENE EXPRESSION WITHIN A HUMAN CHOROIDAL NEOVASCULAR MEMBRANE USING SPATIAL TRANSCRIPTOMICS' in path:
             custom_adata = GSE234047_to_adata(path)
+            
+        if 'Batf3-dendritic cells and 4-1BB-4-1BB ligand axis are required at the effector phase within the tumor microenvironment for PD-1-PD-L1 blockade efficacy' in path:
+            custom_adata = GSE238145_to_adata(path)
             
         if raw_count_path is not None:
             custom_adata = raw_count_to_adata(raw_count_path)
@@ -1150,6 +1153,7 @@ def xenium_to_pseudo_visium(df: pd.DataFrame, pixel_size_he: float, pixel_size_m
     adata.obs['array_col'] = np.arange(len(adata.obs)) % n
     adata.obs['array_row'] = np.arange(len(adata.obs)) // n
     adata.obs.index = [str(row).zfill(3) + 'x' + str(col).zfill(3) for row, col in  zip(adata.obs['array_row'], adata.obs['array_col'])]
+    sc.pp.filter_cells(adata, min_counts=1)
     
     
     return adata

@@ -660,11 +660,13 @@ def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal:
         return
     print(f"create pyramidal tiff for {row['id']}")
     if cp_pyramidal:
-        dst = os.path.join(dest, 'pyramidal', _sample_id_to_filename(row['id']))
-        #vips_pyr_cmd = f'LD_LIBRARY_PATH="/mnt/sdb1/paul/vips-8.15.2/mybuild/lib/x86_64-linux-gnu/" /mnt/sdb1/paul/vips-8.15.2/mybuild/bin/vips tiffsave "{path_fullres}" "{dst}" --pyramid --tile --tile-width=256 --tile-height=256 --compression=deflate --bigtiff --subifd'
-        bigtiff_option = '' if isinstance(row['bigtiff'], float) or not row['bigtiff']  else '--bigtiff'
-        vips_pyr_cmd = f'vips tiffsave "{path_fullres}" "{dst}" --pyramid --tile --tile-width=256 --tile-height=256 --compression=deflate {bigtiff_option}'
-        subprocess.call(vips_pyr_cmd, shell=True)
+        src_pyramidal = os.path.join(path, 'aligned_fullres_HE.tif')
+        dst_pyramidal = os.path.join(dest, 'pyramidal', _sample_id_to_filename(row['id']))
+        shutil.copy(src_pyramidal, dst_pyramidal)
+        #dst = os.path.join(dest, 'pyramidal', _sample_id_to_filename(row['id']))
+        #bigtiff_option = '' if isinstance(row['bigtiff'], float) or not row['bigtiff']  else '--bigtiff'
+        #vips_pyr_cmd = f'vips tiffsave "{path_fullres}" "{dst}" --pyramid --tile --tile-width=256 --tile-height=256 --compression=deflate {bigtiff_option}'
+        #subprocess.call(vips_pyr_cmd, shell=True)
     if cp_downscaled:
         path_downscaled = os.path.join(path, 'downscaled_fullres.jpeg')
         os.makedirs(os.path.join(dest, 'downscaled'), exist_ok=True)

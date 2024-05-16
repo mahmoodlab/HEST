@@ -2,6 +2,8 @@ import sys
 
 import pandas as pd
 
+from src.hest.bench.training.predict_expression import benchmark_encoder
+
 sys.path.append("/mnt/ssd/paul/ST-histology-loader")
 
 import cProfile
@@ -16,11 +18,13 @@ from packaging import version
 from PIL import Image
 
 from src.hest.HESTData import create_benchmark_data, create_splits
-from src.hest.readers import process_meta_df, VisiumHDReader
+from src.hest.readers import VisiumReader, process_meta_df, VisiumHDReader
 from src.hest.utils import copy_processed_images, get_k_genes_from_df
+import pyreadr
 
 
-def create_gene_panels(name_to_meta):
+
+def create_gene_panels(meta_df):
     
     for key, val in name_to_meta.items():
         get_k_genes_from_df(val, k=50, save_dir=f"/mnt/sdb1/paul/{key}/var_50genes.json", criteria='var')
@@ -55,46 +59,16 @@ def main():
     #meta_df = meta_df[meta_df['id'].str.startswith('GIT')]
     #meta_df = meta_df[(meta_df['id'] == "NCBI783") | (meta_df['id'] == "NCBI785")]
     #meta_df = meta_df[(meta_df['id'] == "SPA100")]
-
-    #meta_df = meta_df[(meta_df['use_train'] == 'TRUE')]
-    #img = pyvips.Image.tiffload('/mnt/sdb1/paul/images/pyramidal/NCBI844.tif')
-
-    dest = '/mnt/sdb1/paul/images'
-    
-    reader = VisiumHDReader()
-    st = reader.auto_read('/mnt/sdb1/paul/data/samples/visium-hd/Visium HD Spatial Gene Expression Library, Mouse Brain (FFPE)')
-    
-    st.save_spatial_plot('./')
-    
-    #df = pool_xenium_by_cell('/mnt/sdb1/paul/data/samples/xenium/FFPE Human Breast using the Entire Sample Area/Tissue sample 1', '/mnt/sdb1/paul/TENX95_cell_detection.geojson', 
-    #                         0.2125)
-    #df.to_parquet('TENX95_pool.parquet')
-
-    #df = pool_xenium_by_cell('/mnt/sdb1/paul/data/samples/xenium/FFPE Human Breast using the Entire Sample Area/Replicate 1', '/mnt/sdb1/paul/TENX99_cell_detection.geojson', 
-    #                         0.2125)
-    #df.to_parquet('TENX99_pool.parquet')
-    
-    #df = pool_xenium_by_cell('/mnt/sdb1/paul/data/samples/xenium/High resolution mapping of the tumor microenvironment using integrated single-cell, spatial and in situ analysis [Xenium]/Breast Cancer, Xenium In Situ Spatial Gene Expression Rep 1/', '/mnt/sdb1/paul/NCBI785_cell_detection.geojson', 
-    #                         0.2125)#0.3639107956749145)
-    #df.to_parquet('NCBI785_pool.parquet')
-    
-    #df = pool_xenium_by_cell('/mnt/sdb1/paul/data/samples/xenium/High resolution mapping of the tumor microenvironment using integrated single-cell, spatial and in situ analysis [Xenium]/Breast Cancer, Xenium In Situ Spatial Gene Expression', '/mnt/sdb1/paul/NCBI783_cell_detection.geojson', 
-    #                         0.27395985597740874)
-    #df.to_parquet('NCBI783_pool.parquet')
-    
-    #meta_df = meta_df[(meta_df['dataset_title'] == "Multimodal decoding of human liver regeneration [st_human]") | (meta_df['dataset_title'] == "Multimodal decoding of human liver regeneration [st_mouse]")] 
-    #root = '/mnt/sdb1/paul/data/samples/visium/Charting the Heterogeneity of Colorectal Cancer Consensus Molecular Subtypes using Spatial Transcriptomics: datasets/A595688_Rep1/processed/'
-    ##read_HESTData(root + '/aligned_adata.h5ad', 
-    #             '/mnt/sdb1/paul/images/pyramidal/ZEN42.tif', 
-    #              root + '/metrics.json')
-    
+    #meta_df = meta_df[meta_df['dataset_title'] == 'Batf3-dendritic cells and 4-1BB-4-1BB ligand axis are required at the effector phase within the tumor microenvironment for PD-1-PD-L1 blockade efficacy']
+    #meta_df = meta_df[meta_df['dataset_title'] == 'A new epithelial cell subpopulation predicts response to surgery, chemotherapy, and immunotherapy in bladder cancer']
+    #meta_df = meta_df[(meta_df['dataset_title'] == 'Preview Data: FFPE Human Lung Cancer with Xenium Multimodal Cell Segmentation') | (meta_df['dataset_title'] == 'FFPE Human Lung Cancer Data with Human Immuno-Oncology Profiling Panel and Custom Add-on')]
     
     name_to_meta = {
         'IDC_ILC': meta_df[(meta_df['id'] == "TENX99") | (meta_df['id'] == "TENX95") | (meta_df['id'] == "NCBI785") | (meta_df['id'] == "NCBI783") | (meta_df['id'] == "TENX94")],
         #'BC2': meta_df[(meta_df['dataset_title'] == "Integrating spatial gene expression and breast tumour morphology via deep learning")], #BC2
         'SCC': meta_df[(meta_df['dataset_title'] == "Single Cell and Spatial Analysis of Human Squamous Cell Carcinoma [ST]")], #SCC
         #'BC1': meta_df[(meta_df['dataset_title'] == "Spatial deconvolution of HER2-positive breast cancer delineates tumor-associated cell type interactions")], #BC1
-        'PAAD': meta_df[(meta_df['id'] == "TENX126") | (meta_df['id'] == "TENX116")],
+        'PAAD': meta_df[(meta_df['id'] == "TENX126") | (meta_df['id'] == "TENX116") | (meta_df['id'] == "TENX140")],
         'FHPTLD': meta_df[(meta_df['id'] == "TENX124") | (meta_df['id'] == "TENX125")],
         'SKCM': meta_df[(meta_df['id'] == "TENX117") | (meta_df['id'] == "TENX115")],
         'CRC_COAD': meta_df[(meta_df['oncotree_code'] == 'COAD') & (meta_df['dataset_title'] == "Charting the Heterogeneity of Colorectal Cancer Consensus Molecular Subtypes using Spatial Transcriptomics: datasets")],
@@ -106,22 +80,41 @@ def main():
         'HCC': meta_df[meta_df['dataset_title'] == 'Identification of TREM1+CD163+ myeloid cells as a deleterious immune subset in HCC [Spatial Transcriptomics]']
     }
     
-    meta_df = name_to_meta['CCRCC']  #meta_df[meta_df['id'] == "TENX94"] #name_to_meta['IDC_ILC']
-    #name_to_meta
+    #meta_df = name_to_meta['PAAD']
+    #meta_df = meta_df[(meta_df['id'] == 'TENX139') | (meta_df['id'] == 'TENX142')]
+    meta_df = meta_df[meta_df['st_technology'] != 'Xenium']
+
+    #meta_df = meta_df[(meta_df['use_train'] == 'TRUE')]
+    #img = pyvips.Image.tiffload('/mnt/sdb1/paul/images/pyramidal/NCBI844.tif')
+
+    dest = '/mnt/sdb1/paul/images'
     
-    #create_gene_panels(name_to_meta)
+    #img = pyvips.Image.svgload('/mnt/sdb1/paul/Nor_lung.svg', unlimited=True)
     
-    #bc1_splits = meta_df.groupby('patient')['id'].agg(list).to_dict()
-    #create_splits('/mnt/sdb1/paul/bc2_splits', bc1_splits, K=8)
-    #test = sc.read_h5ad('/mnt/sdb1/paul/BC1/adata/SPA154.h5ad')
+    #from src.hest.bench import benchmark_encoder
+    #import torch.nn as nn
     
     
-    #process_meta_df(meta_df, pyramidal=False)
-    #get_k_genes_from_df(meta_df, k=50, save_dir="/mnt/sdb1/paul/SKCM/var_50genes.json", criteria='var')
+    #benchmark_encoder(
+    #    None, 
+    #    None,
+    #    '/mnt/ssd/paul/ST-histology-loader/samples/bench_config.yaml'
+    #)
+    
+    #obj = VisiumReader().auto_read('/mnt/sdb1/paul/data/samples/visium/Batf3-dendritic cells and 4-1BB-4-1BB ligand axis are required at the effector phase within the tumor microenvironment for PD-1-PD-L1 blockade efficacy/GSM7659430')
+    #obj.save_spatial_plot('/mnt/sdb1/paul/data/samples/visium/Batf3-dendritic cells and 4-1BB-4-1BB ligand axis are required at the effector phase within the tumor microenvironment for PD-1-PD-L1 blockade efficacy/GSM7659430/processed')
+
+    process_meta_df(meta_df, pyramidal=False)
+    #get_k_genes_from_df(meta_df, k=50, save_dir="/mnt/ssd/paul/ST-histology-loader/bench_data/PAAD/var_50genes.json", criteria='var')
     
     #copy_processed_images(dest, meta_df, cp_pyramidal=False)
     
     #pyvips.tiffload('/media/ssd2/hest/pyramidal/TENX137.tif'
+    #create_benchmark_data(meta_df, save_dir='/mnt/ssd/paul/ST-histology-loader/bench_data/PAAD', K=3, adata_folder='/mnt/sdb1/paul/images/adata', use_mask=True, keep_largest=[False, True, True])
+    #create_benchmark_data(meta_df, save_dir='/mnt/ssd/paul/ST-histology-loader/bench_data/LUNG', K=2, adata_folder='/mnt/sdb1/paul/images/adata', use_mask=True, keep_largest=[True, False])
+    #create_benchmark_data(meta_df, save_dir='/mnt/sdb1/paul/BLAD2', K=4, adata_folder='/mnt/sdb1/paul/images/adata', use_mask=False)
+    #create_benchmark_data(meta_df, save_dir='/mnt/sdb1/paul/EPM', K=11, adata_folder='/mnt/sdb1/paul/images/adata', use_mask=False)
+    #create_benchmark_data(meta_df, save_dir='/mnt/sdb1/paul/BLAD', K=2, adata_folder='/mnt/sdb1/paul/images/adata', use_mask=False)
     #create_benchmark_data(meta_df, save_dir='/mnt/sdb1/paul/CCRCC', K=6, adata_folder='/mnt/sdb1/paul/images/adata', use_mask=False)
     #create_benchmark_data(meta_df, save_dir='/mnt/sdb1/paul/IDC_ILC', K=None, adata_folder='/mnt/sdb1/paul/images/adata', use_mask=True)
     #create_benchmark_data(meta_df, save_dir='/mnt/sdb1/paul/CCRCC', K=12, adata_folder='/mnt/sdb1/paul/images/adata', use_mask=False)

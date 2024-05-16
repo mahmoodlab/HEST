@@ -10,6 +10,32 @@ from .utils import (find_first_file_endswith, split_join_adata_by_col,
                     write_10X_h5)
 
 
+def GSE238145_to_adata(path):
+    counts_path = find_first_file_endswith(path, 'counts.txt')
+    coords_path = find_first_file_endswith(path, 'coords.txt')
+    
+    coords_df = pd.read_csv(coords_path, index_col=0, sep='\t')
+    coords_df = coords_df.rename(columns={
+        'tissue': 'in_tissue',
+        'row': 'array_row',
+        'col': 'array_col',
+        'imagerow': 'pxl_row_in_fullres',
+        'imagecol': 'pxl_col_in_fullres',
+    })
+    
+    counts_df = pd.read_csv(counts_path, index_col=0, sep='\t')
+    counts_df = counts_df.transpose()
+    counts_df.index = counts_df.index.str.replace('.', '-')
+    
+    sel = counts_df.merge(coords_df, left_index=True, right_index=True).index
+    coords_df = coords_df.loc[sel]
+    
+    adata = sc.AnnData(counts_df)
+    
+    adata.obsm['spatial'] = np.column_stack((coords_df['pxl_col_in_fullres'], coords_df['pxl_row_in_fullres']))
+    return adata
+
+
 def join_object_to_adatas_GSE214989(path):
     adata = sc.read_10x_h5(path)
     sampleIDS = ['_1', '_2', '_3']
