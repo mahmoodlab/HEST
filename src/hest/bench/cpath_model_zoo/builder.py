@@ -1,9 +1,10 @@
+from .models.custom_weight_loaders import load_pretrained_weights_into_model_cocavit
+from .models.vision_transformer_custom import vit_large_w_pooler
 from .models.densenetbackbone import DenseNetBackbone
 from .models.remedis_models import resnet152_remedis
 from .models.phikon import ibot_vit
 from .models import TimmCNNEncoder, TimmViTEncoder, HFViTEncoder
 import timm
-from conch.open_clip_custom import create_model_from_pretrained
 import os
 from functools import partial
 import torch
@@ -11,19 +12,8 @@ from loguru import logger
 from .model_registry import _MODEL_CONFIGS
 from .utils import get_eval_transforms, get_constants
 import torch.nn as nn
-from .models.ctran import ctranspath
 import torchvision.models as models
 from .models.post_processor import CLIPVisionModelPostProcessor
-
-def load_ctranspath(ckpt_path, img_size=224):
-    model = ctranspath()
-    model.head = nn.Identity()
-    td = torch.load(ckpt_path, map_location ='cpu')['model']
-    td = {k:v for k,v in td.items() if 'attn_mask' not in k}
-    missing_keys, unexpected_keys = model.load_state_dict(td, strict=False)
-    print('missing keys: ', missing_keys)
-    print('unexpected keys: ', unexpected_keys)
-    return model
 
 def get_encoder(model_name, overwrite_kwargs={}, img_size = 224):
     config = _MODEL_CONFIGS[model_name]
@@ -67,12 +57,14 @@ def build_model(config):
     elif config['loader'] == 'hf_wrapper_vit':
         model = HFViTEncoder(**config['loader_kwargs'])
     elif config['loader'] == 'conch_openclip_custom':
+        from conch.open_clip_custom import create_model_from_pretrained
         model, _ = create_model_from_pretrained(**config['loader_kwargs'], checkpoint_path=config["checkpoint_path"])
         model.forward = partial(model.encode_image, proj_contrast=False, normalize=False)
     elif config['loader'] == 'timm':
         # uses timm to load a model
         model = timm.create_model(**config['loader_kwargs'])
     elif config['loader'] == 'ctranspath_loader':
+        from .models.ctran import ctranspath
         ckpt_path = config["checkpoint_path"]
         assert os.path.isfile(ckpt_path)
         model = ctranspath(img_size=224)
@@ -113,6 +105,20 @@ def build_model(config):
         ckpt_path = config["checkpoint_path"]
         model = ibot_vit.iBOTViT(architecture="vit_base_pancan", encoder="teacher", weights_path=ckpt_path)
         
+        load_state_dict = False
+    elif config['loader'] == 'pathchat':
+        kwargs = {}
+        add_kwargs = {'pooler_n_queries_contrast': 1}
+        add_kwargs['legacy'] = False
+        kwargs.update(add_kwargs)
+        model = vit_large_w_pooler(**kwargs, init_values=1e-6)
+        ckpt_path = config["checkpoint_path"]
+        checkpoint = ckpt_path.split('/')[-1]
+        enc_name = os.path.dirname(ckpt_path).split('/')[-1]
+        assets_dir = os.path.dirname(os.path.dirname(ckpt_path))
+        load_pretrained_weights_into_model_cocavit(
+            model, enc_name, checkpoint, assets_dir)
+
         load_state_dict = False
     else:
         raise ValueError(f"Unsupported loader type: {config['loader']}")

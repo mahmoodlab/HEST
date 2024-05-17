@@ -2,7 +2,7 @@ import sys
 
 import pandas as pd
 
-from src.hest.bench.training.predict_expression import benchmark_encoder
+from .bench.training.predict_expression import benchmark_encoder
 
 sys.path.append("/mnt/ssd/paul/ST-histology-loader")
 
@@ -95,16 +95,16 @@ def main():
     #import torch.nn as nn
     
     
-    #benchmark_encoder(
-    #    None, 
-    #    None,
-    #    '/mnt/ssd/paul/ST-histology-loader/samples/bench_config.yaml'
-    #)
+    benchmark_encoder(
+        None, 
+        None,
+        '/mnt/ssd/paul/ST-histology-loader/samples/bench_config.yaml'
+    )
     
     #obj = VisiumReader().auto_read('/mnt/sdb1/paul/data/samples/visium/Batf3-dendritic cells and 4-1BB-4-1BB ligand axis are required at the effector phase within the tumor microenvironment for PD-1-PD-L1 blockade efficacy/GSM7659430')
     #obj.save_spatial_plot('/mnt/sdb1/paul/data/samples/visium/Batf3-dendritic cells and 4-1BB-4-1BB ligand axis are required at the effector phase within the tumor microenvironment for PD-1-PD-L1 blockade efficacy/GSM7659430/processed')
 
-    process_meta_df(meta_df, pyramidal=False)
+    #process_meta_df(meta_df, pyramidal=False)
     #get_k_genes_from_df(meta_df, k=50, save_dir="/mnt/ssd/paul/ST-histology-loader/bench_data/PAAD/var_50genes.json", criteria='var')
     
     #copy_processed_images(dest, meta_df, cp_pyramidal=False)

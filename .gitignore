@@ -12,3 +12,4 @@ Makefile
 *.parquet
 bench_data
 src/hest/bench/timm_ctp
+notebooks

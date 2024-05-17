@@ -24,15 +24,15 @@ torch.multiprocessing.set_sharing_strategy('file_system')
 
 sys.path.append('../')
 
-from src.hest.HESTData import HESTData
-from src.hest.bench.data_modules.st_dataset import H5TileDataset, load_adata
-from src.hest.bench.utils.transform_utils import get_eval_transforms
-from src.hest.bench.utils.utils import (get_current_time, merge_dict)
-from src.hest.bench.utils.file_utils import save_pkl, load_pkl, save_hdf5, read_assets_from_h5
-from src.hest.bench.training.trainer import train_test_reg
+from hest.HESTData import HESTData
+from hest.bench.data_modules.st_dataset import H5TileDataset, load_adata
+from hest.bench.utils.transform_utils import get_eval_transforms
+from hest.bench.utils.utils import (get_current_time, merge_dict)
+from hest.bench.utils.file_utils import save_pkl, load_pkl, save_hdf5, read_assets_from_h5
+from hest.bench.training.trainer import train_test_reg
 
-from src.hest.bench.cpath_model_zoo.builder import get_encoder
-from src.hest.bench.cpath_model_zoo.model_registry import _MODEL_CONFIGS
+from hest.bench.cpath_model_zoo.builder import get_encoder
+from hest.bench.cpath_model_zoo.model_registry import _MODEL_CONFIGS
 
 
 
@@ -43,9 +43,9 @@ parser.add_argument('--seed', type=int, default=1,
                     help='random seed for reproducible experiment (default: 1)')
 parser.add_argument('--overwrite', action='store_true', default=False,
                     help='overwrite existing results')
-parser.add_argument('--source_dataroot', type=str)
+parser.add_argument('--source_dataroot', type=str, default='/mnt/ssd/paul/ST-histology-loader/bench_data', help='root directory containing all the datasets')
 parser.add_argument('--embed_dataroot', type=str)
-parser.add_argument('--results_dir', type=str, default='/mnt/sdb1/paul/ST_pred_results/')
+parser.add_argument('--results_dir', type=str)
 parser.add_argument('--exp_code', type=str, default=None)
 
 ### specify encoder settings ### 
@@ -82,14 +82,15 @@ class LazyEncoder:
 
 
 def benchmark_grid(fn, args, device, encoders: List[LazyEncoder], datasets: List[str], save_dir, precision):
+    "execute fn for each encoders and datasets and dump the results in a nested directory structure"
     dataset_perfs = []
     for dataset in datasets:
-        args.source_dataroot = os.path.join(args.datasets_root, dataset)
+        source_dataroot = os.path.join(args.source_dataroot, dataset)
         enc_perfs = []
         for enc in encoders:
             exp_save_dir = os.path.join(save_dir, dataset, enc.name)
             os.makedirs(exp_save_dir, exist_ok=True)
-            enc_results = fn(args, exp_save_dir, enc, dataset, device, precision)
+            enc_results = fn(args, exp_save_dir, enc, dataset, device, precision, source_dataroot)
             
             enc_perfs.append({
                 'encoder_name': enc.name,
@@ -168,11 +169,11 @@ def load_encoder(enc_name, device):
     encoder.to(device)
     return encoder, img_transforms, enc_config
 
-def predict_split(train_split, test_split, args, save_dir, dataset_name, lazy_enc, device, precision):
+def predict_single_split(train_split, test_split, args, save_dir, dataset_name, lazy_enc, device, precision, source_dataroot):
     if not os.path.isfile(train_split):
-        train_split = os.path.join(args.source_dataroot, 'splits', train_split)
+        train_split = os.path.join(source_dataroot, 'splits', train_split)
     if not os.path.isfile(test_split):
-        test_split = os.path.join(args.source_dataroot, 'splits', test_split)
+        test_split = os.path.join(source_dataroot, 'splits', test_split)
     
     train_df = pd.read_csv(train_split)
     test_df = pd.read_csv(test_split)
@@ -185,7 +186,7 @@ def predict_split(train_split, test_split, args, save_dir, dataset_name, lazy_en
     for split in [train_df, test_df]:
         for i in tqdm(range(len(split))):
             sample_id = split.iloc[i]['sample_id']
-            tile_h5_path = os.path.join(args.source_dataroot, split.iloc[i]['patches_path'])
+            tile_h5_path = os.path.join(source_dataroot, split.iloc[i]['patches_path'])
             assert os.path.isfile(tile_h5_path)
             embed_path = os.path.join(embedding_dir, f'{sample_id}.h5')
             if not os.path.isfile(embed_path) or args.overwrite:
@@ -212,7 +213,7 @@ def predict_split(train_split, test_split, args, save_dir, dataset_name, lazy_en
     all_split_assets = {}
     
     if args.gene_list is None:
-        files = os.listdir(args.source_dataroot)
+        files = os.listdir(source_dataroot)
         for f in files:
             if f.endswith('.json'):
                 gene_list = f
@@ -221,7 +222,7 @@ def predict_split(train_split, test_split, args, save_dir, dataset_name, lazy_en
         gene_list = args.gene_list
 
     print(f'using gene_list {gene_list}')
-    with open(os.path.join(args.source_dataroot, gene_list), 'r') as f:
+    with open(os.path.join(source_dataroot, gene_list), 'r') as f:
         genes = json.load(f)['genes']
             
     for split_key, split in zip(['train', 'test'], [train_df, test_df]):
@@ -229,7 +230,7 @@ def predict_split(train_split, test_split, args, save_dir, dataset_name, lazy_en
         for i in tqdm(range(len(split))):
             sample_id = split.iloc[i]['sample_id']
             embed_path = os.path.join(embedding_dir, f'{sample_id}.h5')
-            expr_path = os.path.join(args.source_dataroot, split.iloc[i]['expr_path'])
+            expr_path = os.path.join(source_dataroot, split.iloc[i]['expr_path'])
             assets, attrs = read_assets_from_h5(embed_path)
             barcodes = assets['barcodes'].flatten().astype(str).tolist()
             adata = load_adata(expr_path, genes=genes, barcodes=barcodes, normalize=args.normalize)
@@ -283,31 +284,17 @@ def merge_fold_results(arr):
 
 def benchmark_encoder(encoder: torch.nn.Module, enc_transf, config_path: str) -> dict:
     
-    #dir = Path(__file__).resolve().parent.parent.parent.parent.parent
     args = parser.parse_args()
-    #args.source_dataroot = data_root
-    
-    with open(config_path) as stream:
-        config = yaml.safe_load(stream)
-        
-    for key in config:
-        if key in args:
-            setattr(args, key, config[key])
+
+            
+    args.config = config_path
     
     
-    
-    #datasets = config['datasets']
-    print(f'Benchmarking on the following datasets {args.datasets}')
-    
-    args.hyperparams = None
-    
-    
-    #args.results_dir = os.path.join(args.results_dir, f'benchmark::{get_current_time()}')
     benchmark(args, encoder=encoder, enc_transf=enc_transf)
         
         
-def predict_folds(args, exp_save_dir, enc, dataset_name, device, precision):
-    split_dir = os.path.join(args.source_dataroot, 'splits')
+def predict_folds(args, exp_save_dir, enc, dataset_name, device, precision, source_dataroot):
+    split_dir = os.path.join(source_dataroot, 'splits')
     splits = os.listdir(split_dir)
     n_splits = len(splits) // 2
     
@@ -317,7 +304,7 @@ def predict_folds(args, exp_save_dir, enc, dataset_name, device, precision):
         test_split = os.path.join(split_dir, f'test_{i}.csv')
         kfold_save_dir = os.path.join(exp_save_dir, f'split{i}')
         os.makedirs(kfold_save_dir, exist_ok=True)
-        linprobe_results = predict_split(train_split, test_split, args, kfold_save_dir, dataset_name, lazy_enc=enc, device=device, precision=precision)
+        linprobe_results = predict_single_split(train_split, test_split, args, kfold_save_dir, dataset_name, lazy_enc=enc, device=device, precision=precision, source_dataroot=source_dataroot)
         libprobe_results_arr.append(linprobe_results)
         
         
@@ -333,17 +320,28 @@ def predict_folds(args, exp_save_dir, enc, dataset_name, device, precision):
 
 
 def benchmark(args, encoder, enc_transf):
-    print('args is ', args)
+    
+    if args.config is not None:
+        with open(args.config) as stream:
+            config = yaml.safe_load(stream)
+            
+        for key in config:
+            if key in args:
+                setattr(args, key, config[key])
+    
+    
+    logger.info(f'Benchmarking on the following datasets {args.datasets}')
+    
+    logger.info(f'run parameters {args}')
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     precisions = {'fp16': torch.float16, 
                   'fp32': torch.float32}
     precision = precisions.get(args.precision, torch.float32)
 
-    args.datasets_root = args.source_dataroot
 
     datasets = args.datasets
     if len(datasets) >= 1 and datasets[0] == '*':
-        datasets = os.listdir(args.datasets_root)
+        datasets = os.listdir(args.source_dataroot)
     
     #### Setup Save Directory ####
     save_dir = args.results_dir
@@ -363,13 +361,14 @@ def benchmark(args, encoder, enc_transf):
     
     benchmark_grid(predict_folds, args, device, encoders, datasets, save_dir=save_dir, precision=precision)
 
-            
-    #assert enc_name in _MODEL_CONFIGS, f"Encoder {enc_name} not found in model registry"
     
     
     
 if __name__ == '__main__':
     args = parser.parse_args()
+    
+    if args.config is None and (args.source_dataroot is None or args.embed_dataroot, args.results_dir):
+        parser.error("if --config isn't provided, --source_dataroot, --embed_dataroot and --results_dir must be provided")
     
     benchmark(args, None, None)
     

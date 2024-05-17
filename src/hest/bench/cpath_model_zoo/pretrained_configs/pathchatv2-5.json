@@ -1,0 +1,10 @@
+{
+    "name": "pathchatv2-5",
+    "img_norm": "imagenet",
+    "loader": "pathchat",
+    "loader_kwargs": {
+        "model_name": "pathchatv2-5"
+    },
+    "checkpoint_path": "",
+    "load_state_dict_strict": true
+}

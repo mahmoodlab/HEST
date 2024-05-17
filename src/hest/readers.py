@@ -16,11 +16,11 @@ from matplotlib import rcParams
 from PIL import Image
 from tqdm import tqdm
 
-from src.hest.custom_readers import (GSE167096_to_adata, GSE180128_to_adata,
+from .custom_readers import (GSE167096_to_adata, GSE180128_to_adata,
                                      GSE203165_to_adata, GSE217828_to_adata, GSE234047_to_adata, GSE238145_to_adata, align_ST_counts_with_transform,
                                      align_dev_human_heart, align_eval_qual_dataset, align_her2, raw_count_to_adata, raw_counts_to_pixel)
-from src.hest.HESTData import HESTData, VisiumHDHESTData, VisiumHESTData, XeniumHESTData, STHESTData
-from src.hest.utils import (ALIGNED_HE_FILENAME, SpotPacking,
+from .HESTData import HESTData, VisiumHDHESTData, VisiumHESTData, XeniumHESTData, STHESTData
+from .utils import (ALIGNED_HE_FILENAME, SpotPacking,
                             get_path_from_meta_row, autoalign_visium,
                             check_arg, find_biggest_img,
                             find_first_file_endswith,

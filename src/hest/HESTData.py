@@ -19,9 +19,9 @@ from matplotlib.collections import PatchCollection
 from PIL import Image
 from tqdm import tqdm
 
-from src.hest.masking import (apply_otsu_thresholding, keep_largest_area,
+from .masking import (apply_otsu_thresholding, keep_largest_area,
                               mask_to_contours, save_pkl, scale_contour_dim)
-from src.hest.utils import (ALIGNED_HE_FILENAME, get_path_from_meta_row,
+from .utils import (ALIGNED_HE_FILENAME, get_path_from_meta_row,
                             plot_verify_pixel_size, save_scalefactors,
                             tiff_save, write_10X_h5)
 
