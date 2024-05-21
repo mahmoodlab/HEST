@@ -1,8 +1,9 @@
+import os
 import sys
 
 import pandas as pd
 
-from .bench.training.predict_expression import benchmark_encoder
+from hest.bench.training.predict_expression import benchmark_encoder
 
 sys.path.append("/mnt/ssd/paul/ST-histology-loader")
 
@@ -19,8 +20,7 @@ from PIL import Image
 
 from src.hest.HESTData import create_benchmark_data, create_splits
 from src.hest.readers import VisiumReader, process_meta_df, VisiumHDReader
-from src.hest.utils import copy_processed_images, get_k_genes_from_df
-import pyreadr
+from src.hest.utils import copy_processed_images, create_meta_release, get_k_genes_from_df
 
 
 
@@ -51,7 +51,7 @@ def main():
         meta_df['image'] = [True for _ in range(len(meta_df))]
     #meta_df = meta_df[meta_df['Products'] == 'Spatial Gene Expression']
     meta_df = meta_df[meta_df['image'] == True]
-    meta_df = meta_df[meta_df['st_technology'] != 'Visium HD']
+    #meta_df = meta_df[meta_df['st_technology'] == 'Visium HD']
     #meta_df = meta_df[meta_df['st_instrument'] != 'Xenium Analyzer']
     meta_df = meta_df[~meta_df['dataset_title'].isin(exclude_list)]
     #meta_df = meta_df[meta_df['bigtiff'].notna() & meta_df['bigtiff'] != "TRUE"]
@@ -82,12 +82,44 @@ def main():
     
     #meta_df = name_to_meta['PAAD']
     #meta_df = meta_df[(meta_df['id'] == 'TENX139') | (meta_df['id'] == 'TENX142')]
-    meta_df = meta_df[meta_df['st_technology'] != 'Xenium']
+    #meta_df = meta_df[meta_df['st_technology'] != 'Xenium']
 
     #meta_df = meta_df[(meta_df['use_train'] == 'TRUE')]
     #img = pyvips.Image.tiffload('/mnt/sdb1/paul/images/pyramidal/NCBI844.tif')
 
     dest = '/mnt/sdb1/paul/images'
+    
+    
+    #import matplotlib.pyplot as plt
+    
+    
+    
+    #species_counts = meta_df['organ'].value_counts()
+
+    # Create the pie plot
+    #plt.figure(figsize=(8, 6))
+    #explode = [0.05 for _ in range(len(species_counts))]
+    #autopct='%1.1f%%'
+    #plt.pie(species_counts, labels=species_counts.index, shadow=False, startangle=140, explode=explode)
+    #plt.pie(species_counts, labels=[f'{label} ({count})' for label, count in zip(species_counts.index, species_counts)], explode=explode, startangle=140, colors=plt.cm.Set2.colors, labeldistance=1.5)
+
+    # Equal aspect ratio ensures that pie is drawn as a circle
+    #plt.axis('equal')
+
+    # Add a title
+   # plt.title('Species Distribution')
+
+    # Show the plot
+    #plt.savefig('pie.pdf')
+    #plt.savefig('pie.png')
+    
+    #create_meta_release(meta_df, version.Version("0.0.2"))
+    
+    #df = pd.read_csv('/mnt/sdb1/paul/meta_releases/HEST_v0_0_2.csv')
+    #for _, row in df.iterrows():
+    #    if not os.path.exists('/mnt/sdb1/paul/images/pyramidal/' + row['id'] + '.tif'):
+    #        print(row['id'])
+    
     
     #img = pyvips.Image.svgload('/mnt/sdb1/paul/Nor_lung.svg', unlimited=True)
     
@@ -98,13 +130,15 @@ def main():
     benchmark_encoder(
         None, 
         None,
-        '/mnt/ssd/paul/ST-histology-loader/samples/bench_config.yaml'
+         '/mnt/ssd/paul/ST-histology-loader/samples/bench_config.yaml'
     )
     
     #obj = VisiumReader().auto_read('/mnt/sdb1/paul/data/samples/visium/Batf3-dendritic cells and 4-1BB-4-1BB ligand axis are required at the effector phase within the tumor microenvironment for PD-1-PD-L1 blockade efficacy/GSM7659430')
     #obj.save_spatial_plot('/mnt/sdb1/paul/data/samples/visium/Batf3-dendritic cells and 4-1BB-4-1BB ligand axis are required at the effector phase within the tumor microenvironment for PD-1-PD-L1 blockade efficacy/GSM7659430/processed')
 
-    #process_meta_df(meta_df, pyramidal=False)
+    #meta_df = meta_df[(meta_df['id'] == 'TENX128') | (meta_df['id'] == 'TENX129') | (meta_df['id'] == 'TENX131') | (meta_df['id'] == 'TENX138')]
+
+    #process_meta_df(meta_df, pyramidal=True)
     #get_k_genes_from_df(meta_df, k=50, save_dir="/mnt/ssd/paul/ST-histology-loader/bench_data/PAAD/var_50genes.json", criteria='var')
     
     #copy_processed_images(dest, meta_df, cp_pyramidal=False)

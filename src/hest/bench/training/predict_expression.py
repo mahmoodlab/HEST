@@ -1,40 +1,42 @@
+import argparse
+import json
+import os
+import pdb
+import shutil
+import sys
 from operator import itemgetter
 from pathlib import Path
 from typing import Dict, List, Union
-from matplotlib import pyplot as plt
-from sklearn.preprocessing import RobustScaler
-import torch
-import argparse
-import os
-import h5py 
-import json
-import sklearn
-import shutil
-import pandas as pd
-import sys
+
+import h5py
 import numpy as np
-import pdb
-from tqdm import tqdm, trange
-from torchvision import transforms
+import pandas as pd
+import sklearn
+import torch
 import torch.multiprocessing
 import yaml
 from loguru import logger
+from matplotlib import pyplot as plt
+from sklearn.decomposition import PCA
+from sklearn.discriminant_analysis import StandardScaler
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import RobustScaler
+from torchvision import transforms
+from tqdm import tqdm, trange
 
 torch.multiprocessing.set_sharing_strategy('file_system')
 
 sys.path.append('../')
 
-from hest.HESTData import HESTData
-from hest.bench.data_modules.st_dataset import H5TileDataset, load_adata
-from hest.bench.utils.transform_utils import get_eval_transforms
-from hest.bench.utils.utils import (get_current_time, merge_dict)
-from hest.bench.utils.file_utils import save_pkl, load_pkl, save_hdf5, read_assets_from_h5
-from hest.bench.training.trainer import train_test_reg
-
 from hest.bench.cpath_model_zoo.builder import get_encoder
 from hest.bench.cpath_model_zoo.model_registry import _MODEL_CONFIGS
-
-
+from hest.bench.data_modules.st_dataset import H5TileDataset, load_adata
+from hest.bench.training.trainer import train_test_reg
+from hest.bench.utils.file_utils import (load_pkl, read_assets_from_h5,
+                                         save_hdf5, save_pkl)
+from hest.bench.utils.transform_utils import get_eval_transforms
+from hest.bench.utils.utils import get_current_time, merge_dict
+from hest.HESTData import HESTData
 
 # Generic training settings
 parser = argparse.ArgumentParser(description='Configurations for linear probing')
@@ -61,6 +63,8 @@ parser.add_argument('--alpha', type=float, default=None)
 parser.add_argument('--kfold', action='store_true', default=False)
 parser.add_argument('--benchmark_encoders', action='store_true', default=False)
 parser.add_argument('--normalize', type=bool, default=True)
+parser.add_argument('--dimreduce', type=str, default=None, help='whenever to perform dimensionality reduction before linear probing, can be "PCA" or None')
+parser.add_argument('--latent_dim', type=int, default=256, help='dimensionality reduction latent dimension')
 parser.add_argument('--encoders', nargs='+', help='All the encoders to benchmark', default=[])
 parser.add_argument('--datasets', nargs='+', help='Datasets from source_dataroot to use during benchmark', default=['*'])
 parser.add_argument('--config', type=str, help='Path to a benchmark config file, arguments provided in the config file will overwrite the command line args', default=None)
@@ -109,8 +113,18 @@ def benchmark_grid(fn, args, device, encoders: List[LazyEncoder], datasets: List
             'results': enc_perfs
         })
         
+    perf_per_enc = {}
+    for dataset_perf in dataset_perfs:
+        for enc_perf in dataset_perf['results']:
+            perf_per_enc[enc_perf['encoder_name']] = perf_per_enc.get(enc_perf['encoder_name'], []) + [enc_perf['pearson_mean']]
+            
+    for key, val in perf_per_enc.items():
+        perf_per_enc[key] = np.mean(val)
+    perf_per_enc = sorted(perf_per_enc, key=lambda item: item[1], reverse=True)
+        
     with open(os.path.join(save_dir, 'dataset_results.json'), 'w') as f:
-        json.dump({'results': dataset_perfs}, f, sort_keys=True, indent=4)
+        json.dump({'results': dataset_perfs, 'average': perf_per_enc}, f, sort_keys=True, indent=4)
+        
 
             
 
@@ -244,6 +258,18 @@ def predict_single_split(train_split, test_split, args, save_dir, dataset_name, 
     
     X_train, y_train = all_split_assets['train']['embeddings'], all_split_assets['train']['adata']
     X_test, y_test = all_split_assets['test']['embeddings'], all_split_assets['test']['adata']
+    
+    
+    #scaler = StandardScaler()
+    #scaler.fit(X_train)
+    ##X_train = scaler.transform(X_train)
+    #X_test = scaler.transform(X_test)
+    
+    if args.dimreduce == 'PCA':
+        print('perform PCA dim reduction')
+        pipe = Pipeline([('scaler', StandardScaler()), (f'{args.dimreduce}', eval(args.dimreduce)(n_components=args.latent_dim))])
+        X_train, X_test = torch.Tensor(pipe.fit_transform(X_train)), torch.Tensor(pipe.transform(X_test))
+        
     
     linprobe_results, linprobe_dump = train_test_reg(X_train, X_test, y_train, y_test, random_state=args.seed, genes=genes)
     linprobe_summary = {}

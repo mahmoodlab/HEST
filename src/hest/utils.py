@@ -402,15 +402,19 @@ def create_meta_release(meta_df: pd.DataFrame, version: version.Version) -> None
         f = open(os.path.join(path, 'processed', 'metrics.json'))
         metrics = json.load(f)
         for col in metric_subset:
-            meta_df.loc[index][col] = metrics.get(col)
-        meta_df.loc[index]['image_filename'] = _sample_id_to_filename(row['id'])
-        meta_df.loc[index]['subseries'] = _get_nan(meta_df.loc[index], 'tissue') + _get_nan(meta_df.loc[index], 'disease_comment') + _get_nan(meta_df.loc[index], 'subseries')
+            meta_df.loc[index, col] = metrics.get(col)
+        meta_df.loc[index, 'image_filename'] = _sample_id_to_filename(row['id'])
+        meta_df.loc[index, 'subseries'] = _get_nan(meta_df.loc[index], 'subseries')
+        meta_df.loc[index, 'disease_comment'] = _get_nan(meta_df.loc[index], 'disease_comment')
+        meta_df.loc[index, 'tissue'] = _get_nan(meta_df.loc[index], 'tissue')
+        #meta_df.loc[index, 'subseries'] = _get_nan(meta_df.loc[index], 'tissue') + ' , ' +  _get_nan(meta_df.loc[index], 'disease_comment') + ' , ' + _get_nan(meta_df.loc[index], 'subseries')
         
-        meta_df.loc[index]['magnification'] = pixel_size_to_mag(meta_df.loc[index]['pixel_size_um_estimated'])
+        meta_df.loc[index, 'magnification'] = pixel_size_to_mag(metrics['pixel_size_um_estimated'])
         
         #TODO remove
-        adata = sc.read_h5ad(os.path.join(path, 'processed', 'aligned_adata.h5ad'))             
-        meta_df.loc[index]['nb_genes'] = len(adata.var_names)
+        meta_df.loc[index, 'nb_genes'] = metrics['adata_nb_col']
+        #adata = sc.read_h5ad(os.path.join(path, 'processed', 'aligned_adata.h5ad'))             
+        #meta_df.loc[index]['nb_genes'] = len(adata.var_names)
         
         
     version_s = str(version).replace('.', '_')
@@ -503,7 +507,7 @@ def tiff_save(img: np.ndarray, save_path: str, pixel_size: float, pyramidal=True
             xres=1. / (pixel_size * 1e-4),
             yres=1. / (pixel_size * 1e-4))
     else:
-        with tifffile.TiffWriter(save_path, bigtiff=True) as tif:
+        with tifffile.TiffWriter(save_path, bigtiff=bigtiff) as tif:
             options = dict(
                 tile=(256, 256), 
                 compression='deflate', 

@@ -1052,7 +1052,7 @@ def reader_factory(path: str) -> Reader:
     """For internal use, determine the reader based on the path"""
     path = path.lower()
     if 'visium-hd' in path:
-        raise VisiumHDReader()
+        return VisiumHDReader()
     elif 'visium' in path:
         return VisiumReader()
     elif 'xenium' in path:
@@ -1063,7 +1063,7 @@ def reader_factory(path: str) -> Reader:
         raise NotImplementedError('')
         
     
-def read_and_save(path: str, save_plots=True, plot_genes=False, pyramidal=True):
+def read_and_save(path: str, save_plots=True, plot_genes=False, pyramidal=True, bigtiff=False):
     """For internal use, determine the appropriate reader based on the raw data path, and
     automatically process the data at that location, then the processed files are dumped
     to processed/
@@ -1080,7 +1080,7 @@ def read_and_save(path: str, save_plots=True, plot_genes=False, pyramidal=True):
     print(st_object)
     save_path = os.path.join(path, 'processed')
     os.makedirs(save_path, exist_ok=True)
-    st_object.save(save_path, pyramidal)
+    st_object.save(save_path, pyramidal, bigtiff=bigtiff)
     if save_plots:
         st_object.save_spatial_plot(save_path)
     if plot_genes:
@@ -1163,4 +1163,5 @@ def process_meta_df(meta_df, save_spatial_plots=True, plot_genes=False, pyramida
     """Internal use method, process all the raw ST data in the meta_df"""
     for _, row in tqdm(meta_df.iterrows(), total=len(meta_df)):
         path = get_path_from_meta_row(row)
-        _ = read_and_save(path, save_plots=save_spatial_plots, plot_genes=plot_genes, pyramidal=pyramidal)
+        bigtiff = not(isinstance(row['bigtiff'], float) or row['bigtiff'] == 'FALSE')
+        _ = read_and_save(path, save_plots=save_spatial_plots, plot_genes=plot_genes, pyramidal=pyramidal, bigtiff=bigtiff)

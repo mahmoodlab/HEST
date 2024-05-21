@@ -113,7 +113,7 @@ class HESTData:
         print(f"H&E overlay spatial plots saved in {save_path}")
     
         
-    def save(self, path: str, pyramidal=True):
+    def save(self, path: str, pyramidal=True, bigtiff=False):
         try:
             self.adata.write(os.path.join(path, 'aligned_adata.h5ad'))
         except:
@@ -158,7 +158,7 @@ class HESTData:
         
         pixel_size = self.meta['pixel_size_um_estimated']
         
-        tiff_save(self.img, os.path.join(path, ALIGNED_HE_FILENAME), pixel_size, pyramidal=pyramidal)
+        tiff_save(self.img, os.path.join(path, ALIGNED_HE_FILENAME), pixel_size, pyramidal=pyramidal, bigtiff=bigtiff)
         
         
     def plot_genes(self, path, top_k=300, plot_spatial=True):
