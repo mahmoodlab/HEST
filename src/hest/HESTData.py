@@ -2,12 +2,13 @@ import json
 import os
 import shutil
 from functools import partial
-from typing import Dict
+from typing import Dict, Union
 
 import cv2
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+import openslide
 import pandas as pd
 import pyvips
 import scanpy as sc
@@ -20,11 +21,10 @@ from PIL import Image
 from tqdm import tqdm
 
 from .masking import (apply_otsu_thresholding, keep_largest_area,
-                              mask_to_contours, save_pkl, scale_contour_dim)
-from .utils import (ALIGNED_HE_FILENAME, get_path_from_meta_row,
-                            plot_verify_pixel_size, save_scalefactors,
-                            tiff_save, write_10X_h5)
-
+                      mask_to_contours, save_pkl, scale_contour_dim)
+from .utils import (ALIGNED_HE_FILENAME, get_path_from_meta_row, load_image,
+                    plot_verify_pixel_size, save_scalefactors, tiff_save,
+                    write_10X_h5)
 from .vst_save_utils import initsave_hdf5
 
 
@@ -64,22 +64,25 @@ class HESTData:
     def __init__(
         self, 
         adata: sc.AnnData,
-        img: np.ndarray, 
-        meta: Dict, 
-        spot_size: float, 
-        spot_inter_dist: float
+        img: Union[np.ndarray, str], 
+        meta: Dict
     ):
         """
         Args:
             adata (sc.AnnData): Spatial Transcriptomics data in a scanpy Anndata object
                 adata must contain a downscaled image in ['spatial']['ST']['images']['downscaled_fullres']
                 and the following collomns in adata.obs: ['array_col', 'array_row', 'in_tissue', 'pxl_row_in_fullres', 'pxl_col_in_fullres']
-            img (np.ndarray): Full resolution image corresponding to the ST data
+            img (Union[np.ndarray, str]): Full resolution image corresponding to the ST data, if passed as a path (str) the image is lazily loaded
             meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
         """
         self.adata = adata
         
-        self.img = img
+        if isinstance(img, str):
+            self.wsi = openslide.OpenSlide(img)
+            self.img = None
+        else:
+            self.img = img
+            
         self.meta = meta
         self._verify_format(adata)
         self.pixel_size_embedded = meta['pixel_size_um_embedded']
@@ -112,36 +115,41 @@ class HESTData:
         plt.close()  # Close the plot to free memory
         print(f"H&E overlay spatial plots saved in {save_path}")
     
+    
+    def _load_wsi(self):
+        self.img, _ = load_image(self.wsi._filename)
+        
+    
+    def get_img(self):
+        if self.img is None:
+            self._load_wsi()
+        return self.img
+    
+    
+    def get_img_shape(self):
+        if self.img is not None:
+            shape = self.img.shape[:2]
+            return shape[0], shape[1]
+        else:
+            width, height = self.wsi.dimensions
+            return height, width
+    
         
     def save(self, path: str, pyramidal=True, bigtiff=False):
         try:
             self.adata.write(os.path.join(path, 'aligned_adata.h5ad'))
         except:
-            #traceback.print_exc()
             # workaround from https://github.com/theislab/scvelo/issues/255
             self.adata.__dict__['_raw'].__dict__['_var'] = self.adata.__dict__['_raw'].__dict__['_var'].rename(columns={'_index': 'features'})
             self.adata.write(os.path.join(path, 'aligned_adata.h5ad'))
         
-        #if self.h5_path is not None:
-        #    shutil.copy(self.h5_path, os.path.join(path, 'filtered_feature_bc_matrix.h5'))
-        #else:
-        #    write_10X_h5(self.adata, os.path.join(path, 'filtered_feature_bc_matrix.h5'))
-        
-        #if self.spatial_path is not None:
-        #    shutil.copytree(self.spatial_path, os.path.join(path, 'spatial'), dirs_exist_ok=True)
-        #else:
-        #    os.makedirs(os.path.join(path, 'spatial'), exist_ok=True)
-        #    save_scalefactors(self.adata, os.path.join(path, 'spatial/scalefactors_json.json'))
-
         df = self.adata.obs
         
-        #if self.save_positions:
-        #    tissue_positions = df[['in_tissue', 'array_row', 'array_col', 'pxl_row_in_fullres', 'pxl_col_in_fullres']]
-        #    tissue_positions.to_csv(os.path.join(path, 'spatial/tissue_positions.csv'), index=True, index_label='barcode')
         
+        img = self.get_img()
         self.meta['adata_nb_col'] = len(self.adata.var_names)
-        self.meta['fullres_px_width'] = self.img.shape[1]
-        self.meta['fullres_px_height'] = self.img.shape[0]
+        self.meta['fullres_px_width'] = img.shape[1]
+        self.meta['fullres_px_height'] = img.shape[0]
         with open(os.path.join(path, 'metrics.json'), 'w') as json_file:
             json.dump(self.meta, json_file) 
         
@@ -158,12 +166,10 @@ class HESTData:
         
         pixel_size = self.meta['pixel_size_um_estimated']
         
-        tiff_save(self.img, os.path.join(path, ALIGNED_HE_FILENAME), pixel_size, pyramidal=pyramidal, bigtiff=bigtiff)
+        tiff_save(img, os.path.join(path, ALIGNED_HE_FILENAME), pixel_size, pyramidal=pyramidal, bigtiff=bigtiff)
         
         
     def plot_genes(self, path, top_k=300, plot_spatial=True):
-        #self.adata.obs['in_tissue_cat'] = self.adata.obs['in_tissue_cat'].astype('category')
-        #sc.tl.rank_genes_groups(self.adata, groupby='in_tissue', method='wilcoxon')
         sums = np.array(np.sum(self.adata.X, axis=0))[0]
 
         # Sort genes based on variability
@@ -180,7 +186,6 @@ class HESTData:
             shutil.rmtree(os.path.join(path, 'gene_bar_plots'))
         os.makedirs(os.path.join(path, 'gene_bar_plots'), exist_ok=True)
 
-        #gene_names = [name for name in self.adata.var_names if ('BLANK' not in name and 'NegControl' not in name)]
         gene_names = top_genes
 
         adata_df = self.adata.to_df()
@@ -200,6 +205,14 @@ class HESTData:
                 plt.close()  # Close the plot to free memory
         rcParams["figure.figsize"] = old_figsize
         
+    
+    def get_thumbnail(self, width: int, height: int) -> np.ndarray:
+        if self.img is not None:
+            thumb = np.array(cv2.resize(self.img, dsize=(width, height)))
+        else:
+            thumb = self.wsi.get_thumbnail((width, height))  
+        return thumb      
+        
 
     def visualize_mask_and_patches(
                 self,
@@ -218,22 +231,15 @@ class HESTData:
                 font_thickness=10,
                 cont_df=None
         ):
-            #if vis_level == -1:
-            #    vis_level = self.wsi.get_best_level_for_downsample(downscale)
-            #width, height = self.wsi.dimensions
-            height, width = self.img.shape[:2]
+            height, width = self.get_img_shape()
             downsample = target_width / width
 
             top_left = (0,0)
-            #downsample = self.wsi.level_downsamples[vis_level]
             scale = [downsample, downsample]    
-            #region_size = self.wsi.level_dimensions[vis_level]
-            #img = np.array(self.wsi.read_region(top_left, vis_level, region_size).convert("RGB"))
-            #cv2.resize(self.downscaled_img)
-            img = np.array(cv2.resize(self.img, dsize=(round(width * downsample), round(height * downsample))))
-            #img = np.array(self.wsi.get_thumbnail((width * downsample, height * downsample)))
-            self.downscaled_img = img.copy()
 
+            img = self.get_thumbnail(round(width * downsample), round(height * downsample))
+
+            self.downscaled_img = img.copy()
 
             downscaled_mask = cv2.resize(self.tissue_mask, (img.shape[1], img.shape[0]))
             downscaled_mask = np.expand_dims(downscaled_mask, axis=-1)
@@ -243,7 +249,6 @@ class HESTData:
                 return Image.fromarray(img)
 
             offset = tuple(-(np.array(top_left) * scale).astype(int))
-            #line_thickness = int(line_thickness * math.sqrt(scale[0] * scale[1]))
             draw_cont = partial(cv2.drawContours, contourIdx=-1, thickness=line_thickness, lineType=cv2.LINE_8, offset=offset)
             draw_cont_fill = partial(cv2.drawContours, contourIdx=-1, thickness=cv2.FILLED, offset=offset)
             put_text = partial(cv2.putText, fontFace=font, fontScale=font_size, thickness=font_thickness)
@@ -252,8 +257,6 @@ class HESTData:
                 for idx, cont in enumerate(self.contours_tissue):
                     cont = np.array(scale_contour_dim(cont, scale))
                     M = cv2.moments(cont)
-                    ##cX = int(M["m10"] / M["m00"]) # warning: can be zero
-                    #cY = int(M["m01"] / M["m00"]) # warning: can be zero
                     draw_cont(image=img, contours=[cont], color=line_color)
                     draw_cont_fill(image=downscaled_mask, contours=[cont], color=line_color)
 
@@ -264,10 +267,6 @@ class HESTData:
                     else:
                         label = str(idx)
 
-                    #put_text(img=img, text=label, org=(cX, cY), color=(255, 0, 0))
-                    #if show_group:
-                    #    put_text(img=img, text=str(wsi.groups[idx]), org=(cX+20, cY+20), color=(0, 0, 255))
-
                 ### Draw hole contours
                 for cont in self.contours_holes:
                     cont = scale_contour_dim(cont, scale)
@@ -275,8 +274,6 @@ class HESTData:
 
             alpha = 0.4
             self.downscaled_mask = downscaled_mask
-            #img = cv2.drawContours(img, self.contours_tissue, contourIdx=-1, thickness=cv2.FILLED, offset=offset, color=(255, 255, 255))
-            #overlay_array = (downscaled_mask * [144, 238, 144]).astype(np.uint8)
             self.tissue_mask = cv2.resize(downscaled_mask, self.tissue_mask.shape).round().astype(np.uint8)
             img = cv2.addWeighted(img, 1 - alpha, downscaled_mask, alpha, 0)
             img = img.astype(np.uint8)
@@ -285,13 +282,10 @@ class HESTData:
 
 
     def _compute_mask(self, keep_largest=False):
-        #width, height = self.wsi.dimensions
-        height, width = self.img.shape[:2]
+        width, height = self.get_img_shape()
         TARGET_WIDTH = 2000
         scale = TARGET_WIDTH / width
-        thumbnail = cv2.resize(self.img, (round(height * scale), round(width * scale)))
-        #thumbnail = np.array(self.wsi.get_thumbnail((width * scale, height * scale)))
-        #Image.fromarray(thumbnail).save('thumb.png')
+        thumbnail = self.get_thumbnail((round(width * scale), round(height * scale)))
         mask = apply_otsu_thresholding(thumbnail).astype(np.uint8)
         mask = 1 - mask
         if keep_largest:
@@ -316,19 +310,12 @@ class HESTData:
         adata = self.adata
         
         src_pixel_size =  self.meta['pixel_size_um_estimated'],
-
-        #TODO change
-        #img = self.wsi.read_region((0, 0), 0, self.wsi.dimensions)
-        #img = np.array(img)
-        #if img.shape[2] == 4:
-        #    img = img[:, :, :3]
         
         # minimum intersection percecentage with the tissue mask to keep a patch
         TISSUE_INTER_THRESH = 0.05
         TARGET_VIS_SIZE = 1000
         
         scale_factor = target_pixel_size / src_pixel_size
-        #patch_size_pxl = round(patch_size_um  src_pixel_size)
         patch_size_pxl = round(target_patch_size * scale_factor)
         patch_count = 0
         output_datafile = os.path.join(patch_save_dir, name + '.h5')
@@ -339,11 +326,7 @@ class HESTData:
         
         mode_HE = 'w'
         i = 0
-        if load_in_memory:
-            img_height, img_width = self.img.shape[:2]
-        else:
-            raise NotImplementedError()
-            img_width, img_height = self.wsi.dimensions
+        img_width, img_height = self.get_img_shape()
         patch_rectangles = [] # lower corner (x, y) + (widht, height)
         downscale_vis = TARGET_VIS_SIZE / img_width
 
@@ -355,13 +338,12 @@ class HESTData:
         mask_plot = self.visualize_mask_and_patches(line_thickness=3, target_width=1000)
 
         ax.imshow(mask_plot)
-        #ax.imshow(self.wsi.get_thumbnail((img_width * downscale_vis, img_height * downscale_vis)))
         for index0, row in tqdm(adata.obs.iterrows(), total=len(adata.obs)):
             
             barcode_spot = row.name
 
-            xImage = int(adata.obsm['spatial'][i][0]) #int(row['pxl_col_in_fullres'])
-            yImage = int(adata.obsm['spatial'][i][1]) #int(row['pxl_row_in_fullres'])
+            xImage = int(adata.obsm['spatial'][i][0])
+            yImage = int(adata.obsm['spatial'][i][1])
 
             i += 1
             
@@ -380,7 +362,6 @@ class HESTData:
                 image_patch = self.img[yImage - patch_size_pxl // 2: yImage + patch_size_pxl // 2,
                                     xImage - patch_size_pxl // 2: xImage + patch_size_pxl // 2, :]
             else:
-                raise NotImplementedError()
                 image_patch = self.wsi.read_region((xImage - patch_size_pxl // 2, yImage - patch_size_pxl // 2), 0, (patch_size_pxl, patch_size_pxl))
             rect_x = (xImage - patch_size_pxl // 2) * downscale_vis
             rect_y = (yImage - patch_size_pxl // 2) * downscale_vis
@@ -406,11 +387,8 @@ class HESTData:
             patch_count += 1
             image_patch = cv2.resize(image_patch, (target_patch_size, target_patch_size), interpolation=cv2.INTER_CUBIC)
             
-            #image = Image.fromarray(image_patch)
-            #image.save(f'/mnt/sdb1/paul/test_patch/{barcode_spot}.png')
             
             # Save ref patches
-
             assert image_patch.shape == (224, 224, 3)
             asset_dict = { 'img': np.expand_dims(image_patch, axis=0),  # (1 x w x h x 3)
                             'coords': np.expand_dims([yImage, xImage], axis=0),   # (1 x 2)
@@ -445,27 +423,11 @@ class HESTData:
         return asset_dict
       
             
-    def save_segmentation(self, save_dir, name, deeplab=False):
+    def save_segmentation(self, save_dir, name):
         if self.tissue_mask is None:
             self._compute_mask()
 
         image_vis = self.visualize_wsi(line_thickness=3)
-
-        # save to a deeplab compatible format
-        if deeplab:
-            #TARGET_WIDTH = 1000
-            #scale = TARGET_WIDTH / self.tissue_mask.shape[0]
-            #tissue_mask = cv2.resize(self.tissue_mask, dsize=(int(scale * self.tissue_mask.shape[0]), int(scale * self.tissue_mask.shape[1])))
-            #tissue_mask = np.expand_dims(tissue_mask, axis=-1)
-            #tissue_mask = tissue_mask * np.array([255, 255, 255]).astype(np.uint8)
-            #width, height = self.wsi.dimensions
-            #downscaled_img = self.wsi.get_thumbnail((int(width * scale), int(height * scale)))
-            os.makedirs(os.path.join(save_dir, 'deeplab', 'Masks'), exist_ok=True)
-            os.makedirs(os.path.join(save_dir, 'deeplab', 'Images'), exist_ok=True)
-            Image.fromarray(self.downscaled_mask).save(os.path.join(save_dir, 'deeplab', 'mask', f'{name}.png'))
-
-            Image.fromarray(self.downscaled_img).save(os.path.join(save_dir, 'deeplab', 'image', f'{name}.png'))
-
 
         os.makedirs(os.path.join(save_dir, 'vis'), exist_ok=True)
         image_vis.save(os.path.join(save_dir, 'vis', f'{name}_vis.png'))
@@ -475,20 +437,20 @@ class HESTData:
 
 class VisiumHESTData(HESTData): 
     def __init__(self, adata: sc.AnnData, img: np.ndarray, meta: Dict):
-        super().__init__(adata, img, meta, spot_size=55., spot_inter_dist=100.)
+        super().__init__(adata, img, meta)
 
 class VisiumHDHESTData(HESTData): 
     def __init__(self, adata: sc.AnnData, img: np.ndarray, meta: Dict):
-        super().__init__(adata, img, meta, spot_size=128., spot_inter_dist=128.)        
+        super().__init__(adata, img, meta)        
         
 class STHESTData(HESTData):
     def __init__(self, adata: sc.AnnData, img: np.ndarray, meta: Dict):
-        super().__init__(adata, img, meta, spot_size=100., spot_inter_dist=200.)
+        super().__init__(adata, img, meta)
         self.save_positions = False
         
 class XeniumHESTData(HESTData):
     def __init__(self, adata: sc.AnnData, img: np.ndarray, meta: Dict):
-        super().__init__(adata, img, meta, spot_size=55., spot_inter_dist=100.)
+        super().__init__(adata, img, meta)
         self.save_positions = False
 
 
@@ -497,7 +459,7 @@ def read_HESTData(adata_path: str, pyramidal_tiff_path: str, metrics_path: str) 
     image = pyvips.Image.tiffload(pyramidal_tiff_path).numpy()
     with open(metrics_path) as metrics_f:     
         metrics = json.load(metrics_f)
-    return HESTData(adata, image, metrics, spot_inter_dist=metrics['inter_spot_dist'], spot_size=metrics['spot_diameter'])
+    return HESTData(adata, image, metrics)
         
 
 def mask_and_patchify(meta_df: pd.DataFrame, save_dir: str, use_mask=True, keep_largest=None):
@@ -580,7 +542,6 @@ def create_splits(dest_dir, splits, K):
         print('')
         print('test set is ', test_ids)
         print('')
-        #train_ids, test_ids = splits[k]
 
         data_train = np.column_stack((train_ids, [os.path.join('patches', id + '.h5') for id in train_ids], [os.path.join('adata', id + '.h5ad') for id in train_ids]))
         train_df = pd.DataFrame(data_train, columns=['sample_id', 'patches_path', 'expr_path'])
