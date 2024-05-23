@@ -447,7 +447,8 @@ class VisiumReader(Reader):
         tissue_position_exists = tissue_positions_path is not None or tissue_position_list_path is not None
             
         if autoalign == 'always' or (not tissue_position_exists and alignment_file_path is None and autoalign != 'never'):
-            print('no tissue_positions_list.csv/tissue_positions.csv or alignment file found')
+            if (not tissue_position_exists and alignment_file_path is None):
+                print('no tissue_positions_list.csv/tissue_positions.csv or alignment file found')
             print('attempt fiducial auto alignment...')
 
             os.makedirs(os.path.join(os.path.dirname(img_path), 'spatial'), exist_ok=True)

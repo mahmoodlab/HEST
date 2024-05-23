@@ -122,22 +122,22 @@ class HESTData:
             self.adata.__dict__['_raw'].__dict__['_var'] = self.adata.__dict__['_raw'].__dict__['_var'].rename(columns={'_index': 'features'})
             self.adata.write(os.path.join(path, 'aligned_adata.h5ad'))
         
-        if self.h5_path is not None:
-            shutil.copy(self.h5_path, os.path.join(path, 'filtered_feature_bc_matrix.h5'))
-        else:
-            write_10X_h5(self.adata, os.path.join(path, 'filtered_feature_bc_matrix.h5'))
+        #if self.h5_path is not None:
+        #    shutil.copy(self.h5_path, os.path.join(path, 'filtered_feature_bc_matrix.h5'))
+        #else:
+        #    write_10X_h5(self.adata, os.path.join(path, 'filtered_feature_bc_matrix.h5'))
         
-        if self.spatial_path is not None:
-            shutil.copytree(self.spatial_path, os.path.join(path, 'spatial'), dirs_exist_ok=True)
-        else:
-            os.makedirs(os.path.join(path, 'spatial'), exist_ok=True)
-            save_scalefactors(self.adata, os.path.join(path, 'spatial/scalefactors_json.json'))
+        #if self.spatial_path is not None:
+        #    shutil.copytree(self.spatial_path, os.path.join(path, 'spatial'), dirs_exist_ok=True)
+        #else:
+        #    os.makedirs(os.path.join(path, 'spatial'), exist_ok=True)
+        #    save_scalefactors(self.adata, os.path.join(path, 'spatial/scalefactors_json.json'))
 
         df = self.adata.obs
         
-        if self.save_positions:
-            tissue_positions = df[['in_tissue', 'array_row', 'array_col', 'pxl_row_in_fullres', 'pxl_col_in_fullres']]
-            tissue_positions.to_csv(os.path.join(path, 'spatial/tissue_positions.csv'), index=True, index_label='barcode')
+        #if self.save_positions:
+        #    tissue_positions = df[['in_tissue', 'array_row', 'array_col', 'pxl_row_in_fullres', 'pxl_col_in_fullres']]
+        #    tissue_positions.to_csv(os.path.join(path, 'spatial/tissue_positions.csv'), index=True, index_label='barcode')
         
         self.meta['adata_nb_col'] = len(self.adata.var_names)
         self.meta['fullres_px_width'] = self.img.shape[1]
@@ -303,11 +303,8 @@ class HESTData:
     def dump_patches(
         self,
         patch_save_dir: str,
-        adata: sc.AnnData, 
-        src_pixel_size: float,
         name: str = None,
         target_patch_size: int=224,
-        #patch_size_um: float=112,
         target_pixel_size: float=0.5,
         verbose=0,
         dump_visualization=True,
@@ -315,6 +312,10 @@ class HESTData:
         load_in_memory=True,
         keep_largest=False
     ):
+        
+        adata = self.adata
+        
+        src_pixel_size =  self.meta['pixel_size_um_estimated'],
 
         #TODO change
         #img = self.wsi.read_region((0, 0), 0, self.wsi.dimensions)
@@ -518,8 +519,6 @@ def mask_and_patchify(meta_df: pd.DataFrame, save_dir: str, use_mask=True, keep_
         keep_largest_args = keep_largest[i] if keep_largest is not None else False
 
         hest_obj.dump_patches(save_dir,
-                           adata,
-                           hest_obj.meta['pixel_size_um_estimated'],
                            id,
                            verbose=1,
                            use_mask=use_mask,

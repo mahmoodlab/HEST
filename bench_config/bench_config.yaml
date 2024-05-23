@@ -1,5 +1,5 @@
 # directory containing all the datasets
-source_dataroot: '/mnt/ssd/paul/ST-histology-loader/bench_data'
+source_dataroot: '??/hest/bench_data'
 
 # directory where results will be dumped
 results_dir: '/mnt/sdb1/paul/ST_pred_results/'
@@ -14,19 +14,15 @@ num_workers: 1
 
 # encoders to benchmark
 encoders: [
-  "pathchatv2",
-  "pathchatv2-5",
-  "pathchatv3"
-  #"ibot_uni",
-  #"kimianet",
-  #"plip",
-  #"uni_v1_official",
-  #"resnet50_trunc",
-  #"ciga",
-  #"ctranspath",
-  #"phikon_official_hf",
-  #"remedis",
-  #"conch_v1_official",
+  "kimianet",
+  "plip",
+  "uni_v1_official",
+  "resnet50_trunc",
+  "ciga",
+  "ctranspath",
+  "phikon_official_hf",
+  "remedis",
+  "conch_v1_official",
 ]
 
 # datasets contained in `source_dataroot` to benchmark
@@ -42,3 +38,4 @@ datasets: [
   "LUNG",
   "LYMPH_IDC",
 ]
+dimreduce: "PCA"

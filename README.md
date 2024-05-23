@@ -19,7 +19,7 @@ pip install -e .
 
 In order to use the HEST-benchmark, start by placing all the hest-formated datasets in a common folder.
 
-Then modify the config file in samples/bench_config.yaml
+Then modify the config file in bench_config/bench_config.yaml
 
 ### From a python script
 
@@ -41,7 +41,7 @@ benchmark_encoder(
 
 ### From the command-line
 ```
-python src/hest/bench/training/predict_expression.py --config samples/bench_config.yaml
+python src/hest/bench/training/predict_expression.py --config bench_config/bench_config.yaml
 ```
 
 

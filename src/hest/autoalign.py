@@ -202,6 +202,7 @@ def _spots_to_json(template, spots):
             'imageY': spots[i][1]
         })
     dict['oligo'] = arr_spots
+    return dict
 
 
 def autoalign_visium(fullres_img: np.ndarray, save_dir: str=None, name='') -> Dict:
@@ -229,19 +230,16 @@ def autoalign_visium(fullres_img: np.ndarray, save_dir: str=None, name='') -> Di
 
     # discard fiducials prediction that didn't agree
     # with the majority vote
-    boxes_to_match = []
-    for i in range(len(result.boxes)):
-        #if diffs[i] == highest:
-        boxes_to_match.append(result.boxes[i])
+    cpu_boxes = result.boxes.cpu()
     
-    if len(boxes_to_match) < 3:
+    if len(cpu_boxes) < 3:
         raise Exception('Auto-alignment failed to detect at least 3 fiducials')
     
-    template, edge_len = _match_template_type(img, boxes_to_match)
+    template, edge_len = _match_template_type(img, cpu_boxes)
 
     src_pts = []
     dst_pts = []
-    for box in boxes_to_match:
+    for box in cpu_boxes:
         fidName = id_to_name[int(box.cls)]
         src = template.fiducial_centers[fidName]
         x, y, w, h = box.xywh[0].numpy().astype(int)
@@ -250,7 +248,7 @@ def autoalign_visium(fullres_img: np.ndarray, save_dir: str=None, name='') -> Di
         src_pts.append(src)
         dst_pts.append(dst)
 
-    n = len(boxes_to_match)
+    n = len(cpu_boxes)
     if n >= 3:
         found = False
         for i in range(n):
@@ -290,12 +288,12 @@ def autoalign_visium(fullres_img: np.ndarray, save_dir: str=None, name='') -> Di
     aligned_spots = aligned_spots.T
                     
     
-    dict =  _spots_to_json(template, spots)
+    dict =  _spots_to_json(template, aligned_spots)
     
     if save_dir is not None:
         save_path = os.path.join(save_dir, name + 'autoalignment.png')
 
-        _alignment_plot_to_file(boxes_to_match, 
+        _alignment_plot_to_file(cpu_boxes, 
                                 template, 
                                 edge_len, 
                                 aligned_spots, 

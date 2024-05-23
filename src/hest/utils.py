@@ -35,6 +35,66 @@ Image.MAX_IMAGE_PIXELS = 93312000000
 ALIGNED_HE_FILENAME = 'aligned_fullres_HE.tif'
 
 
+
+def enc_results_to_table(path):
+    with open(path) as f:
+        dict = json.load(f)['results']
+    
+    first_dataset = dict[0]['results']
+    encoders = []
+    for encoder in first_dataset:
+        encoders.append(encoder['encoder_name'])
+
+    datasets = []
+    for d in dict:
+        datasets.append(d["dataset_name"])
+
+    df_str = pd.DataFrame("", columns=encoders, index=datasets)
+    df_int = pd.DataFrame(0, columns=encoders, index=datasets)
+        
+    for dataset in dict:
+        row = dataset['dataset_name']
+        for encoder in dataset['results']:
+            col = encoder['encoder_name']
+            mean = encoder['pearson_mean']
+            std = encoder['pearson_std']
+            df_str.loc[row, col] = str(round(mean, 3)).ljust(5, '0') + ' +- ' + str(round(std, 2)).ljust(4, '0')
+            df_int.loc[row, col] = mean
+    
+    df_int.loc['Average'] = round(df_int.mean(axis=0), 3)
+    df_str.loc['Average'] = df_int.loc['Average'].astype(str).apply(lambda x: x.ljust(5, '0'))
+    
+    names = {
+        'resnet50_trunc': 'ResNet50',
+        'kimianet': 'KimiaNet',
+        'ciga': 'Ciga',
+        'ctranspath': 'CTransPath',
+        'remedis': 'Remedis',
+        'phikon_official_hf': 'Phikon',
+        'plip': 'PLIP',
+        'uni_v1_official': 'UNI',
+        'conch_v1_official': 'CONCH'
+    }
+    
+    df_str = df_str[names.keys()]
+    df_int = df_int[names.keys()]
+    df_str = df_str.rename(columns=names)
+    df_int = df_int.rename(columns=names)
+    
+    df_str.to_csv('str.csv')
+    df_int.to_csv('int.csv')
+   # with open('latex.txt') as f:
+    print(df_str.to_latex())
+    
+    
+def compare_meta_df(meta_df1, meta_df2):
+    diff1 = set(meta_df1['id'].values) - set(meta_df2['id'].values)
+    diff2 = set(meta_df2['id'].values) - set(meta_df1['id'].values)
+    print('only in meta1: ', diff1)
+    print('')
+    print('only in meta2: ', diff2)
+    return list(diff1), list(diff2)
+
 def profile_fn(fn, **args):
     """Profile a function and print the runtime stats
 
@@ -378,6 +438,9 @@ def create_meta_release(meta_df: pd.DataFrame, version: version.Version) -> None
     """
     META_RELEASE_DIR = '/mnt/sdb1/paul/meta_releases'
     
+    # Exclude private data
+    meta_df = meta_df[meta_df['dataset_title'] != 'Bern ST']
+    
     metric_subset = [
         'pixel_size_um_embedded', 
         'pixel_size_um_estimated', 
@@ -399,10 +462,20 @@ def create_meta_release(meta_df: pd.DataFrame, version: version.Version) -> None
 
     for index, row in tqdm(meta_df.iterrows(), total=len(meta_df)):
         path = get_path_from_meta_row(row)
-        f = open(os.path.join(path, 'processed', 'metrics.json'))
-        metrics = json.load(f)
+        with open(os.path.join(path, 'processed', 'metrics.json')) as f:
+            metrics = json.load(f)
         for col in metric_subset:
             meta_df.loc[index, col] = metrics.get(col)
+        #adata = sc.read_h5ad(os.path.join(path, 'processed', 'aligned_adata.h5ad'))
+        #nb_genes = len(adata.var_names)
+        #metrics['adata_nb_col'] = nb_genes
+        #with open(os.path.join(path, 'processed', 'metrics.json'), 'w') as f:
+        #    json.dump(metrics, f)
+        
+        if isinstance(row['treatment_comment'], float) or row['treatment_comment'].strip() == '':
+            meta_df.loc[index, 'treatment_comment'] = None
+        
+        
         meta_df.loc[index, 'image_filename'] = _sample_id_to_filename(row['id'])
         meta_df.loc[index, 'subseries'] = _get_nan(meta_df.loc[index], 'subseries')
         meta_df.loc[index, 'disease_comment'] = _get_nan(meta_df.loc[index], 'disease_comment')
@@ -666,6 +739,7 @@ def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal:
     if cp_pyramidal:
         src_pyramidal = os.path.join(path, 'aligned_fullres_HE.tif')
         dst_pyramidal = os.path.join(dest, 'pyramidal', _sample_id_to_filename(row['id']))
+        os.makedirs(os.path.join(dest, 'pyramidal'), exist_ok=True)
         shutil.copy(src_pyramidal, dst_pyramidal)
         #dst = os.path.join(dest, 'pyramidal', _sample_id_to_filename(row['id']))
         #bigtiff_option = '' if isinstance(row['bigtiff'], float) or not row['bigtiff']  else '--bigtiff'
