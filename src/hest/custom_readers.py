@@ -69,13 +69,6 @@ def join_object_to_adatas_GSE171351(path):
         
         new_adata.uns['spatial'] = my_adata.uns['spatial'][sampleID]
         
-        #col1 = new_adata.obs['pxl_col_in_fullres'].values
-        #col2 = new_adata.obs['pxl_row_in_fullres'].values
-        #matrix = (np.vstack((col1, col2))).T
-        
-        #new_adata.obsm['spatial'] = matrix 
-        
-        #adatas.append(new_adata)
         write_10X_h5(new_adata, os.path.join(os.path.dirname(path), f'{sampleID}_filtered_feature_bc_matrix.h5'))
 
 
@@ -126,7 +119,6 @@ def GSE206391_split_h5(path):
         df = adata.obs[adata.obs['library_id'] == old_library_id]
         
         new_df = adata.to_df().iloc[df['int_index']]
-        #new_df.index = [idx[:-2] for idx in new_df.index]
         new_df.index = [idx + '-1' for idx in new_df.index]
         new_adata = sc.AnnData(new_df, var=adata.var)
         new_adata.var['feature_types'] = ['Gene Expression' for _ in range(len(new_adata.var))]
@@ -190,12 +182,6 @@ def GSE184384_to_h5(path):
 def GSE180128_to_adata(path):
     path = find_first_file_endswith(path, '.csv')
     df = pd.read_csv(path)
-    #df.index = df['barcode']
-    #columns_drop = ['barcode', 'prediction_celltype', 'Bipolar', 'Cone', 'Endothelial', 'Fibroblast', 'Immune', 'Interneuron', 'Melanocyte', 'Muller.Astrocyte', 'Pericyte.SMC', 'RGC', 'Rod', 'RPE.x', 'Schwann', 'res_ss', 'region', 'tissue', 'percent_CNV', 'image']
-    
-    #df = df.drop(columns_drop, axis=1)
-    
-    #df.index = [s.split('_')[1].split('-')[0] + '-1' for s in df.index]
     df.index = df['Unnamed: 0']
     df = df.drop(['Unnamed: 0'], axis=1)
     adata = sc.AnnData(df)
@@ -230,8 +216,6 @@ def GSE167096_to_adata(path):
     matrix = pd.read_csv(symbol_path, sep='\t')
     matrix.index = matrix['Symbol']
     matrix = matrix.transpose().iloc[1:]
-    
-    #matrix = matrix.replace("NaN", np.nan)
 
     adata = sc.AnnData(matrix)
     adata.var['feature_types'] = ['Gene Expression' for _ in range(len(adata.var))]
@@ -253,8 +237,6 @@ def GSE203165_to_adata(path):
 
 
 def GSE205707_split_to_h5ad(path):
-    #adata = sc.read_h5ad(os.path.join(path, 'ITD1_1202L.h5ad'))
-    #write_10X_h5(adata, os.path.join(path, '1202L.h5'))
     split_join_adata_by_col(path, 'aggregate.h5ad', 'orig.ident')
     split_join_adata_by_col(path, '2L_2R_1197L_1203L_599L_600R.h5ad', 'orig.ident')
     
@@ -275,9 +257,7 @@ def GSE184369_split_to_h5ad(path):
     for sample in samples:
         sample_adata = adata[adata.obs['sample'] == sample]
         try:
-            #write_10X_h5(sample_adata, os.path.join(path, f'{sample}.h5'))
             sample_adata.write_h5ad(os.path.join(path, f'{sample}.h5ad'))
-            #write_10X_h5(sample_adata, os.path.join(path, f'{sample}.h5'))
         except:
             sample_adata.__dict__['_raw'].__dict__['_var'] = sample_adata.__dict__['_raw'].__dict__['_var'].rename(columns={'_index': 'features'})
             sample_adata.write_h5ad(os.path.join(path, f'{sample}.h5ad'))
@@ -401,16 +381,6 @@ def GSE236787_split_to_h5(path):
         new_adata.obs = df
         new_adata.obs.index = new_df.index
         
-        
-        #new_adata.uns['spatial'] = my_adata.uns['spatial'][sampleID]
-        
-        #col1 = new_adata.obs['pxl_col_in_fullres'].values
-        #col2 = new_adata.obs['pxl_row_in_fullres'].values
-        #matrix = (np.vstack((col1, col2))).T
-        
-        #new_adata.obsm['spatial'] = matrix 
-        
-        #adatas.append(new_adata)
         write_10X_h5(new_adata, os.path.join(os.path.dirname(path), f'N{sampleID}filtered_feature_bc_matrix.h5'))
 
     return df

@@ -1,22 +1,13 @@
-import math
-import os
 import pickle
-import shutil
-from functools import partial
 
 import cv2
-import matplotlib
-import matplotlib.pyplot as plt
 import numpy as np
 import openslide
-import pandas as pd
 import scanpy as sc
 import skimage.color as sk_color
 import skimage.filters as sk_filters
 import skimage.measure as sk_measure
 import skimage.morphology as sk_morphology
-from matplotlib.collections import PatchCollection
-from PIL import Image
 from tqdm import tqdm
 
 

@@ -7,9 +7,7 @@ import matplotlib.collections as mc
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 from kwimage.im_cv2 import imresize
-from PIL import Image
 from ultralytics import YOLO
 
 from hest.utils import get_path_relative

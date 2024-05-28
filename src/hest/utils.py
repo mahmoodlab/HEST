@@ -1,24 +1,19 @@
 import concurrent.futures
 import gzip
 import json
-import math
 import os
 import shutil
-import subprocess
-import tarfile
 from cProfile import Profile
 from enum import Enum
 from pstats import SortKey, Stats
 from typing import List, Tuple
 
-import cv2
 import h5py
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pyvips
 import scanpy as sc
-import seaborn as sns
 import tifffile
 from kwimage.im_cv2 import imresize
 from packaging import version

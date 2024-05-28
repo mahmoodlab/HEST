@@ -2,18 +2,14 @@ import json
 import math
 import os
 import shutil
-import traceback
 from abc import abstractmethod
 from typing import Dict, Tuple
 
-import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import pyvips
 import scanpy as sc
 from matplotlib import rcParams
-from PIL import Image
 from tqdm import tqdm
 
 from .autoalign import autoalign_visium
@@ -25,7 +21,7 @@ from .custom_readers import (GSE167096_to_adata, GSE180128_to_adata,
                              raw_count_to_adata, raw_counts_to_pixel)
 from .HESTData import (HESTData, STHESTData, VisiumHDHESTData, VisiumHESTData,
                        XeniumHESTData)
-from .utils import (ALIGNED_HE_FILENAME, SpotPacking, check_arg,
+from .utils import (SpotPacking, check_arg,
                     find_biggest_img, find_first_file_endswith,
                     find_pixel_size_from_spot_coords, get_path_from_meta_row,
                     helper_mex, load_image, metric_file_do_dict,
