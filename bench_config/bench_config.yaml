@@ -2,10 +2,13 @@
 source_dataroot: '??/hest/bench_data'
 
 # directory where results will be dumped
-results_dir: '/mnt/sdb1/paul/ST_pred_results/'
+results_dir: '??/ST_pred_results/'
 
 # directory where the vision embeddings will be dumped
-embed_dataroot: '/mnt/sdb1/paul/ST_data_emb'
+embed_dataroot: '??/ST_data_emb'
+
+# directory to the model weights root
+weights_root: '??/fm_v1'
 
 # inference parameters
 precision: 'fp32'

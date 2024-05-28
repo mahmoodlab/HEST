@@ -27,13 +27,14 @@ from scipy import sparse
 from sklearn.neighbors import KDTree
 from tqdm import tqdm
 
-from .autoalign import autoalign_visium
-from .vst_save_utils import initsave_hdf5
-
 
 Image.MAX_IMAGE_PIXELS = 93312000000
 ALIGNED_HE_FILENAME = 'aligned_fullres_HE.tif'
 
+
+def get_path_relative(file, path) -> str:
+    curr_dir = os.path.dirname(os.path.abspath(file))
+    return os.path.join(curr_dir, path)
 
 
 def enc_results_to_table(path):

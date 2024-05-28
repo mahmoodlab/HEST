@@ -45,8 +45,9 @@ parser.add_argument('--seed', type=int, default=1,
                     help='random seed for reproducible experiment (default: 1)')
 parser.add_argument('--overwrite', action='store_true', default=False,
                     help='overwrite existing results')
-parser.add_argument('--source_dataroot', type=str, default='/mnt/ssd/paul/ST-histology-loader/bench_data', help='root directory containing all the datasets')
+parser.add_argument('--source_dataroot', type=str, help='root directory containing all the datasets')
 parser.add_argument('--embed_dataroot', type=str)
+parser.add_argument('--weights_root', type=str)
 parser.add_argument('--results_dir', type=str)
 parser.add_argument('--exp_code', type=str, default=None)
 
@@ -176,7 +177,7 @@ def load_encoder(enc_name, device):
     
     overwrite_kwargs = {}
     if enc_name in ckpt_registry:
-        overwrite_kwargs.update({'checkpoint_path': ckpt_registry[enc_name]})
+        overwrite_kwargs.update({'checkpoint_path': os.path.join(args.weights_root, ckpt_registry[enc_name])})
     encoder, img_transforms, enc_config = get_encoder(model_name = enc_name, overwrite_kwargs=overwrite_kwargs)
     logger.info(f"Encoder: {enc_config}")
     _ = encoder.eval()

@@ -12,6 +12,8 @@ from kwimage.im_cv2 import imresize
 from PIL import Image
 from ultralytics import YOLO
 
+from hest.utils import get_path_relative
+
 orientations = {
     'hourglass': 0,
     'hexFilled': 1,
@@ -218,8 +220,9 @@ def autoalign_visium(fullres_img: np.ndarray, save_dir: str=None, name='') -> Di
 
     Returns:
         Dict: spot alignment as a dictionary
-    """
-    model = YOLO('best.pt')
+    """ 
+    path_model = get_path_relative(__file__, '../../models/visium_yolov8_v1.pt')
+    model = YOLO(path_model)
 
     img, factor = _resize_to_target(fullres_img)
     result = model(img)[0]

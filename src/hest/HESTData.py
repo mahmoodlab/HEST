@@ -281,11 +281,10 @@ class HESTData:
             return Image.fromarray(img)
 
 
-    def _compute_mask(self, keep_largest=False):
+    def _compute_mask(self, keep_largest=False, thumbnail_width=2000):
         width, height = self.get_img_shape()
-        TARGET_WIDTH = 2000
-        scale = TARGET_WIDTH / width
-        thumbnail = self.get_thumbnail((round(width * scale), round(height * scale)))
+        scale = thumbnail_width / width
+        thumbnail = self.get_thumbnail(round(width * scale), round(height * scale))
         mask = apply_otsu_thresholding(thumbnail).astype(np.uint8)
         mask = 1 - mask
         if keep_largest:

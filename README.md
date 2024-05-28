@@ -1,8 +1,16 @@
 # ST-histology-loader
-Hest provides provides legacy readers for loading the different Spatial Transcriptomics data formats supporting H&E (Visium/Visium-HD, Xenium and ST) and for automatically aligning them with their associated histology image. Hest was used for assembling the HEST-1k dataset, processing challenging ST datasets from a wide variety of sources and converting them to formats commonly used in pathology (.tif, Scanpy AnnData). The framework also provides helper functions for pooling transcripts and tesselating slides into patches centered around ST spots.
+Hest provides provides legacy readers for the different Spatial Transcriptomics data formats supporting H&E (Visium/Visium-HD, Xenium and ST) and for automatically aligning them with their associated histology image. Hest was used to assemble the HEST-1k dataset, processing challenging ST datasets from a wide variety of sources and converting them to formats commonly used in pathology (.tif, Scanpy AnnData). The framework also provides helper functions for pooling transcripts and tesselating slides into patches centered around ST spots.
 
 The main strength of hest is the ability to read ST samples even when files are missing, for example hest is able to read a Visium sample even if only `filtered_bc_matrix.h5` (or a `mex` folder) and a `full_resolution.tif` are provided.
 
+<br/>
+
+1. [Installation](#installation)
+2. [Tutorials](#tutorials) \
+    2.1 [HEST-bench tutorial](#hest-bench-tutorial) \
+    2.2 [HEST readers tutorial](#hest-reader-api)
+<br/>
+<br/>
 
 
 # Installation
@@ -12,6 +20,30 @@ conda create -n "hest" python=3.9
 conda activate hest
 pip install -e .
 ```
+
+NOTE: hest was only tested on linux/macOS machines, please report any bugs in the GitHub issues.
+
+## Benchmarking CONCH/UNI (Optional, for HEST-bench only)
+
+If you want to benchmark CONCH/UNI, additional steps are necesary
+
+### Install CONCH (model + weights)
+
+1. Request access to the model weights from the Huggingface model page [here](https://huggingface.co/MahmoodLab/CONCH).
+
+2. Download the model weights (`pytorch_model.bin`) and place them in your `fm_v1` directory `fm_v1/conch_v1_official/pytorch_model.bin`
+
+```
+git clone https://github.com/mahmoodlab/CONCH.git
+cd CONCH
+pip install -e .
+```
+
+### Install UNI (weights only)
+
+1. Request access to the model weights from the Huggingface model page [here](https://huggingface.co/MahmoodLab/UNI).
+
+2. Download the model weights (`pytorch_model.bin`) and place them in your `fm_v1` directory `fm_v1/uni_v1_official/pytorch_model.bin`
 
 # Tutorials
 
@@ -37,16 +69,14 @@ benchmark_encoder(
 )
 ```
 
-
-
 ### From the command-line
 ```
 python src/hest/bench/training/predict_expression.py --config bench_config/bench_config.yaml
 ```
 
+## Hest reader API
 
-## VisiumReader tutorial
-
+## Reading Visium files
 
 ### read()
 `VisiumReader().read` is prefered for a more fine grain control
@@ -102,7 +132,7 @@ st = VisiumReader().auto_read(visium_dir)
 ```
 
 
-### Visualizing the aligned spots
+## Visualizing the spots over a fullres WSI
 ``` python
 # visualize the spots over a downscaled version of the fullres image
 st.save_spatial_plot(save_dir)
@@ -138,4 +168,4 @@ st.dump_patches(
 
 ## Query HEST-1k
 
-TODO
+Will be added during public release

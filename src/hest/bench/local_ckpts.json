@@ -1,13 +1,9 @@
 {
-    "conch_v1_official": "/mnt/sdb1/paul/fm_v1/conch/pytorch_model.bin",
-    "uni_v1_official": "/mnt/sdb1/paul/fm_v1/uni/pytorch_model.bin",
-    "ciga": "/mnt/sdb1/paul/fm_v1/ciga/tenpercent_resnet18.ckpt",
-    "ctranspath": "/mnt/sdb1/paul/fm_v1/ctranspath/ctranspath.pth",
-    "remedis": "/mnt/sdb1/paul/fm_v1/remedis/path-152x2-remedis-m_torch.pth",
-    "phikon_official_hf": "/mnt/sdb1/paul/fm_v1/phikon/ibot_vit_base_pancan.pth",
-    "kimianet": "/mnt/sdb1/paul/fm_v1/kimianet/KimiaNetPyTorchWeights.pth",
-    "ibot_uni": "/mnt/sdb1/paul/fm_v1/ibot_uni/checkpoint0051.pth",
-    "pathchatv2": "/mnt/sdb1/paul/fm_v1/pathchat/coca_ViT-L-16_poolseq-128_data-v2_bz768_non_legacy/epoch_20.pt",
-    "pathchatv2-5": "/mnt/sdb1/paul/fm_v1/pathchatv2-5/coca_ViT-L-16_poolseq-128_data-v2.5_bz768_non_legacy_v1.5/epoch_20.pt",
-    "pathchatv3": "/mnt/sdb1/paul/fm_v1/pathchatv3/coca_ViT-L-16_poolseq-128_data-v3_bz768_non_legacy_v2/epoch_20.pt"
+    "conch_v1_official": "conch/pytorch_model.bin",
+    "uni_v1_official": "uni/pytorch_model.bin",
+    "ciga": "ciga/tenpercent_resnet18.ckpt",
+    "ctranspath": "fm_v1/ctranspath/ctranspath.pth",
+    "remedis": "remedis/path-152x2-remedis-m_torch.pth",
+    "phikon_official_hf": "phikon/ibot_vit_base_pancan.pth",
+    "kimianet": "kimianet/KimiaNetPyTorchWeights.pth"
 }
