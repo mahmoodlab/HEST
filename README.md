@@ -10,7 +10,6 @@ The main strength of hest is the ability to read ST samples even when files are 
     2.1 [HEST-bench tutorial](#hest-bench-tutorial) \
     2.2 [HEST readers tutorial](#hest-reader-api)
 <br/>
-<br/>
 
 
 # Installation
