@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "hest"
 version = "0.0.1"
 authors = [
-  { name="Paul Doucet", email="pdoucet@bwh.harvard.edu" },
+  { name="Anonymized", email="Anonymized" },
 ]
 dependencies = [
     "ultralytics >= 8.2.4",

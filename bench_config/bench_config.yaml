@@ -1,7 +1,7 @@
-# directory containing all the datasets
+# directory containing the data for each task
 source_dataroot: '??/hest/bench_data'
 
-# directory where results will be dumped
+# directory where benchmark results will be dumped
 results_dir: '??/ST_pred_results/'
 
 # directory where the vision embeddings will be dumped
@@ -19,13 +19,13 @@ num_workers: 1
 encoders: [
   "kimianet",
   "plip",
-  "uni_v1_official",
+  #"uni_v1_official", # uncomment after requesting the weights
   "resnet50_trunc",
   "ciga",
   "ctranspath",
   "phikon_official_hf",
   "remedis",
-  "conch_v1_official",
+  #"conch_v1_official", # uncomment after requesting the weights
 ]
 
 # datasets contained in `source_dataroot` to benchmark
@@ -41,4 +41,4 @@ datasets: [
   "LUNG",
   "LYMPH_IDC",
 ]
-dimreduce: "PCA"
+#dimreduce: "PCA" 

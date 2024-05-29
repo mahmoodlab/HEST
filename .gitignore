@@ -13,3 +13,6 @@ bench_data
 src/hest/bench/timm_ctp
 my_notebooks
 tests/
+figures/test_paul
+bench_data.zip
+old_bench_data

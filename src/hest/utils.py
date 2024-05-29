@@ -508,6 +508,7 @@ def create_meta_release(meta_df: pd.DataFrame, version: version.Version) -> None
         'inter_spot_dist',
         'spot_diameter',
         'spots_under_tissue',
+        'preservation_method',
         'nb_genes',
         'treatment_comment',
         'pixel_size_um_embedded', 
@@ -515,6 +516,8 @@ def create_meta_release(meta_df: pd.DataFrame, version: version.Version) -> None
         'magnification',
         'fullres_px_width',
         'fullres_px_height',
+        'tissue',
+        'disease_comment',
         'subseries'
     ]
     #release_col_selection += metric_subset
