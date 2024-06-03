@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 try:
     import pyvips
-except ImportError:
+except Exception:
     print("Couldn't import pyvips, verify that libvips is installed on your system")
 import scanpy as sc
 import tifffile

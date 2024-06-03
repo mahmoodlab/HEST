@@ -10,12 +10,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 try:
     import openslide
-except ImportError:
+except Exception:
     print("Couldn't import openslide, verify that openslide is installed on your system, https://openslide.org/download/")
 import pandas as pd
 try:
     import pyvips
-except ImportError:
+except Exception:
     print("Couldn't import pyvips, verify that libvips is installed on your system")
 import scanpy as sc
 from dask import delayed
@@ -100,9 +100,20 @@ class HESTData:
         
         
     def __repr__(self):
-        rep = f"""'pixel_size_um_embedded' is {self.pixel_size_embedded}
+        sup_rep = super().__repr__()
+
+        img_str = 'WSI in memory'if self.is_image_in_mem() else "WSI not in memory"
+
+        height, width = self.get_img_dim()
+        dim_str = f'WSI has dim height={height}, width={width}'
+    
+        rep = f"""{sup_rep}
+        'pixel_size_um_embedded' is {self.pixel_size_embedded}
         'pixel_size_um_estimated' is {self.pixel_size_estimated}
-        'spots_under_tissue' is {self.spots_under_tissue}"""
+        'spots_under_tissue' is {self.spots_under_tissue}
+        {img_str}
+        {dim_str}
+        """
         return rep
         
     
