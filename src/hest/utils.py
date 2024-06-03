@@ -840,7 +840,7 @@ def write_10X_h5(adata, file):
 
 def check_arg(arg, arg_name, values):
     if arg not in values:
-       raise ValueError(f"{arg_name} must be one of {values}")
+       raise ValueError(f"{arg_name}={arg} must be one of {values}")
         
 
 def helper_mex(path: str, filename: str) -> None:

@@ -366,7 +366,7 @@ class VisiumReader(Reader):
         scanpy_h5_path: str = None,
         metric_file_path: str = None,
         custom_adata: sc.AnnData = None,
-        autoalign: bool = None,
+        autoalign: bool = 'auto',
         save_autoalign: bool = False
     ) -> VisiumHESTData:
         """read 10x visium with its associated image
