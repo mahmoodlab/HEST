@@ -15,7 +15,7 @@ The main strength of hest is its ability to read ST samples even when files are 
 2. [Information for reviewers](#information-for-reviewers)
 3. [Hest-lib tutorials](#tutorials) \
 3.1 [Hest reader API](#hest-reader-api) \
-3.2 [Hest bench](#hest-bench-tutorial)
+3.2 [Hest bench](#hest-bench-tutorial) 
 <br/>
 
 
@@ -27,6 +27,11 @@ cd hest
 conda create -n "hest" python=3.9
 conda activate hest
 pip install -e .
+```
+
+additional dependencies (for WSI manipulation):
+```
+apt install libvips libvips-dev openslide-tools
 ```
 
 NOTE: hest was only tested on linux/macOS machines, please report any bugs in the GitHub issues.
@@ -200,4 +205,4 @@ python src/hest/bench/training/predict_expression.py --config bench_config/bench
 
 ## Query HEST-1k
 
-Will be added during public release
+Stay tuned!

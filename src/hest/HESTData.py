@@ -11,7 +11,7 @@ import numpy as np
 try:
     import openslide
 except ImportError:
-    print("Couldn't import openslide, verify that openslide is installed on your system")
+    print("Couldn't import openslide, verify that openslide is installed on your system, https://openslide.org/download/")
 import pandas as pd
 try:
     import pyvips

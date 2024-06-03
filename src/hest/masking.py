@@ -6,7 +6,7 @@ import numpy as np
 try:
     import openslide
 except ImportError:
-    print("Couldn't import openslide, verify that openslide is installed on your system")
+    print("Couldn't import openslide, verify that openslide is installed on your system, https://openslide.org/download/")
 import scanpy as sc
 import skimage.color as sk_color
 import skimage.filters as sk_filters
