@@ -98,6 +98,9 @@ class HESTData:
         self.spots_under_tissue = meta['spots_under_tissue']
         self.cell_seg = cell_seg
         
+        if 'total_counts' not in self.adata.var_names:
+            sc.pp.calculate_qc_metrics(self.adata, inplace=True)
+        
         
     def __repr__(self):
         sup_rep = super().__repr__()

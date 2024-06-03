@@ -12,3 +12,9 @@ python:
 
 sphinx:
   configuration: docs/source/conf.py
+
+system_packages:
+  apt_packages:
+    - libvips
+    - libvips-dev
+    - openslide-tools
