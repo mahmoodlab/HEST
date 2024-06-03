@@ -5,7 +5,6 @@ src/hiSTloader/yolov8n.pt
 .vscode/launch.json
 dist
 src/hest.egg-info
-docs
 make.bat
 Makefile
 *.parquet
@@ -20,3 +19,4 @@ bench_config/my_bench_config.yaml
 src/hest/bench/private
 str.csv
 int.csv
+docs/build
