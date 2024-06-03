@@ -9,7 +9,7 @@
 import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../src'))
-import src.hest
+import hest
 
 project = 'hest'
 copyright = '2024, Paul Doucet'
