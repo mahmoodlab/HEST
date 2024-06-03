@@ -12,7 +12,10 @@ import h5py
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import pyvips
+try:
+    import pyvips
+except ImportError:
+    print("Couldn't import pyvips, verify that libvips is installed on your system")
 import scanpy as sc
 import tifffile
 from kwimage.im_cv2 import imresize

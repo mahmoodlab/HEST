@@ -371,7 +371,7 @@ class VisiumReader(Reader):
     ) -> VisiumHESTData:
         """read 10x visium with its associated image
         
-        requires a full resolution image and a gene expression file, only one of the gene expression file will be used in this order:
+        requires a full resolution image and a gene expression file, only one of the gene expression files will be used in this order:
         - filtered_bc_matrix_path
         - raw_bc_matrix_path
         - mex_path

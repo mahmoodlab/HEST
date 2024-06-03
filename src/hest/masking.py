@@ -2,7 +2,11 @@ import pickle
 
 import cv2
 import numpy as np
-import openslide
+
+try:
+    import openslide
+except ImportError:
+    print("Couldn't import openslide, verify that openslide is installed on your system")
 import scanpy as sc
 import skimage.color as sk_color
 import skimage.filters as sk_filters

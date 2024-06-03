@@ -8,9 +8,15 @@ import cv2
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
-import openslide
+try:
+    import openslide
+except ImportError:
+    print("Couldn't import openslide, verify that openslide is installed on your system")
 import pandas as pd
-import pyvips
+try:
+    import pyvips
+except ImportError:
+    print("Couldn't import pyvips, verify that libvips is installed on your system")
 import scanpy as sc
 from dask import delayed
 from dask.array import from_delayed
