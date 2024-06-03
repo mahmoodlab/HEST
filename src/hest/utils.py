@@ -32,7 +32,7 @@ def get_path_relative(file, path) -> str:
     return os.path.join(curr_dir, path)
 
 
-def enc_results_to_table(path):
+def enc_results_to_table(path) -> str:
     with open(path) as f:
         dict = json.load(f)['results']
     
@@ -61,15 +61,16 @@ def enc_results_to_table(path):
     df_str.loc['Average'] = df_int.loc['Average'].astype(str).apply(lambda x: x.ljust(5, '0'))
     
     names = {
-        'resnet50_trunc': 'ResNet50',
-        'kimianet': 'KimiaNet',
-        'ciga': 'Ciga',
-        'ctranspath': 'CTransPath',
-        'remedis': 'Remedis',
-        'phikon_official_hf': 'Phikon',
-        'plip': 'PLIP',
-        'uni_v1_official': 'UNI',
-        'conch_v1_official': 'CONCH'
+        #'resnet50_trunc': 'ResNet50',
+        #'kimianet': 'KimiaNet',
+        #'ciga': 'Ciga',
+        #'ctranspath': 'CTransPath',
+        #'remedis': 'Remedis',
+        #'phikon_official_hf': 'Phikon',
+        #'plip': 'PLIP',
+        #'uni_v1_official': 'UNI',
+        #'conch_v1_official': 'CONCH'
+        'gigapath': 'gigapath'
     }
     
     df_str = df_str[names.keys()]
@@ -79,8 +80,10 @@ def enc_results_to_table(path):
     
     df_str.to_csv('str.csv')
     df_int.to_csv('int.csv')
-   # with open('latex.txt') as f:
-    print(df_str.to_latex())
+    # with open('latex.txt') as f:
+    latex = df_str.to_latex()
+    print(latex)
+    return latex
     
     
 def compare_meta_df(meta_df1, meta_df2):
@@ -401,9 +404,9 @@ def pixel_size_to_mag(pixel_size: float) -> str:
     """
     
     if pixel_size <= 0.1:
-        return '>60x'
-    elif 0.1 < pixel_size and pixel_size <= 0.25:
         return '60x'
+    elif 0.1 < pixel_size and pixel_size <= 0.25:
+        return '40x'
     elif 0.25 < pixel_size and pixel_size <= 0.5:
         return '40x'
     elif 0.5 < pixel_size and pixel_size <= 1:

@@ -120,6 +120,26 @@ def build_model(config):
             model, enc_name, checkpoint, assets_dir)
 
         load_state_dict = False
+    
+    elif config['loader'] == 'gigapath':
+        from torchvision import transforms
+        model = timm.create_model(model_name='vit_giant_patch14_dinov2', 
+                **{'img_size': 224, 'in_chans': 3, 
+                'patch_size': 16, 'embed_dim': 1536, 
+                'depth': 40, 'num_heads': 24, 'init_values': 1e-05, 
+                'mlp_ratio': 5.33334, 'num_classes': 0})
+        ckpt_path = config["checkpoint_path"]
+        state_dict = torch.load(ckpt_path, map_location='cpu')
+        model.load_state_dict(state_dict, strict=True)
+        eval_transform = transforms.Compose(
+            [
+                transforms.CenterCrop(224),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
+            ]
+        )
+        load_state_dict = False
+        
     else:
         raise ValueError(f"Unsupported loader type: {config['loader']}")
     if load_state_dict:

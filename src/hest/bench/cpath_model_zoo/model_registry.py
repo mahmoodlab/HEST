@@ -2,7 +2,7 @@ from pathlib import Path
 import json 
 import re
 
-_MODEL_CONFIG_PATHS = [Path(__file__).parent / "pretrained_configs/"]
+_MODEL_CONFIG_PATHS = [Path(__file__).parent / "pretrained_configs/", Path(__file__).parent.parent / "private/pretrained_configs/"]
 _MODEL_CONFIGS = {}  # directory (model_name: config) of model architecture configs
 
 def _natural_key(string_):

@@ -2,7 +2,7 @@
     "conch_v1_official": "conch/pytorch_model.bin",
     "uni_v1_official": "uni/pytorch_model.bin",
     "ciga": "ciga/tenpercent_resnet18.ckpt",
-    "ctranspath": "fm_v1/ctranspath/ctranspath.pth",
+    "ctranspath": "ctranspath/ctranspath.pth",
     "remedis": "remedis/path-152x2-remedis-m_torch.pth",
     "phikon_official_hf": "phikon/ibot_vit_base_pancan.pth",
     "kimianet": "kimianet/KimiaNetPyTorchWeights.pth"

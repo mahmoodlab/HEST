@@ -16,3 +16,7 @@ tests/
 figures/test_paul
 bench_data.zip
 old_bench_data
+bench_config/my_bench_config.yaml
+src/hest/bench/private
+str.csv
+int.csv

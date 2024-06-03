@@ -1,42 +1,27 @@
 import argparse
 import json
 import os
-import pdb
-import shutil
-import sys
 from operator import itemgetter
-from pathlib import Path
-from typing import Dict, List, Union
+from typing import Dict, List
 
-import h5py
 import numpy as np
 import pandas as pd
-import sklearn
 import torch
 import torch.multiprocessing
 import yaml
 from loguru import logger
-from matplotlib import pyplot as plt
-from sklearn.decomposition import PCA
 from sklearn.discriminant_analysis import StandardScaler
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import RobustScaler
-from torchvision import transforms
-from tqdm import tqdm, trange
+from tqdm import tqdm
 
 torch.multiprocessing.set_sharing_strategy('file_system')
 
-sys.path.append('../')
-
 from hest.bench.cpath_model_zoo.builder import get_encoder
-from hest.bench.cpath_model_zoo.model_registry import _MODEL_CONFIGS
 from hest.bench.data_modules.st_dataset import H5TileDataset, load_adata
 from hest.bench.training.trainer import train_test_reg
-from hest.bench.utils.file_utils import (load_pkl, read_assets_from_h5,
-                                         save_hdf5, save_pkl)
-from hest.bench.utils.transform_utils import get_eval_transforms
+from hest.bench.utils.file_utils import (read_assets_from_h5, save_hdf5,
+                                         save_pkl)
 from hest.bench.utils.utils import get_current_time, merge_dict
-from hest.HESTData import HESTData
 
 # Generic training settings
 parser = argparse.ArgumentParser(description='Configurations for linear probing')
@@ -48,6 +33,7 @@ parser.add_argument('--overwrite', action='store_true', default=False,
 parser.add_argument('--source_dataroot', type=str, help='root directory containing all the datasets')
 parser.add_argument('--embed_dataroot', type=str)
 parser.add_argument('--weights_root', type=str)
+parser.add_argument('--private_weights_root', type=str, default=None)
 parser.add_argument('--results_dir', type=str)
 parser.add_argument('--exp_code', type=str, default=None)
 
@@ -60,6 +46,7 @@ parser.add_argument('--num_workers', type=int, default=1, help='Number of worker
 
 ### specify dataset settings ###
 parser.add_argument('--gene_list', type=str, default=None)
+parser.add_argument('--method', type=str, default='ridge')
 parser.add_argument('--alpha', type=float, default=None)
 parser.add_argument('--kfold', action='store_true', default=False)
 parser.add_argument('--benchmark_encoders', action='store_true', default=False)
@@ -72,16 +59,18 @@ parser.add_argument('--config', type=str, help='Path to a benchmark config file,
 
 class LazyEncoder:
     
-    def __init__(self, name, transforms=None, model=None, ):
+    def __init__(self, name, weights_root, private_weights_root, transforms=None, model=None):
         self.name = name
         self.model = model
         self.transforms = transforms
+        self.weights_root = weights_root
+        self.private_weights_root = private_weights_root
         
     def get_model(self, device):
         if self.model is not None:
             return self.model, self.transforms
         else:
-            encoder, img_transforms, _ = load_encoder(self.name, device)
+            encoder, img_transforms, _ = load_encoder(self.name, device, self.weights_root, self.private_weights_root)
             return encoder, img_transforms
             
 
@@ -168,16 +157,25 @@ def embed_tiles(dataloader,
                   mode=mode)
     return embedding_save_path  
 
-def load_encoder(enc_name, device):
+def load_encoder(enc_name, device, weights_root, private_weights_root):
     # instantiate encoder model
     cur_dir = os.path.dirname(os.path.abspath(__file__))
     local_ckpt_registry = os.path.join(cur_dir, '..', 'local_ckpts.json')
     with open(local_ckpt_registry, 'r') as f:
         ckpt_registry = json.load(f)
+        
+    private_ckpt_registry = os.path.join(cur_dir, '..', 'private/private_local_ckpts.json')
+    if os.path.exists(private_ckpt_registry):
+        with open(private_ckpt_registry, 'r') as f:
+            priv_ckpt_registry = json.load(f)   
+            ckpt_registry = {**ckpt_registry, **priv_ckpt_registry}
     
     overwrite_kwargs = {}
     if enc_name in ckpt_registry:
-        overwrite_kwargs.update({'checkpoint_path': os.path.join(args.weights_root, ckpt_registry[enc_name])})
+        root = weights_root
+        if enc_name in private_ckpt_registry:
+            root = private_weights_root
+        overwrite_kwargs.update({'checkpoint_path': os.path.join(root, ckpt_registry[enc_name])})
     encoder, img_transforms, enc_config = get_encoder(model_name = enc_name, overwrite_kwargs=overwrite_kwargs)
     logger.info(f"Encoder: {enc_config}")
     _ = encoder.eval()
@@ -270,9 +268,9 @@ def predict_single_split(train_split, test_split, args, save_dir, dataset_name, 
         print('perform PCA dim reduction')
         pipe = Pipeline([('scaler', StandardScaler()), (f'{args.dimreduce}', eval(args.dimreduce)(n_components=args.latent_dim))])
         X_train, X_test = torch.Tensor(pipe.fit_transform(X_train)), torch.Tensor(pipe.transform(X_test))
-        
     
-    linprobe_results, linprobe_dump = train_test_reg(X_train, X_test, y_train, y_test, random_state=args.seed, genes=genes)
+    
+    linprobe_results, linprobe_dump = train_test_reg(X_train, X_test, y_train, y_test, random_state=args.seed, genes=genes, method=args.method)
     linprobe_summary = {}
     linprobe_summary.update({'n_train': len(y_train), 'n_test': len(y_test)})
     linprobe_summary.update({key: val for key, val in linprobe_results.items()})
@@ -325,6 +323,7 @@ def predict_folds(args, exp_save_dir, enc, dataset_name, device, precision, sour
     splits = os.listdir(split_dir)
     n_splits = len(splits) // 2
     
+
     libprobe_results_arr = []
     for i in range(n_splits):
         train_split = os.path.join(split_dir, f'train_{i}.csv')
@@ -381,9 +380,9 @@ def benchmark(args, encoder, enc_transf):
     
     encoders = []
     if encoder is not None:
-        encoders.append(LazyEncoder('custom_encoder', transforms=enc_transf, model=encoder))
+        encoders.append(LazyEncoder('custom_encoder', weights_root=args.weights_root, private_weights_root=args.private_weights_root, transforms=enc_transf, model=encoder))
     for enc_name in args.encoders:
-        encoders.append(LazyEncoder(enc_name))
+        encoders.append(LazyEncoder(enc_name, weights_root=args.weights_root, private_weights_root=args.private_weights_root))
         
     
     benchmark_grid(predict_folds, args, device, encoders, datasets, save_dir=save_dir, precision=precision)

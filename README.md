@@ -22,6 +22,8 @@ The main strength of hest is its ability to read ST samples even when files are 
 # Installation
 
 ```
+git clone https://github.com/mahmoodlab/hest.git
+cd hest
 conda create -n "hest" python=3.9
 conda activate hest
 pip install -e .
@@ -58,16 +60,18 @@ pip install -e .
 
 In order to reproduce the results of the HEST-benchmark (Table 1 and Suppl. Table 11), please follow the following steps:
 
-1. Install HEST as explained in section 1
+1. Install hest as explained in section 1
 
-2. Download the benchmark task data `bench_data.zip` from [this link](https://drive.google.com/drive/folders/1x5envjv6lUfH9Hw13hXPIucMJELSJEKl) and unzip it to some directory
+2. Download the benchmark task data `bench_data.zip` from [this link](https://www.dropbox.com/scl/fo/61m7k9s6ujnccdusuv4an/ACcBmaN6LhnluMhDPPGD5fY?rlkey=zqqjxhp7yz0jyrb3ancmo0ofb&dl=0) and unzip it to some directory
 
-3. Download the patch encoder weights `fm_v1.zip` from [this link](https://drive.google.com/drive/folders/1x5envjv6lUfH9Hw13hXPIucMJELSJEKl) and unzip it to some directory
+3. Download the patch encoder weights `fm_v1.zip` from [this link](https://www.dropbox.com/scl/fo/61m7k9s6ujnccdusuv4an/ACcBmaN6LhnluMhDPPGD5fY?rlkey=zqqjxhp7yz0jyrb3ancmo0ofb&dl=0) and unzip it to some directory
 
 4. Then update the paths in the config file `bench_config/bench_config.yaml`
 
-5. For reproducing Suppl. Table 11 with PCA, uncomment `dimreduce: "PCA"` in `bench_config/bench_config.yaml`
-
+5. Start the benchmark with the following:
+```bash
+python src/hest/bench/training/predict_expression.py --config bench_config/bench_config.yaml
+```
 
 
 # Tutorials
