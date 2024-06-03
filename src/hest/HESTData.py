@@ -120,15 +120,16 @@ class HESTData:
         return rep
         
     
-    def save_spatial_plot(self, save_path: str):
+    def save_spatial_plot(self, save_path: str, pl_kwargs={}):
         """Save the spatial plot from that STObject
 
         Args:
             save_path (str): path to a directory where the spatial plot will be saved
+            pl_kwargs(Dict): arguments for sc.pl.spatial
         """
         print("Plotting spatial plots...")
              
-        sc.pl.spatial(self.adata, show=None, img_key="downscaled_fullres", color=['total_counts'], title=f"in_tissue spots", alpha=0.4)
+        sc.pl.spatial(self.adata, show=None, img_key="downscaled_fullres", color=['total_counts'], title=f"in_tissue spots", **pl_kwargs)
         
         filename = f"spatial_plots.png"
         
