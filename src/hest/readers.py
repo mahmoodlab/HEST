@@ -451,6 +451,7 @@ class VisiumReader(Reader):
             print('attempt fiducial auto alignment...')
 
             os.makedirs(os.path.join(os.path.dirname(img_path), 'spatial'), exist_ok=True)
+            autoalign_save_dir = None
             if save_autoalign:
                 autoalign_save_dir = os.path.join(os.path.dirname(img_path), 'spatial')
             align_json = autoalign_visium(img, autoalign_save_dir)

@@ -320,7 +320,7 @@ class HESTData:
 
 
     def _compute_mask(self, keep_largest=False, thumbnail_width=2000):
-        width, height = self.get_img_dim()
+        height, width = self.get_img_dim()
         scale = thumbnail_width / width
         thumbnail = self.get_thumbnail(round(width * scale), round(height * scale))
         mask = apply_otsu_thresholding(thumbnail).astype(np.uint8)
@@ -352,7 +352,7 @@ class HESTData:
         
         adata = self.adata
         
-        src_pixel_size =  self.meta['pixel_size_um_estimated'],
+        src_pixel_size =  self.meta['pixel_size_um_estimated']
         
         # minimum intersection percecentage with the tissue mask to keep a patch
         TISSUE_INTER_THRESH = 0.05
@@ -369,7 +369,7 @@ class HESTData:
         
         mode_HE = 'w'
         i = 0
-        img_width, img_height = self.get_img_dim()
+        img_height, img_width = self.get_img_dim()
         patch_rectangles = [] # lower corner (x, y) + (widht, height)
         downscale_vis = TARGET_VIS_SIZE / img_width
 

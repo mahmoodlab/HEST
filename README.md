@@ -13,9 +13,10 @@ The main strength of hest is its ability to read ST samples even when files are 
 
 1. [Installation](#installation)
 2. [Information for reviewers](#information-for-reviewers)
-3. [Hest-lib tutorials](#tutorials) \
-3.1 [Hest reader API](#hest-reader-api) \
-3.2 [Hest bench](#hest-bench-tutorial) 
+3. [Documentation](https://hest.readthedocs.io/en/latest/)
+4. [Hest-lib tutorials](#tutorials) \
+4.1 [Hest reader API](#hest-reader-api) \
+4.2 [Hest bench](#hest-bench-tutorial) 
 <br/>
 
 
