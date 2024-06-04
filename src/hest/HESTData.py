@@ -8,15 +8,19 @@ import cv2
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+import tifffile
+
 try:
     import openslide
 except Exception:
     print("Couldn't import openslide, verify that openslide is installed on your system, https://openslide.org/download/")
 import pandas as pd
+
 try:
     import pyvips
 except Exception:
     print("Couldn't import pyvips, verify that libvips is installed on your system")
+import dask.array as da
 import scanpy as sc
 from dask import delayed
 from dask.array import from_delayed
@@ -36,15 +40,20 @@ from .vst_save_utils import initsave_hdf5
 
 class HESTData:
     """
-    Object representing a single Spatial Transcriptomics sample along with a full resolution H&E image and metadatas
+    Object representing a Spatial Transcriptomics sample along with a full resolution H&E image and metadatas
     """
-    h5_path = None
-    spatial_path = None
-    save_positions = True
-    tissue_mask = None
-    thumbnail = None
-    contours_tissue = None
-    cell_seg = None
+    
+    tissue_mask: np.ndarray = None
+    """tissue mask for that sample, will be None until _compute_mask() is called"""
+    
+    contours_tissue: list = None
+    """tissue contours for that sample, will be None until _compute_mask() is called"""
+    
+    cellvit_seg = None
+    """dictionary of cells in the CellViT .geojson format"""
+    
+    img = None
+    """WSI image associated with this sample, will be None until loaded"""
     
     
     def _verify_format(self, adata):
@@ -73,7 +82,7 @@ class HESTData:
         adata: sc.AnnData,
         img: Union[np.ndarray, str], 
         meta: Dict,
-        cell_seg: Dict=None
+        cellvit_seg: Dict=None
     ):
         """
         Args:
@@ -82,6 +91,7 @@ class HESTData:
                 and the following collomns in adata.obs: ['array_col', 'array_row', 'in_tissue', 'pxl_row_in_fullres', 'pxl_col_in_fullres']
             img (Union[np.ndarray, str]): Full resolution image corresponding to the ST data, if passed as a path (str) the image is lazily loaded
             meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
+            cellvit_seg (Dict): dictionary of cells in the CellViT .geojson format. Default: None
         """
         self.adata = adata
         
@@ -96,7 +106,7 @@ class HESTData:
         self.pixel_size_embedded = meta['pixel_size_um_embedded']
         self.pixel_size_estimated = meta['pixel_size_um_estimated']
         self.spots_under_tissue = meta['spots_under_tissue']
-        self.cell_seg = cell_seg
+        self.cellvit_seg = cellvit_seg
         
         if 'total_counts' not in self.adata.var_names:
             sc.pp.calculate_qc_metrics(self.adata, inplace=True)
@@ -193,7 +203,7 @@ class HESTData:
             json.dump(self.meta, json_file) 
             
         with open(os.path.join(path, 'cells.geojson')) as json_file:
-            json.dump(self.cell_seg, json_file)
+            json.dump(self.cellvit_seg, json_file)
         
         downscaled_img = self.adata.uns['spatial']['ST']['images']['downscaled_fullres']
         down_fact = self.adata.uns['spatial']['ST']['scalefactors']['tissue_downscaled_fullres_scalef']
@@ -489,21 +499,35 @@ class HESTData:
 
 
     def to_spatial_data(self, lazy_img=True) -> SpatialData:
+        """Convert a HESTData sample to a scverse SpatialData object
+        
+        Args:
+            lazy_img (bool, optional): whenever to lazily load the image if not already loaded (i.e. if self.img is None). Defaults to True.
+
+        Returns:
+            SpatialData: scverse SpatialData object
+        """
         
         def read_hest_wsi(path):
             return pyvips.Image.tiffload(path).numpy().transpose((2, 0, 1))
     
-        if lazy_img:
+        if lazy_img and self.img is None:
             if self.wsi is None:
                 raise ValueError('HESTData.wsi path to a wsi needs to be set to use the lazy_img feature of to_spatial_data')
             
-            img = from_delayed(delayed(read_hest_wsi)(self.wsi), shape=(10156, 9911, 3), dtype=np.int8)
+            with tifffile.TiffFile(self.wsi) as tif:
+                page = tif.pages[0]
+                width = page.imagewidth
+                height = page.imagelength
+                
+            
+            img = from_delayed(delayed(read_hest_wsi)(self.wsi), shape=(height, width, 3), dtype=np.int8)
         else:
             img = self.get_img()
-            sp_img = SpatialImage(img, dims=['c', 'y', 'x'], attrs={'transform': None})
-        adata = sc.read_h5ad('/mnt/sdb1/paul/images/adata/NCBI62.h5ad')
+            arr = da.from_array(img)
+            sp_img = SpatialImage(arr, dims=['c', 'y', 'x'], attrs={'transform': None})
         
-        st = SpatialData({'fullres': sp_img}, table=adata)
+        st = SpatialData({'fullres': sp_img}, table=self.adata)
         
         #TODO add CellViT
         
@@ -515,18 +539,65 @@ class VisiumHESTData(HESTData):
         super().__init__(adata, img, meta)
 
 class VisiumHDHESTData(HESTData): 
-    def __init__(self, adata: sc.AnnData, img: np.ndarray, meta: Dict):
-        super().__init__(adata, img, meta)        
+    def __init__(
+        self, 
+        adata: sc.AnnData,
+        img: Union[np.ndarray, str], 
+        meta: Dict,
+        cellvit_seg: Dict=None
+    ):
+        """
+        Args:
+            adata (sc.AnnData): Spatial Transcriptomics data in a scanpy Anndata object
+                adata must contain a downscaled image in ['spatial']['ST']['images']['downscaled_fullres']
+                and the following collomns in adata.obs: ['array_col', 'array_row', 'in_tissue', 'pxl_row_in_fullres', 'pxl_col_in_fullres']
+            img (Union[np.ndarray, str]): Full resolution image corresponding to the ST data, if passed as a path (str) the image is lazily loaded
+            meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
+            cellvit_seg (Dict): dictionary of cells in the CellViT .geojson format. Default: None
+        """
+        super().__init__(adata, img, meta, cellvit_seg)        
         
 class STHESTData(HESTData):
-    def __init__(self, adata: sc.AnnData, img: np.ndarray, meta: Dict):
-        super().__init__(adata, img, meta)
-        self.save_positions = False
+    def __init__(
+        self, 
+        adata: sc.AnnData,
+        img: Union[np.ndarray, str], 
+        meta: Dict,
+        cellvit_seg: Dict=None
+    ):
+        """
+        Args:
+            adata (sc.AnnData): Spatial Transcriptomics data in a scanpy Anndata object
+                adata must contain a downscaled image in ['spatial']['ST']['images']['downscaled_fullres']
+                and the following collomns in adata.obs: ['array_col', 'array_row', 'in_tissue', 'pxl_row_in_fullres', 'pxl_col_in_fullres']
+            img (Union[np.ndarray, str]): Full resolution image corresponding to the ST data, if passed as a path (str) the image is lazily loaded
+            meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
+            cellvit_seg (Dict): dictionary of cells in the CellViT .geojson format. Default: None
+        """
+        super().__init__(adata, img, meta, cellvit_seg)
         
 class XeniumHESTData(HESTData):
-    def __init__(self, adata: sc.AnnData, img: np.ndarray, meta: Dict):
-        super().__init__(adata, img, meta)
-        self.save_positions = False
+    def __init__(
+        self, 
+        adata: sc.AnnData,
+        img: Union[np.ndarray, str], 
+        meta: Dict,
+        cellvit_seg: Dict=None,
+        xenium_seg: Dict=None
+    ):
+        """
+        Args:
+            adata (sc.AnnData): Spatial Transcriptomics data in a scanpy Anndata object
+                adata must contain a downscaled image in ['spatial']['ST']['images']['downscaled_fullres']
+                and the following collomns in adata.obs: ['array_col', 'array_row', 'in_tissue', 'pxl_row_in_fullres', 'pxl_col_in_fullres']
+            img (Union[np.ndarray, str]): Full resolution image corresponding to the ST data, if passed as a path (str) the image is lazily loaded
+            meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
+            cellvit_seg (Dict): dictionary of cells in the CellViT .geojson format. Default: None
+            xenium_seg (Dict): path to a xenium nuclei contour file (nucleus_boundaries.csv.gz)
+        """
+        super().__init__(adata, img, meta, cellvit_seg)
+        
+        self.xenium_seg = xenium_seg
 
 
 def read_HESTData(adata_path: str, img: Union[np.ndarray, str], metrics_path: str) -> HESTData:

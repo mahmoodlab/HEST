@@ -350,9 +350,6 @@ class VisiumReader(Reader):
             save_autoalign=True
         )
         
-        st_object.h5_path = filtered_feature_path
-        st_object.spatial_path = spatial_coord_path
-        
         return st_object        
     
     
