@@ -3,6 +3,7 @@ import os
 import shutil
 from functools import partial
 from typing import Dict, Tuple, Union
+import warnings
 
 import cv2
 import matplotlib
@@ -72,24 +73,24 @@ class HESTData:
         if len(missing) > 0:
             raise ValueError(f'The following columns are missing in adata.obs: {missing}')
         
-        for index in adata.obs.index:
-            if len(index) != len(adata.obs.index[0]):
-                raise Exception('indices of adata.obs must all have the same length, otherwise problems can occur when saving to h5')
-    
     
     def __init__(
         self, 
         adata: sc.AnnData,
-        img: Union[np.ndarray, str], 
-        meta: Dict,
+        img: Union[np.ndarray, str],
+        pixel_size: float,
+        meta: Dict = {},
         cellvit_seg: Dict=None
     ):
         """
+        class representing a single ST profile + its associated WSI image
+        
         Args:
             adata (sc.AnnData): Spatial Transcriptomics data in a scanpy Anndata object
                 adata must contain a downscaled image in ['spatial']['ST']['images']['downscaled_fullres']
                 and the following collomns in adata.obs: ['array_col', 'array_row', 'in_tissue', 'pxl_row_in_fullres', 'pxl_col_in_fullres']
             img (Union[np.ndarray, str]): Full resolution image corresponding to the ST data, if passed as a path (str) the image is lazily loaded
+            pixel_size (float): pixel_size of WSI im um/px, this pixel size will be used to perform operations on the slide, such as patching and segmenting
             meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
             cellvit_seg (Dict): dictionary of cells in the CellViT .geojson format. Default: None
         """
@@ -103,8 +104,7 @@ class HESTData:
             
         self.meta = meta
         self._verify_format(adata)
-        self.pixel_size_embedded = meta['pixel_size_um_embedded']
-        self.pixel_size_estimated = meta['pixel_size_um_estimated']
+        self.pixel_size = pixel_size
         self.spots_under_tissue = meta['spots_under_tissue']
         self.cellvit_seg = cellvit_seg
         
@@ -121,8 +121,7 @@ class HESTData:
         dim_str = f'WSI has dim height={height}, width={width}'
     
         rep = f"""{sup_rep}
-        'pixel_size_um_embedded' is {self.pixel_size_embedded}
-        'pixel_size_um_estimated' is {self.pixel_size_estimated}
+        'pixel_size' is {self.pixel_size}
         'spots_under_tissue' is {self.spots_under_tissue}
         {img_str}
         {dim_str}
@@ -174,7 +173,7 @@ class HESTData:
             return height, width
     
         
-    def save(self, path: str, pyramidal=True, bigtiff=False):
+    def save(self, path: str, pyramidal=True, bigtiff=False, plot_pxl_size=False):
         """Save a HESTData object to `path` as follows:
             - aligned_adata.h5ad (contains expressions for each spots + their location on the fullres image + a downscaled version of the fullres image)
             - metrics.json (contains useful metrics)
@@ -210,15 +209,16 @@ class HESTData:
         down_img = Image.fromarray(downscaled_img)
         down_img.save(os.path.join(path, 'downscaled_fullres.jpeg'))
         
-        pixel_size_embedded = self.meta['pixel_size_um_embedded']
-        pixel_size_estimated = self.meta['pixel_size_um_estimated']
         
+        if plot_pxl_size:
+            pixel_size_embedded = self.meta['pixel_size_um_embedded']
+            pixel_size_estimated = self.meta['pixel_size_um_estimated']
+            
+            
+            plot_verify_pixel_size(downscaled_img, down_fact, pixel_size_embedded, pixel_size_estimated, os.path.join(path, 'pixel_size_vis.png'))
+
         
-        plot_verify_pixel_size(downscaled_img, down_fact, pixel_size_embedded, pixel_size_estimated, os.path.join(path, 'pixel_size_vis.png'))
-        
-        pixel_size = self.meta['pixel_size_um_estimated']
-        
-        tiff_save(img, os.path.join(path, ALIGNED_HE_FILENAME), pixel_size, pyramidal=pyramidal, bigtiff=bigtiff)
+        tiff_save(img, os.path.join(path, ALIGNED_HE_FILENAME), self.pixel_size, pyramidal=pyramidal, bigtiff=bigtiff)
         
         
     def plot_genes(self, path, top_k=300, plot_spatial=True):
@@ -360,9 +360,14 @@ class HESTData:
         keep_largest=False
     ):
         
-        adata = self.adata
+        adata = self.adata.copy()
         
-        src_pixel_size =  self.meta['pixel_size_um_estimated']
+        for index in adata.obs.index:
+            if len(index) != len(adata.obs.index[0]):
+                warnings.warn("indices of adata.obs should all have the same length to avoid problems when saving to h5", UserWarning)
+                
+        
+        src_pixel_size =  self.pixel_size
         
         # minimum intersection percecentage with the tissue mask to keep a patch
         TISSUE_INTER_THRESH = 0.05
@@ -544,15 +549,21 @@ class HESTData:
 
 
 class VisiumHESTData(HESTData): 
-    def __init__(self, adata: sc.AnnData, img: np.ndarray, meta: Dict):
-        super().__init__(adata, img, meta)
+    def __init__(self, 
+        adata: sc.AnnData,
+        img: Union[np.ndarray, str],
+        pixel_size: float,
+        meta: Dict = {},
+        cellvit_seg: Dict=None
+    ):
+        super().__init__(adata, img, pixel_size, meta, cellvit_seg)
 
 class VisiumHDHESTData(HESTData): 
-    def __init__(
-        self, 
+    def __init__(self, 
         adata: sc.AnnData,
-        img: Union[np.ndarray, str], 
-        meta: Dict,
+        img: Union[np.ndarray, str],
+        pixel_size: float,
+        meta: Dict = {},
         cellvit_seg: Dict=None
     ):
         """
@@ -564,14 +575,14 @@ class VisiumHDHESTData(HESTData):
             meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
             cellvit_seg (Dict): dictionary of cells in the CellViT .geojson format. Default: None
         """
-        super().__init__(adata, img, meta, cellvit_seg)        
+        super().__init__(adata, img, pixel_size, meta, cellvit_seg)        
         
 class STHESTData(HESTData):
-    def __init__(
-        self, 
+    def __init__(self, 
         adata: sc.AnnData,
-        img: Union[np.ndarray, str], 
-        meta: Dict,
+        img: Union[np.ndarray, str],
+        pixel_size: float,
+        meta: Dict = {},
         cellvit_seg: Dict=None
     ):
         """
@@ -583,14 +594,14 @@ class STHESTData(HESTData):
             meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
             cellvit_seg (Dict): dictionary of cells in the CellViT .geojson format. Default: None
         """
-        super().__init__(adata, img, meta, cellvit_seg)
+        super().__init__(adata, img, pixel_size, meta, cellvit_seg)
         
 class XeniumHESTData(HESTData):
-    def __init__(
-        self, 
+    def __init__(self, 
         adata: sc.AnnData,
-        img: Union[np.ndarray, str], 
-        meta: Dict,
+        img: Union[np.ndarray, str],
+        pixel_size: float,
+        meta: Dict = {},
         cellvit_seg: Dict=None,
         xenium_seg: Dict=None
     ):
@@ -604,7 +615,7 @@ class XeniumHESTData(HESTData):
             cellvit_seg (Dict): dictionary of cells in the CellViT .geojson format. Default: None
             xenium_seg (Dict): path to a xenium nuclei contour file (nucleus_boundaries.csv.gz)
         """
-        super().__init__(adata, img, meta, cellvit_seg)
+        super().__init__(adata, img, pixel_size, meta, cellvit_seg)
         
         self.xenium_seg = xenium_seg
 
@@ -613,7 +624,7 @@ def read_HESTData(adata_path: str, img: Union[np.ndarray, str], metrics_path: st
     adata = sc.read_h5ad(adata_path)
     with open(metrics_path) as metrics_f:     
         metrics = json.load(metrics_f)
-    return HESTData(adata, img, metrics)
+    return HESTData(adata, img, metrics['pixel_size_um_estimated'], metrics)
         
 
 def mask_and_patchify_bench(meta_df: pd.DataFrame, save_dir: str, use_mask=True, keep_largest=None):

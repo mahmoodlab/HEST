@@ -67,12 +67,12 @@ def enc_results_to_table(path) -> str:
         #'resnet50_trunc': 'ResNet50',
         #'kimianet': 'KimiaNet',
         #'ciga': 'Ciga',
-        #'ctranspath': 'CTransPath',
+        'ctranspath': 'CTransPath',
         #'remedis': 'Remedis',
         #'phikon_official_hf': 'Phikon',
         #'plip': 'PLIP',
-        #'uni_v1_official': 'UNI',
-        #'conch_v1_official': 'CONCH'
+        'uni_v1_official': 'UNI',
+        'conch_v1_official': 'CONCH',
         'gigapath': 'gigapath'
     }
     
@@ -488,6 +488,13 @@ def create_meta_release(meta_df: pd.DataFrame, version: version.Version) -> None
         
         #TODO remove
         meta_df.loc[index, 'nb_genes'] = metrics['adata_nb_col']
+        if meta_df.loc[index, 'st_technology'] == 'Xenium':
+            meta_df.loc[index, 'spot_diameter'] = None
+            meta_df.loc[index, 'inter_spot_dist'] = None
+        elif meta_df.loc[index, 'st_technology'] == 'Visium HD':
+            meta_df.loc[index, 'spot_diameter'] = 2
+            meta_df.loc[index, 'inter_spot_dist'] = 2
+        
         #adata = sc.read_h5ad(os.path.join(path, 'processed', 'aligned_adata.h5ad'))             
         #meta_df.loc[index]['nb_genes'] = len(adata.var_names)
         

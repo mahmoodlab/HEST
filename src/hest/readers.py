@@ -215,7 +215,7 @@ class VisiumHDReader(Reader):
         register_downscale_img(adata, img, pixel_size, spot_size=128)
         
         
-        return VisiumHDHESTData(adata, img, meta)
+        return VisiumHDHESTData(adata, img, meta['pixel_size_um_estimated'], meta)
         
         
 class VisiumReader(Reader):
@@ -505,7 +505,7 @@ class VisiumReader(Reader):
         dict['inter_spot_dist'] = 100.
         
 
-        return VisiumHESTData(adata, img, dict)
+        return VisiumHESTData(adata, img, dict['pixel_size_um_estimated'], dict)
     
 
     def _alignment_file_to_df(self, path, alignment_json=None):
@@ -868,7 +868,7 @@ class STReader(Reader):
         assert 'x' in adata.obs.index[0]
         adata.obs.index = [idx.split('x')[0].zfill(3) + 'x' + idx.split('x')[1].zfill(3) for idx in adata.obs.index]
         
-        return STHESTData(adata, img, dict)
+        return STHESTData(adata, img, dict['pixel_size_um_estimated'], dict)
     
     
 class XeniumReader(Reader):
@@ -1042,7 +1042,7 @@ class XeniumReader(Reader):
             self.__plot_genes(adata, cur_dir)
             
 
-        st_object = XeniumHESTData(adata, img, dict)
+        st_object = XeniumHESTData(adata, img, dict['pixel_size_um_estimated'], dict)
         return st_object
     
 
