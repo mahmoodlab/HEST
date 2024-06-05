@@ -335,7 +335,7 @@ class HESTData:
         mask = 1 - mask
         if keep_largest:
             mask = keep_largest_area(mask)
-        self.tissue_mask = np.round(cv2.resize(mask, (height, width))).astype(np.uint8)
+        self.tissue_mask = np.round(cv2.resize(mask, (width, height))).astype(np.uint8)
         self.contours_tissue, self.contours_holes = mask_to_contours(self.tissue_mask)
 
 
