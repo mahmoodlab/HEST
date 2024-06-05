@@ -271,7 +271,7 @@ class HESTData:
         if self.img is not None:
             thumb = np.array(cv2.resize(self.img, dsize=(width, height)))
         else:
-            thumb = self.wsi.get_thumbnail((width, height))  
+            thumb = np.array(self.wsi.get_thumbnail((width, height)))
         return thumb      
         
 
@@ -481,19 +481,28 @@ class HESTData:
                       'groups': None}
         return asset_dict
     
+
+    def save_tissue_seg_jpg(self, save_dir: str, name: str = 'hest') -> None:
+        """Save tissue segmentation as a greyscale .jpg file
+
+        Args:
+            save_dir (str): path to save directory
+            name (str): .jpg file is saved as {name}_mask.jpg
+        """
+        
+        tissue_mask = self.get_tissue_mask()
+        img = Image.fromarray(tissue_mask * 255)
+        img.save(os.path.join(save_dir, f'{name}_mask.jpg'))
+        
             
-    def save_segmentation(self, save_dir: str, name: str) -> None:
-        """Save tissue segmentation as a .pkl file
+    def save_tissue_seg_pkl(self, save_dir: str, name: str) -> None:
+        """Save tissue segmentation contour as a .pkl file
 
         Args:
             save_dir (str): path to pkl file
             name (str): .pkl file is saved as {name}_mask.pkl
         """
 
-        image_vis = self.visualize_wsi(line_thickness=3)
-
-        os.makedirs(os.path.join(save_dir, 'vis'), exist_ok=True)
-        image_vis.save(os.path.join(save_dir, 'vis', f'{name}_vis.png'))
         asset_dict = self.get_tissue_contours()
         save_pkl(os.path.join(save_dir, f'{name}_mask.pkl'), asset_dict)
 
