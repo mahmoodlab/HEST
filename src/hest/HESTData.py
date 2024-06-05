@@ -105,7 +105,6 @@ class HESTData:
         self.meta = meta
         self._verify_format(adata)
         self.pixel_size = pixel_size
-        self.spots_under_tissue = meta['spots_under_tissue']
         self.cellvit_seg = cellvit_seg
         
         if 'total_counts' not in self.adata.var_names:
@@ -122,7 +121,6 @@ class HESTData:
     
         rep = f"""{sup_rep}
         'pixel_size' is {self.pixel_size}
-        'spots_under_tissue' is {self.spots_under_tissue}
         {img_str}
         {dim_str}
         """
