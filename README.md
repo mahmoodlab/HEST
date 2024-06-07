@@ -1,5 +1,8 @@
 # HEST
 
+**Note: HEST is still under review and in active development. Please report any bugs in the GitHub issues (The full HEST-1k dataset will be made available upon acceptance. Stay tuned)** 
+<br/>
+
 
 Hest provides legacy readers for the different Spatial Transcriptomics data formats supporting H&E (Visium/Visium-HD, Xenium and ST) and for automatically aligning them with their associated histology image. Hest was used to assemble the HEST-1k dataset, processing challenging ST datasets from a wide variety of sources and converting them to formats commonly used in pathology (.tif, Scanpy AnnData). The framework also provides helper functions for pooling transcripts and tesselating slides into patches centered around ST spots.
 
