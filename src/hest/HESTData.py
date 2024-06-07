@@ -1,9 +1,10 @@
 import json
 import os
 import shutil
+import tempfile
+import warnings
 from functools import partial
 from typing import Dict, Tuple, Union
-import warnings
 
 import cv2
 import matplotlib
@@ -32,10 +33,12 @@ from spatial_image import SpatialImage
 from spatialdata import SpatialData
 from tqdm import tqdm
 
-from .masking import (apply_otsu_thresholding, keep_largest_area,
+from .segmentation import (apply_otsu_thresholding, keep_largest_area,
                       mask_to_contours, save_pkl, scale_contour_dim)
-from .utils import (ALIGNED_HE_FILENAME, get_path_from_meta_row, load_image,
-                    plot_verify_pixel_size, tiff_save)
+from .SegDataset import SegDataset
+from .utils import (ALIGNED_HE_FILENAME, get_path_from_meta_row,
+                    get_path_relative, load_image, plot_verify_pixel_size,
+                    tiff_save)
 from .vst_save_utils import initsave_hdf5
 
 
@@ -88,7 +91,7 @@ class HESTData:
         Args:
             adata (sc.AnnData): Spatial Transcriptomics data in a scanpy Anndata object
                 adata must contain a downscaled image in ['spatial']['ST']['images']['downscaled_fullres']
-                and the following collomns in adata.obs: ['array_col', 'array_row', 'in_tissue', 'pxl_row_in_fullres', 'pxl_col_in_fullres']
+                and the following columns in adata.obs: ['array_col', 'array_row', 'in_tissue', 'pxl_row_in_fullres', 'pxl_col_in_fullres']
             img (Union[np.ndarray, str]): Full resolution image corresponding to the ST data, if passed as a path (str) the image is lazily loaded
             pixel_size (float): pixel_size of WSI im um/px, this pixel size will be used to perform operations on the slide, such as patching and segmenting
             meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
@@ -127,16 +130,17 @@ class HESTData:
         return rep
         
     
-    def save_spatial_plot(self, save_path: str, pl_kwargs={}):
+    def save_spatial_plot(self, save_path: str, key='total_counts', pl_kwargs={}):
         """Save the spatial plot from that STObject
 
         Args:
             save_path (str): path to a directory where the spatial plot will be saved
+            key (str): feature to plot. Default: 'total_counts'
             pl_kwargs(Dict): arguments for sc.pl.spatial
         """
         print("Plotting spatial plots...")
              
-        sc.pl.spatial(self.adata, show=None, img_key="downscaled_fullres", color=['total_counts'], title=f"in_tissue spots", **pl_kwargs)
+        sc.pl.spatial(self.adata, show=None, img_key="downscaled_fullres", color=[key], title=f"in_tissue spots", **pl_kwargs)
         
         filename = f"spatial_plots.png"
         
@@ -336,7 +340,7 @@ class HESTData:
         if keep_largest:
             mask = keep_largest_area(mask)
         self.tissue_mask = np.round(cv2.resize(mask, (width, height))).astype(np.uint8)
-        self.contours_tissue, self.contours_holes = mask_to_contours(self.tissue_mask)
+        self.contours_tissue, self.contours_holes = mask_to_contours(self.tissue_mask, pixel_size=self.pixel_size)
 
 
     def get_tissue_mask(self, keep_largest=False) -> np.ndarray:
@@ -544,7 +548,7 @@ class HESTData:
         #TODO add CellViT
         
         return st
-
+    
 
 class VisiumHESTData(HESTData): 
     def __init__(self, 
@@ -601,21 +605,54 @@ class XeniumHESTData(HESTData):
         pixel_size: float,
         meta: Dict = {},
         cellvit_seg: Dict=None,
-        xenium_seg: Dict=None
+        xenium_nuc_seg: pd.DataFrame=None,
+        xenium_cell_seg: pd.DataFrame=None,
+        cell_adata: sc.AnnData=None,
+        transcript_df: pd.DataFrame=None
     ):
         """
         Args:
-            adata (sc.AnnData): Spatial Transcriptomics data in a scanpy Anndata object
+            adata (sc.AnnData): Spatial Transcriptomics data (pooled by patches) in a scanpy Anndata object
                 adata must contain a downscaled image in ['spatial']['ST']['images']['downscaled_fullres']
                 and the following collomns in adata.obs: ['array_col', 'array_row', 'in_tissue', 'pxl_row_in_fullres', 'pxl_col_in_fullres']
             img (Union[np.ndarray, str]): Full resolution image corresponding to the ST data, if passed as a path (str) the image is lazily loaded
             meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
             cellvit_seg (Dict): dictionary of cells in the CellViT .geojson format. Default: None
-            xenium_seg (Dict): path to a xenium nuclei contour file (nucleus_boundaries.csv.gz)
+            xenium_nuc_seg (pd.DataFrame): content of a xenium nuclei contour file as a dataframe (nucleus_boundaries.parquet)
+            xenium_cell_seg (pd.DataFrame): content of a xenium cell contour file as a dataframe (cell_boundaries.parquet)
+            cell_adata (sc.AnnData): ST cell data, each row in adata.obs is a cell, each row in obsm is the cell location on the H&E image in pixels
+            transcript_df (pd.DataFrame): dataframe of transcripts, each row is a transcript, he_x and he_y is the transcript location on the H&E image in pixels
         """
         super().__init__(adata, img, pixel_size, meta, cellvit_seg)
         
-        self.xenium_seg = xenium_seg
+        self.xenium_nuc_seg = xenium_nuc_seg
+        self.xenium_cell_seg = xenium_cell_seg
+        self.cell_adata = cell_adata
+        self.transcript_df = transcript_df
+        
+    def save(self, path: str, pyramidal=True, bigtiff=False, plot_pxl_size=False):
+        """Save a HESTData object to `path` as follows:
+            - aligned_adata.h5ad (contains expressions for each spots + their location on the fullres image + a downscaled version of the fullres image)
+            - metrics.json (contains useful metrics)
+            - downscaled_fullres.jpeg (a downscaled version of the fullres image)
+            - aligned_fullres_HE.tif (the full resolution image)
+            - cells.geojson (cell segmentation if it exists)
+
+        Args:
+            path (str): save location
+            pyramidal (bool, optional): whenever to save the full resolution image as pyramidal (can be slow to save, however it's sometimes necessary for loading large images in QuPath). Defaults to True.
+            bigtiff (bool, optional): whenever the bigtiff image is more than 4.1GB. Defaults to False.
+        """
+        super().save(path, pyramidal, bigtiff, plot_pxl_size)
+        if self.cell_adata is not None:
+            self.cell_adata.write_h5ad(os.path.join(path, 'aligned_cells.h5ad'))
+        
+        if self.transcript_df is not None:
+            self.transcript_df.to_parquet(os.path.join(path, 'aligned_transcripts.parquet'))
+            
+            
+        # TODO save segmentation
+        
 
 
 def read_HESTData(adata_path: str, img: Union[np.ndarray, str], metrics_path: str) -> HESTData:

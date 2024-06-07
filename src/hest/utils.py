@@ -12,6 +12,7 @@ import h5py
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
 try:
     import pyvips
 except Exception:
@@ -25,10 +26,10 @@ from scipy import sparse
 from sklearn.neighbors import KDTree
 from tqdm import tqdm
 
-
 Image.MAX_IMAGE_PIXELS = 93312000000
 ALIGNED_HE_FILENAME = 'aligned_fullres_HE.tif'
 
+    
 
 def get_path_relative(file, path) -> str:
     curr_dir = os.path.dirname(os.path.abspath(file))
@@ -64,13 +65,13 @@ def enc_results_to_table(path) -> str:
     df_str.loc['Average'] = df_int.loc['Average'].astype(str).apply(lambda x: x.ljust(5, '0'))
     
     names = {
-        #'resnet50_trunc': 'ResNet50',
-        #'kimianet': 'KimiaNet',
-        #'ciga': 'Ciga',
+        'resnet50_trunc': 'ResNet50',
+        'kimianet': 'KimiaNet',
+        'ciga': 'Ciga',
         'ctranspath': 'CTransPath',
-        #'remedis': 'Remedis',
-        #'phikon_official_hf': 'Phikon',
-        #'plip': 'PLIP',
+        'remedis': 'Remedis',
+        'phikon_official_hf': 'Phikon',
+        'plip': 'PLIP',
         'uni_v1_official': 'UNI',
         'conch_v1_official': 'CONCH',
         'gigapath': 'gigapath'

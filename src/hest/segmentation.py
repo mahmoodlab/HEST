@@ -1,7 +1,20 @@
+import os
 import pickle
+import tempfile
+from functools import partial
+from typing import Union
 
 import cv2
 import numpy as np
+import torch
+from PIL import Image
+from torch import nn
+from torch.utils.data import DataLoader
+from torchvision import models, transforms
+
+from hest.SegDataset import SegDataset
+from hest.utils import get_path_relative
+from hest.wsi import WSI
 
 try:
     import openslide
@@ -13,6 +26,103 @@ import skimage.filters as sk_filters
 import skimage.measure as sk_measure
 import skimage.morphology as sk_morphology
 from tqdm import tqdm
+
+
+def segment_tissue_deep(img: Union[np.ndarray, openslide.OpenSlide], pixel_size_src, target_pxl_size=1, patch_size=512):
+    
+    # TODO fix overlap
+    overlap=0
+    
+    #TODO allow np.ndarray
+    
+    scale = pixel_size_src / target_pxl_size
+    patch_size_src = round(patch_size / scale)
+    wsi = WSI(img, patch_size_src, overlap)
+    
+    #lazy = isinstance(img, openslide.OpenSlide) or isinstance(img, CuImage)
+    
+    width, height = wsi.get_dimensions()
+    
+    weights_path = get_path_relative(__file__, '../../models/deeplabv3_seg_v2.ckpt')
+
+    cols, rows = wsi.get_cols_rows()
+    
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        print('created temporary directory', tmpdirname)
+    
+        print('save temp patches...')
+        # saves patches to temp dir
+        for row in tqdm(range(rows)):
+            for col in range(cols):
+                tile, pxl_x, pxl_y = wsi.get_tile(col, row)
+                
+                tile = cv2.resize(tile, (patch_size, patch_size), interpolation=cv2.INTER_CUBIC)
+
+
+                Image.fromarray(tile).save(os.path.join(tmpdirname, f'{pxl_x}_{pxl_y}.jpg'))
+                
+        
+        eval_transforms = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
+        dataset = SegDataset(tmpdirname, eval_transforms)
+        dataloader = DataLoader(dataset, 8)
+        model = torch.hub.load('pytorch/vision:v0.10.0', 'deeplabv3_resnet50', pretrained=False)
+        model.classifier[4] = nn.Conv2d(
+            in_channels=256,
+            out_channels=2,
+            kernel_size=1,
+            stride=1
+        )
+        
+        checkpoint = torch.load(weights_path)
+        new_state_dict = {}
+        for key in checkpoint['state_dict']:
+            if 'aux' in key:
+                continue
+            new_key = key.replace('model.', '')
+            new_state_dict[new_key] = checkpoint['state_dict'][key]
+        model.load_state_dict(new_state_dict)
+        
+        model.cuda()
+        
+        model.eval()
+        
+        
+        stitched_img = np.zeros((height, width))
+        with torch.no_grad():
+            print('start inference...')
+            for batch in tqdm(dataloader, total=len(dataloader)):
+                
+                # coords are top left coords of patch
+                imgs, coords = batch
+                imgs = imgs.cuda()
+                masks = model(imgs)['out']
+                preds = masks.argmax(1)
+                
+                preds = np.array(preds.cpu())
+                
+                coords = np.column_stack((coords[0], coords[1]))
+                
+                # stitch the patches
+                for i in range(preds.shape[0]):
+                    pred = preds[i]
+                    coord = coords[i]
+                    x, y = coord[0], coord[1]
+                    
+                    pred = pred.astype(np.uint8)
+                    
+                    pred = cv2.resize(pred, (patch_size_src + overlap, patch_size_src + overlap), interpolation=cv2.INTER_CUBIC)
+                    
+                    y_end = min(y+patch_size_src + overlap, height)
+                    x_end = min(x+patch_size_src + overlap, width)
+                    stitched_img[y:y_end, x:x_end] += pred[:y_end-y, :x_end-x]
+                    
+
+            
+        mask = (stitched_img > 0).astype(np.uint8)
+            
+        contours_tissue, contours_holes = mask_to_contours(mask, max_nb_holes=5, pixel_size=pixel_size_src)
+            
+        return mask, contours_tissue, contours_holes
 
 
 def save_pkl(filename, save_object):
@@ -58,6 +168,58 @@ def keep_largest_area(mask: np.ndarray) -> np.ndarray:
     largest_mask[label_image == largest_label] = True
     mask[~largest_mask] = 0
     return mask
+
+
+def visualize_tissue_seg(
+            img,
+            tissue_mask,
+            contours_tissue,
+            contour_holes,
+            line_color=(0, 255, 0),
+            hole_color=(0, 0, 255),
+            line_thickness=5,
+            target_width=1000,
+            view_slide_only=False,
+            seg_display=True,
+    ):
+        wsi = WSI(img)
+    
+        width, height = wsi.get_dimensions()
+        downsample = target_width / width
+
+        top_left = (0,0)
+        scale = [downsample, downsample]    
+        
+        img = wsi.get_thumbnail(round(width * downsample), round(height * downsample))
+        #img = cv2.resize(img, (round(width * downsample), round(height * downsample)))
+
+        downscaled_mask = cv2.resize(tissue_mask, (img.shape[1], img.shape[0]))
+        downscaled_mask = np.expand_dims(downscaled_mask, axis=-1)
+        downscaled_mask = downscaled_mask * np.array([0, 0, 0]).astype(np.uint8)
+
+
+        offset = tuple(-(np.array(top_left) * scale).astype(int))
+        draw_cont = partial(cv2.drawContours, contourIdx=-1, thickness=line_thickness, lineType=cv2.LINE_8, offset=offset)
+        draw_cont_fill = partial(cv2.drawContours, contourIdx=-1, thickness=cv2.FILLED, offset=offset)
+
+        if contours_tissue is not None and seg_display:
+            for _, cont in enumerate(contours_tissue):
+                cont = np.array(scale_contour_dim(cont, scale))
+                draw_cont(image=img, contours=[cont], color=line_color)
+                draw_cont_fill(image=downscaled_mask, contours=[cont], color=line_color)
+
+            ### Draw hole contours
+            for cont in contour_holes:
+                cont = scale_contour_dim(cont, scale)
+                draw_cont(image=img, contours=cont, color=hole_color) 
+
+        alpha = 0.4
+        downscaled_mask = downscaled_mask
+        tissue_mask = cv2.resize(downscaled_mask, (width, height)).round().astype(np.uint8)
+        img = cv2.addWeighted(img, 1 - alpha, downscaled_mask, alpha, 0)
+        img = img.astype(np.uint8)
+
+        return Image.fromarray(img)
 
 
 def apply_otsu_thresholding(tile: np.ndarray) -> np.ndarray:
@@ -106,19 +268,7 @@ def apply_otsu_thresholding(tile: np.ndarray) -> np.ndarray:
     return otsu_thr
 
 
-class WSI:
-    wsi: openslide.OpenSlide = None
-    contours_holes = None
-    contours_tissue = None
-    tissue_mask: np.ndarray = None
-
-
-    def __init__(self, path):
-        self.wsi = openslide.OpenSlide(path)
-    
-
-
-def filter_contours(contours, hierarchy, filter_params, scale):
+def filter_contours(contours, hierarchy, filter_params, scale, pixel_size):
     """
         Filter contours by: area
     """
@@ -143,6 +293,7 @@ def filter_contours(contours, hierarchy, filter_params, scale):
         hole_areas = [cv2.contourArea(contours[hole_idx]) for hole_idx in holes]
         # actual area of foreground contour region
         a = a - np.array(hole_areas).sum()
+        a *= pixel_size ** 2
 
         if a == 0: continue
 
@@ -152,6 +303,7 @@ def filter_contours(contours, hierarchy, filter_params, scale):
             
             if (filter_params['filter_color_mode'] == 'none') or (filter_params['filter_color_mode'] is None):
                 filtered.append(cont_idx)
+                holes = [hole_idx for hole_idx in holes if cv2.contourArea(contours[hole_idx]) * pixel_size ** 2 > filter_params['min_hole_area']]
                 all_holes.append(holes)
             else:
                 raise Exception()
@@ -171,8 +323,8 @@ def filter_contours(contours, hierarchy, filter_params, scale):
         unfiltered_holes = [contours[idx] for idx in hole_ids ]
         unfilered_holes = sorted(unfiltered_holes, key=cv2.contourArea, reverse=True)
         # take max_n_holes largest holes by area
-        unfilered_holes = unfilered_holes[:filter_params['max_n_holes']]
-        filtered_holes = []
+        filtered_holes = unfilered_holes[:filter_params['max_n_holes']]
+        #filtered_holes = []
         
         # filter these holes
         #for hole in unfilered_holes:
@@ -184,11 +336,11 @@ def filter_contours(contours, hierarchy, filter_params, scale):
     return foreground_contours, hole_contours
         
         
-def mask_to_contours(mask: np.ndarray, keep_ids = [], exclude_ids=[], max_nb_holes=0):
+def mask_to_contours(mask: np.ndarray, keep_ids = [], exclude_ids=[], max_nb_holes=0, min_contour_area=1000, pixel_size=1):
     TARGET_EDGE_SIZE = 2000
     scale = TARGET_EDGE_SIZE / mask.shape[0]
 
-    downscaled_mask = cv2.resize(mask, (round(mask.shape[0] * scale), round(mask.shape[1] * scale)))
+    downscaled_mask = cv2.resize(mask, (round(mask.shape[1] * scale), round(mask.shape[0] * scale)))
 
     # Find and filter contours
     if max_nb_holes == 0:
@@ -204,11 +356,12 @@ def mask_to_contours(mask: np.ndarray, keep_ids = [], exclude_ids=[], max_nb_hol
     filter_params = {
         'filter_color_mode': 'none',
         'max_n_holes': max_nb_holes,
-        'a_t': 1000
+        'a_t': min_contour_area * pixel_size ** 2,
+        'min_hole_area': 4000 * pixel_size ** 2
     }
 
     if filter_params: 
-        foreground_contours, hole_contours = filter_contours(contours, hierarchy, filter_params, scale)  # Necessary for filtering out artifacts
+        foreground_contours, hole_contours = filter_contours(contours, hierarchy, filter_params, scale, pixel_size)  # Necessary for filtering out artifacts
 
     
     if len(foreground_contours) == 0:

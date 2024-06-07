@@ -20,3 +20,10 @@ src/hest/bench/private
 str.csv
 int.csv
 docs/build
+local
+hest_vis
+hest_vis2
+hest_vis
+vis
+vis2
+models/deeplabv3*
