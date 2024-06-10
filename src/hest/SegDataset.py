@@ -26,7 +26,6 @@ class SegDataset(Dataset):
             pxl_x, pxl_y = int(name.split('_')[0]), int(name.split('_')[1])
             self.patch_paths.append(os.path.join(root_path, mask_filename))
             self.coords.append([pxl_x, pxl_y])
-            print('add coords x=', pxl_x, ' y=', pxl_y)
                         
 
     def __len__(self):

@@ -11,6 +11,9 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import tifffile
+from cucim import CuImage
+
+from hest.wsi import WSI
 
 try:
     import openslide
@@ -33,10 +36,11 @@ from spatial_image import SpatialImage
 from spatialdata import SpatialData
 from tqdm import tqdm
 
-from .segmentation import (apply_otsu_thresholding, keep_largest_area,
-                      mask_to_contours, save_pkl, scale_contour_dim)
 from .SegDataset import SegDataset
-from .utils import (ALIGNED_HE_FILENAME, get_path_from_meta_row,
+from .segmentation import (apply_otsu_thresholding, keep_largest_area,
+                           mask_to_contours, save_pkl, scale_contour_dim,
+                           segment_tissue_deep, visualize_tissue_seg)
+from .utils import (ALIGNED_HE_FILENAME, check_arg, get_path_from_meta_row,
                     get_path_relative, load_image, plot_verify_pixel_size,
                     tiff_save)
 from .vst_save_utils import initsave_hdf5
@@ -48,16 +52,13 @@ class HESTData:
     """
     
     tissue_mask: np.ndarray = None
-    """tissue mask for that sample, will be None until _compute_mask() is called"""
+    """tissue mask for that sample, will be None until compute_mask() is called"""
     
     contours_tissue: list = None
-    """tissue contours for that sample, will be None until _compute_mask() is called"""
+    """tissue contours for that sample, will be None until compute_mask() is called"""
     
     cellvit_seg = None
     """dictionary of cells in the CellViT .geojson format"""
-    
-    img = None
-    """WSI image associated with this sample, will be None until loaded"""
     
     
     def _verify_format(self, adata):
@@ -80,7 +81,7 @@ class HESTData:
     def __init__(
         self, 
         adata: sc.AnnData,
-        img: Union[np.ndarray, str],
+        img: Union[np.ndarray, openslide.OpenSlide, CuImage],
         pixel_size: float,
         meta: Dict = {},
         cellvit_seg: Dict=None
@@ -92,18 +93,14 @@ class HESTData:
             adata (sc.AnnData): Spatial Transcriptomics data in a scanpy Anndata object
                 adata must contain a downscaled image in ['spatial']['ST']['images']['downscaled_fullres']
                 and the following columns in adata.obs: ['array_col', 'array_row', 'in_tissue', 'pxl_row_in_fullres', 'pxl_col_in_fullres']
-            img (Union[np.ndarray, str]): Full resolution image corresponding to the ST data, if passed as a path (str) the image is lazily loaded
+            img (Union[np.ndarray, openslide.OpenSlide, CuImage]): Full resolution image corresponding to the ST data, Openslide/CuImage are lazily loaded, use CuImage for GPU accelerated computation
             pixel_size (float): pixel_size of WSI im um/px, this pixel size will be used to perform operations on the slide, such as patching and segmenting
             meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
             cellvit_seg (Dict): dictionary of cells in the CellViT .geojson format. Default: None
         """
         self.adata = adata
         
-        if isinstance(img, str):
-            self.wsi = openslide.OpenSlide(img)
-            self.img = None
-        else:
-            self.img = img
+        self.wsi = WSI(img)
             
         self.meta = meta
         self._verify_format(adata)
@@ -117,14 +114,13 @@ class HESTData:
     def __repr__(self):
         sup_rep = super().__repr__()
 
-        img_str = 'WSI in memory'if self.is_image_in_mem() else "WSI not in memory"
+        #img_str = 'WSI in memory'if self.is_image_in_mem() else "WSI not in memory"
 
-        height, width = self.get_img_dim()
+        width, height = self.wsi.get_dimensions()
         dim_str = f'WSI has dim height={height}, width={width}'
     
         rep = f"""{sup_rep}
         'pixel_size' is {self.pixel_size}
-        {img_str}
         {dim_str}
         """
         return rep
@@ -151,40 +147,23 @@ class HESTData:
     
     
     def _load_wsi(self):
-        self.img, _ = load_image(self.wsi._filename)
-        
-    
-    def get_img(self):
-        if self.img is None:
-            self._load_wsi()
-        return self.img
-    
-    
-    def get_img_dim(self) -> Tuple[int, int]:
-        """ get the fullres image dimension as (height, width)
-
-        Returns:
-            Tuple[int, int]: (height, width)
-        """
-
-        if self.img is not None:
-            shape = self.img.shape[:2]
-            return shape[0], shape[1]
-        else:
-            width, height = self.wsi.dimensions
-            return height, width
+        self.wsi, _ = load_image(self.wsi._filename)
     
         
-    def save(self, path: str, pyramidal=True, bigtiff=False, plot_pxl_size=False):
+    def save(self, path: str, save_img=True, pyramidal=True, bigtiff=False, plot_pxl_size=False):
         """Save a HESTData object to `path` as follows:
             - aligned_adata.h5ad (contains expressions for each spots + their location on the fullres image + a downscaled version of the fullres image)
             - metrics.json (contains useful metrics)
             - downscaled_fullres.jpeg (a downscaled version of the fullres image)
             - aligned_fullres_HE.tif (the full resolution image)
             - cells.geojson (cell segmentation if it exists)
+            - Optional: tissue_mask.jpg (grayscale image of the tissue segmentation if it exists)
+            - Optional: tissue_mask.pkl (main contours and contours of holes of the tissue segmentation if it exists)
+            - Optional: tissue_seg_vis.jpg (visualization of tissue contour and holes on downscaled H&E if it exists)
 
         Args:
             path (str): save location
+            save_img (bool): whenever to save the image at all (can save a lot of time if set to False). Defaults to True
             pyramidal (bool, optional): whenever to save the full resolution image as pyramidal (can be slow to save, however it's sometimes necessary for loading large images in QuPath). Defaults to True.
             bigtiff (bool, optional): whenever the bigtiff image is more than 4.1GB. Defaults to False.
         """
@@ -195,15 +174,18 @@ class HESTData:
             self.adata.__dict__['_raw'].__dict__['_var'] = self.adata.__dict__['_raw'].__dict__['_var'].rename(columns={'_index': 'features'})
             self.adata.write(os.path.join(path, 'aligned_adata.h5ad'))
         
-        
-        img = self.get_img()
+        if save_img:
+            img = self.wsi.numpy()
         self.meta['adata_nb_col'] = len(self.adata.var_names)
-        self.meta['fullres_px_width'] = img.shape[1]
-        self.meta['fullres_px_height'] = img.shape[0]
+        
+        width, height = self.wsi.get_dimensions()
+        
+        self.meta['fullres_px_width'] = width
+        self.meta['fullres_px_height'] = height
         with open(os.path.join(path, 'metrics.json'), 'w') as json_file:
             json.dump(self.meta, json_file) 
             
-        with open(os.path.join(path, 'cells.geojson')) as json_file:
+        with open(os.path.join(path, 'cells.geojson'), 'w') as json_file:
             json.dump(self.cellvit_seg, json_file)
         
         downscaled_img = self.adata.uns['spatial']['ST']['images']['downscaled_fullres']
@@ -219,8 +201,28 @@ class HESTData:
             
             plot_verify_pixel_size(downscaled_img, down_fact, pixel_size_embedded, pixel_size_estimated, os.path.join(path, 'pixel_size_vis.png'))
 
+
+        if self.tissue_mask is not None:
+            Image.fromarray(self.tissue_mask).save(os.path.join(path, 'tissue_mask.jpg'))
+            self.save_tissue_seg_pkl(path, 'tissue')
+            
+            vis = visualize_tissue_seg(
+                    self.wsi.img,
+                    self.tissue_mask,
+                    self.contours_tissue,
+                    self.contours_holes,
+                    line_color=(0, 255, 0),
+                    hole_color=(0, 0, 255),
+                    line_thickness=5,
+                    target_width=1000,
+                    seg_display=True,
+            )
+            
+            vis.save(os.path.join(path, 'tissue_seg_vis.jpg'))
+
         
-        tiff_save(img, os.path.join(path, ALIGNED_HE_FILENAME), self.pixel_size, pyramidal=pyramidal, bigtiff=bigtiff)
+        if save_img:
+            tiff_save(img, os.path.join(path, ALIGNED_HE_FILENAME), self.pixel_size, pyramidal=pyramidal, bigtiff=bigtiff)
         
         
     def plot_genes(self, path, top_k=300, plot_spatial=True):
@@ -259,108 +261,61 @@ class HESTData:
                 plt.close()  # Close the plot to free memory
         rcParams["figure.figsize"] = old_figsize
         
-    
-    def get_thumbnail(self, width: int, height: int) -> np.ndarray:
-        """Get a downscaled version of the full resolution image
+
+
+    def compute_mask(self, keep_largest=False, thumbnail_width=2000, method: str='deep') -> None:
+        """ Compute tissue mask and stores it in the current HESTData object
 
         Args:
-            width (int): width of thumbnail
-            height (int): height of thumbnail
+            method (str, optional): perform deep learning based segmentation ('deep') or otsu based ('otsu').
+            Deep-learning based segmentation will be more accurate but a GPU is recommended, 'otsu' is faster but less accurate. Defaults to 'deep'.
+        """
+        
+        check_arg(method, 'method', ['deep', 'otsu'])
+        
+        if method == 'deep':
+            self.tissue_mask, self.contours_tissue, self.contours_holes = segment_tissue_deep(self.wsi, self.pixel_size, target_pxl_size=1, patch_size=512)
+        elif method == 'otsu':
+        
+            width, height = self.wsi.get_dimensions()
+            scale = thumbnail_width / width
+            thumbnail = self.wsi.get_thumbnail(round(width * scale), round(height * scale))
+            mask = apply_otsu_thresholding(thumbnail).astype(np.uint8)
+            mask = 1 - mask
+            if keep_largest:
+                mask = keep_largest_area(mask)
+            self.tissue_mask = np.round(cv2.resize(mask, (width, height))).astype(np.uint8)
+            self.contours_tissue, self.contours_holes = mask_to_contours(self.tissue_mask, pixel_size=self.pixel_size)
+
+
+    def get_tissue_mask(self, keep_largest=False, method: str='deep') -> np.ndarray:
+        """ Return existing tissue segmentation mask if it exists, implicitly compute it beforehand if it doesn't exists
+
+        Args:
+            method (str, optional): perform deep learning based segmentation ('deep') or otsu based ('otsu').
+            Deep-learning based segmentation will be more accurate but a GPU is recommended, 'otsu' is faster but less accurate. Defaults to 'deep'.
 
         Returns:
-            np.ndarray: thumbnail
+            np.ndarray: an array with the same resolution as the WSI image, where 1 means tissue and 0 means background
         """
-        if self.img is not None:
-            thumb = np.array(cv2.resize(self.img, dsize=(width, height)))
-        else:
-            thumb = np.array(self.wsi.get_thumbnail((width, height)))
-        return thumb      
         
-
-    def visualize_mask_and_patches(
-                self,
-                line_color=(0, 255, 0),
-                hole_color=(0, 0, 255),
-                line_thickness=250,
-                target_width=1000,
-                view_slide_only=False,
-                seg_display=True,
-                tissue_mask=None
-        ):
-            height, width = self.get_img_dim()
-            downsample = target_width / width
-
-            top_left = (0,0)
-            scale = [downsample, downsample]    
-
-            img = self.get_thumbnail(round(width * downsample), round(height * downsample))
-
-            self.downscaled_img = img.copy()
-
-            if tissue_mask is None:
-                tissue_mask = self.get_tissue_mask()
-
-            downscaled_mask = cv2.resize(tissue_mask, (img.shape[1], img.shape[0]))
-            downscaled_mask = np.expand_dims(downscaled_mask, axis=-1)
-            downscaled_mask = downscaled_mask * np.array([0, 0, 0]).astype(np.uint8)
-
-            if view_slide_only:
-                return Image.fromarray(img)
-
-            offset = tuple(-(np.array(top_left) * scale).astype(int))
-            draw_cont = partial(cv2.drawContours, contourIdx=-1, thickness=line_thickness, lineType=cv2.LINE_8, offset=offset)
-            draw_cont_fill = partial(cv2.drawContours, contourIdx=-1, thickness=cv2.FILLED, offset=offset)
-
-            if self.contours_tissue is not None and seg_display:
-                for _, cont in enumerate(self.contours_tissue):
-                    cont = np.array(scale_contour_dim(cont, scale))
-                    draw_cont(image=img, contours=[cont], color=line_color)
-                    draw_cont_fill(image=downscaled_mask, contours=[cont], color=line_color)
-
-                ### Draw hole contours
-                for cont in self.contours_holes:
-                    cont = scale_contour_dim(cont, scale)
-                    draw_cont(image=img, contours=cont, color=hole_color) 
-
-            alpha = 0.4
-            self.downscaled_mask = downscaled_mask
-            self.tissue_mask = cv2.resize(downscaled_mask, self.tissue_mask.shape).round().astype(np.uint8)
-            img = cv2.addWeighted(img, 1 - alpha, downscaled_mask, alpha, 0)
-            img = img.astype(np.uint8)
-
-            return Image.fromarray(img)
-
-
-    def _compute_mask(self, keep_largest=False, thumbnail_width=2000):
-        height, width = self.get_img_dim()
-        scale = thumbnail_width / width
-        thumbnail = self.get_thumbnail(round(width * scale), round(height * scale))
-        mask = apply_otsu_thresholding(thumbnail).astype(np.uint8)
-        mask = 1 - mask
-        if keep_largest:
-            mask = keep_largest_area(mask)
-        self.tissue_mask = np.round(cv2.resize(mask, (width, height))).astype(np.uint8)
-        self.contours_tissue, self.contours_holes = mask_to_contours(self.tissue_mask, pixel_size=self.pixel_size)
-
-
-    def get_tissue_mask(self, keep_largest=False) -> np.ndarray:
         if self.tissue_mask is None:
-            self._compute_mask(keep_largest)
+            self.compute_mask(keep_largest=keep_largest, method=method)
         return self.tissue_mask
     
 
     def dump_patches(
         self,
         patch_save_dir: str,
-        name: str = None,
+        name: str = 'patches',
         target_patch_size: int=224,
         target_pixel_size: float=0.5,
         verbose=0,
         dump_visualization=True,
         use_mask=True,
-        load_in_memory=True,
         keep_largest=False
     ):
+        
         
         adata = self.adata.copy()
         
@@ -386,7 +341,7 @@ class HESTData:
         
         mode_HE = 'w'
         i = 0
-        img_height, img_width = self.get_img_dim()
+        img_width, img_height = self.wsi.get_dimensions()
         patch_rectangles = [] # lower corner (x, y) + (widht, height)
         downscale_vis = TARGET_VIS_SIZE / img_width
 
@@ -394,8 +349,13 @@ class HESTData:
             tissue_mask = self.get_tissue_mask(keep_largest)
         else:
             tissue_mask = np.ones((img_height, img_width)).astype(np.uint8)
-
-        mask_plot = self.visualize_mask_and_patches(line_thickness=3, target_width=1000, tissue_mask=tissue_mask)
+            
+        mask_plot = visualize_tissue_seg(
+                        self.wsi.img,
+                        self.tissue_mask,
+                        self.contours_tissue,
+                        self.contours_holes
+                )
 
         ax.imshow(mask_plot)
         for _, row in tqdm(adata.obs.iterrows(), total=len(adata.obs)):
@@ -418,11 +378,7 @@ class HESTData:
                     print('Warning, patch is out of the image, skipping')
                 continue
             
-            if load_in_memory:
-                image_patch = self.img[yImage - patch_size_pxl // 2: yImage + patch_size_pxl // 2,
-                                    xImage - patch_size_pxl // 2: xImage + patch_size_pxl // 2, :]
-            else:
-                image_patch = self.wsi.read_region((xImage - patch_size_pxl // 2, yImage - patch_size_pxl // 2), 0, (patch_size_pxl, patch_size_pxl))
+            image_patch = self.wsi.read_region((xImage - patch_size_pxl // 2, yImage - patch_size_pxl // 2), (patch_size_pxl, patch_size_pxl))
             rect_x = (xImage - patch_size_pxl // 2) * downscale_vis
             rect_y = (yImage - patch_size_pxl // 2) * downscale_vis
             rect_width = patch_size_pxl * downscale_vis
@@ -473,6 +429,11 @@ class HESTData:
         if verbose:
             print(f'found {patch_count} valid patches')
             
+    
+    def __verify_mask(self):
+        if self.tissue_mask is None:
+            raise Exception("compute the tissue mask for this HESTData object with self.compute()")        
+    
 
     def get_tissue_contours(self) -> Dict[str, list]:
         """Get the tissue contours and holes
@@ -480,8 +441,8 @@ class HESTData:
         Returns:
             Dict[str, list]: dictionnary of contours and holes in the tissue
         """
-        if self.tissue_mask is None:
-            self._compute_mask()
+        
+        self.__verify_mask()
         
         asset_dict = {'holes': self.contours_holes, 
                       'tissue': self.contours_tissue, 
@@ -497,8 +458,9 @@ class HESTData:
             name (str): .jpg file is saved as {name}_mask.jpg
         """
         
-        tissue_mask = self.get_tissue_mask()
-        img = Image.fromarray(tissue_mask * 255)
+        self.__verify_mask()
+        
+        img = Image.fromarray(self.tissue_mask)
         img.save(os.path.join(save_dir, f'{name}_mask.jpg'))
         
             
@@ -509,6 +471,8 @@ class HESTData:
             save_dir (str): path to pkl file
             name (str): .pkl file is saved as {name}_mask.pkl
         """
+        
+        self.__verify_mask()
 
         asset_dict = self.get_tissue_contours()
         save_pkl(os.path.join(save_dir, f'{name}_mask.pkl'), asset_dict)
@@ -518,7 +482,7 @@ class HESTData:
         """Convert a HESTData sample to a scverse SpatialData object
         
         Args:
-            lazy_img (bool, optional): whenever to lazily load the image if not already loaded (i.e. if self.img is None). Defaults to True.
+            lazy_img (bool, optional): whenever to lazily load the image if not already loaded (e.g. self.wsi is of type OpenSlide or CuImage). Defaults to True.
 
         Returns:
             SpatialData: scverse SpatialData object
@@ -527,9 +491,7 @@ class HESTData:
         def read_hest_wsi(path):
             return pyvips.Image.tiffload(path).numpy().transpose((2, 0, 1))
     
-        if lazy_img and self.img is None:
-            if self.wsi is None:
-                raise ValueError('HESTData.wsi path to a wsi needs to be set to use the lazy_img feature of to_spatial_data')
+        if lazy_img and not (isinstance(self.wsi, np.ndarray)):
             
             with tifffile.TiffFile(self.wsi) as tif:
                 page = tif.pages[0]
@@ -539,13 +501,14 @@ class HESTData:
             
             img = from_delayed(delayed(read_hest_wsi)(self.wsi), shape=(height, width, 3), dtype=np.int8)
         else:
-            img = self.get_img()
+            img = self.wsi.numpy()
             arr = da.from_array(img)
             sp_img = SpatialImage(arr, dims=['c', 'y', 'x'], attrs={'transform': None})
         
         st = SpatialData({'fullres': sp_img}, table=self.adata)
         
         #TODO add CellViT
+        #TODO add tissue segmentation
         
         return st
     
@@ -599,9 +562,11 @@ class STHESTData(HESTData):
         super().__init__(adata, img, pixel_size, meta, cellvit_seg)
         
 class XeniumHESTData(HESTData):
-    def __init__(self, 
+
+    def __init__(
+        self, 
         adata: sc.AnnData,
-        img: Union[np.ndarray, str],
+        img: Union[np.ndarray, openslide.OpenSlide, CuImage],
         pixel_size: float,
         meta: Dict = {},
         cellvit_seg: Dict=None,
@@ -611,11 +576,14 @@ class XeniumHESTData(HESTData):
         transcript_df: pd.DataFrame=None
     ):
         """
+        class representing a single ST profile + its associated WSI image
+        
         Args:
-            adata (sc.AnnData): Spatial Transcriptomics data (pooled by patches) in a scanpy Anndata object
+            adata (sc.AnnData): Spatial Transcriptomics data in a scanpy Anndata object (pooled by patch for Xenium)
                 adata must contain a downscaled image in ['spatial']['ST']['images']['downscaled_fullres']
-                and the following collomns in adata.obs: ['array_col', 'array_row', 'in_tissue', 'pxl_row_in_fullres', 'pxl_col_in_fullres']
-            img (Union[np.ndarray, str]): Full resolution image corresponding to the ST data, if passed as a path (str) the image is lazily loaded
+                and the following columns in adata.obs: ['array_col', 'array_row', 'in_tissue', 'pxl_row_in_fullres', 'pxl_col_in_fullres']
+            img (Union[np.ndarray, openslide.OpenSlide, CuImage]): Full resolution image corresponding to the ST data, Openslide/CuImage are lazily loaded, use CuImage for GPU accelerated computation
+            pixel_size (float): pixel_size of WSI im um/px, this pixel size will be used to perform operations on the slide, such as patching and segmenting
             meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
             cellvit_seg (Dict): dictionary of cells in the CellViT .geojson format. Default: None
             xenium_nuc_seg (pd.DataFrame): content of a xenium nuclei contour file as a dataframe (nucleus_boundaries.parquet)
@@ -630,25 +598,41 @@ class XeniumHESTData(HESTData):
         self.cell_adata = cell_adata
         self.transcript_df = transcript_df
         
-    def save(self, path: str, pyramidal=True, bigtiff=False, plot_pxl_size=False):
+        
+    def save(self, path: str, save_img=True, pyramidal=True, bigtiff=False, plot_pxl_size=False):
         """Save a HESTData object to `path` as follows:
             - aligned_adata.h5ad (contains expressions for each spots + their location on the fullres image + a downscaled version of the fullres image)
             - metrics.json (contains useful metrics)
             - downscaled_fullres.jpeg (a downscaled version of the fullres image)
             - aligned_fullres_HE.tif (the full resolution image)
             - cells.geojson (cell segmentation if it exists)
+            - Optional: cells_xenium.geojson (if xenium cell segmentation is attached to this object)
+            - Optional: nuclei_xenium.geojson (if xenium cell segmentation is attached to this object)
+            - Optional: tissue_mask.jpg (grayscale image of the tissue segmentation if it exists)
+            - Optional: tissue_mask.pkl (main contours and contours of holes of the tissue segmentation if it exists)
 
         Args:
             path (str): save location
+            save_img (bool): whenever to save the image at all (can save a lot of time if set to False)
             pyramidal (bool, optional): whenever to save the full resolution image as pyramidal (can be slow to save, however it's sometimes necessary for loading large images in QuPath). Defaults to True.
             bigtiff (bool, optional): whenever the bigtiff image is more than 4.1GB. Defaults to False.
         """
-        super().save(path, pyramidal, bigtiff, plot_pxl_size)
+        super().save(path, save_img, pyramidal, bigtiff, plot_pxl_size)
         if self.cell_adata is not None:
             self.cell_adata.write_h5ad(os.path.join(path, 'aligned_cells.h5ad'))
         
         if self.transcript_df is not None:
             self.transcript_df.to_parquet(os.path.join(path, 'aligned_transcripts.parquet'))
+            
+        if self.xenium_nuc_seg is not None:
+            print('Saving Xenium nucleus boundaries... (can be slow)')
+            with open(os.path.join(path, 'nuclei_xenium.geojson'), 'w') as f:
+                json.dump(self.xenium_nuc_seg, f, indent=4)
+                
+        if self.xenium_cell_seg is not None:
+            print('Saving Xenium cells boundaries... (can be slow)')
+            with open(os.path.join(path, 'cells_xenium.geojson'), 'w') as f:
+                json.dump(self.xenium_cell_seg, f, indent=4)
             
             
         # TODO save segmentation

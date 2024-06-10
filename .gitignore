@@ -11,7 +11,8 @@ Makefile
 bench_data
 src/hest/bench/timm_ctp
 my_notebooks
-tests/
+tests/assets
+tests/output_tests
 figures/test_paul
 bench_data.zip
 old_bench_data

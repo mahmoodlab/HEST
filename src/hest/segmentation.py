@@ -14,7 +14,7 @@ from torchvision import models, transforms
 
 from hest.SegDataset import SegDataset
 from hest.utils import get_path_relative
-from hest.wsi import WSI
+from hest.wsi import WSI, WSIPatcher
 
 try:
     import openslide
@@ -25,10 +25,11 @@ import skimage.color as sk_color
 import skimage.filters as sk_filters
 import skimage.measure as sk_measure
 import skimage.morphology as sk_morphology
+from cucim import CuImage
 from tqdm import tqdm
 
 
-def segment_tissue_deep(img: Union[np.ndarray, openslide.OpenSlide], pixel_size_src, target_pxl_size=1, patch_size=512):
+def segment_tissue_deep(img: Union[np.ndarray, openslide.OpenSlide, CuImage, WSI], pixel_size_src, target_pxl_size=1, patch_size=512):
     
     # TODO fix overlap
     overlap=0
@@ -37,15 +38,20 @@ def segment_tissue_deep(img: Union[np.ndarray, openslide.OpenSlide], pixel_size_
     
     scale = pixel_size_src / target_pxl_size
     patch_size_src = round(patch_size / scale)
-    wsi = WSI(img, patch_size_src, overlap)
+    if isinstance(img, WSI):
+        wsi = img
+    else:
+        wsi = WSI(img)
     
     #lazy = isinstance(img, openslide.OpenSlide) or isinstance(img, CuImage)
     
     width, height = wsi.get_dimensions()
     
-    weights_path = get_path_relative(__file__, '../../models/deeplabv3_seg_v2.ckpt')
+    weights_path = get_path_relative(__file__, '../../models/deeplabv3_seg_v3.ckpt')
+    
+    patcher = WSIPatcher(wsi, patch_size_src)
 
-    cols, rows = wsi.get_cols_rows()
+    cols, rows = patcher.get_cols_rows()
     
     with tempfile.TemporaryDirectory() as tmpdirname:
         print('created temporary directory', tmpdirname)
@@ -54,7 +60,7 @@ def segment_tissue_deep(img: Union[np.ndarray, openslide.OpenSlide], pixel_size_
         # saves patches to temp dir
         for row in tqdm(range(rows)):
             for col in range(cols):
-                tile, pxl_x, pxl_y = wsi.get_tile(col, row)
+                tile, pxl_x, pxl_y = patcher.get_tile(col, row)
                 
                 tile = cv2.resize(tile, (patch_size, patch_size), interpolation=cv2.INTER_CUBIC)
 
@@ -179,9 +185,11 @@ def visualize_tissue_seg(
             hole_color=(0, 0, 255),
             line_thickness=5,
             target_width=1000,
-            view_slide_only=False,
             seg_display=True,
     ):
+        hole_fill_color = (0, 0, 0)
+    
+    
         wsi = WSI(img)
     
         width, height = wsi.get_dimensions()
@@ -211,7 +219,8 @@ def visualize_tissue_seg(
             ### Draw hole contours
             for cont in contour_holes:
                 cont = scale_contour_dim(cont, scale)
-                draw_cont(image=img, contours=cont, color=hole_color) 
+                draw_cont(image=img, contours=cont, color=hole_color)
+                draw_cont_fill(image=downscaled_mask, contours=cont, color=hole_fill_color)
 
         alpha = 0.4
         downscaled_mask = downscaled_mask

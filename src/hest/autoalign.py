@@ -108,7 +108,6 @@ def _get_orientation(box, boxes):
 
 def _resize_to_target(img):
     TARGET_PIXEL_EDGE = 1000
-    print('image size is ', img.shape)
     downscale_factor = TARGET_PIXEL_EDGE / np.max(img.shape)
     downscaled_fullres = imresize(img, downscale_factor)
     return downscaled_fullres, downscale_factor

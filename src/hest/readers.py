@@ -21,10 +21,10 @@ from .custom_readers import (GSE167096_to_adata, GSE180128_to_adata,
                              raw_count_to_adata, raw_counts_to_pixel)
 from .HESTData import (HESTData, STHESTData, VisiumHDHESTData, VisiumHESTData,
                        XeniumHESTData)
-from .utils import (SpotPacking, check_arg,
+from .utils import (SpotPacking, align_xenium_df, check_arg, df_morph_um_to_pxl,
                     find_biggest_img, find_first_file_endswith,
                     find_pixel_size_from_spot_coords, get_path_from_meta_row,
-                    helper_mex, load_image, metric_file_do_dict,
+                    helper_mex, load_image, metric_file_do_dict, read_10x_seg,
                     register_downscale_img)
 
 
@@ -903,7 +903,9 @@ class XeniumReader(Reader):
             alignment_file_path=alignment_path,
             feature_matrix_path=os.path.join(path, 'cell_feature_matrix.h5'), 
             transcripts_path=os.path.join(path, 'transcripts.parquet'),
-            cells_csv_path=os.path.join(path, 'cells.csv')
+            cells_path=os.path.join(path, 'cells.parquet'),
+            nucleus_bound_path=os.path.join(path, 'nucleus_boundaries.parquet'),
+            cell_bound_path=os.path.join(path, 'cell_boundaries.parquet')
         )
         
         return st_object
@@ -933,18 +935,10 @@ class XeniumReader(Reader):
         return adata, dict
     
     
-    def __align(self, alignment_file_path, pixel_size_morph, df_transcripts):
-        alignment_file = pd.read_csv(alignment_file_path, header=None)
-        alignment_matrix = alignment_file.values
-        #convert alignment matrix from pixel to um
-        alignment_matrix[0][2] *= pixel_size_morph
-        alignment_matrix[1][2] *= pixel_size_morph
-        he_to_morph_matrix = alignment_matrix
-        alignment_matrix = np.linalg.inv(alignment_matrix)
-        coords = np.column_stack((df_transcripts["x_location"].values, df_transcripts["y_location"].values, np.ones((len(df_transcripts),))))
-        aligned = (alignment_matrix @ coords.T).T
-        df_transcripts['y_location'] = aligned[:,1]
-        df_transcripts['x_location'] = aligned[:,0]
+    def __align(self, alignment_file_path, pixel_size_morph, df_transcripts, x_key='x_location', y_key='y_location'):
+
+        df_transcripts, he_to_morph_matrix, alignment_matrix = align_xenium_df(alignment_file_path, pixel_size_morph, df_transcripts, x_key, y_key)
+
         pixel_size_estimated = self.__xenium_estimate_pixel_size(pixel_size_morph, he_to_morph_matrix)    
         return df_transcripts, pixel_size_estimated, alignment_matrix
     
@@ -972,6 +966,57 @@ class XeniumReader(Reader):
             plt.savefig(os.path.join(cur_dir, 'gene_bar_plots', f'{gene_name}.png'))
             plt.close()  # Close the plot to free memory
         rcParams["figure.figsize"] = old_figsize
+        
+        
+    def __load_seg(self, path, type, alignment_file_path, pixel_size_morph):
+        raw_nuclei_df = pd.read_parquet(path)
+        
+        x_key = 'vertex_x'
+        y_key = 'vertex_y'
+        
+        aligned_nuclei_df, _, _ = align_xenium_df(alignment_file_path, pixel_size_morph, raw_nuclei_df, x_key=x_key, y_key=y_key)
+        
+        aligned_nuclei_df = df_morph_um_to_pxl(aligned_nuclei_df, x_key, y_key, pixel_size_morph)
+        
+        xenium_nuc_seg = read_10x_seg(aligned_nuclei_df, type)
+        
+        return xenium_nuc_seg
+        
+        
+    def __load_transcripts(self, transcripts_path, alignment_file_path, pixel_size_morph, dict):
+        df_transcripts = pd.read_parquet(transcripts_path)
+        
+        if alignment_file_path is not None:
+            print('found an alignment file, aligning transcripts...')
+            df_transcripts, pixel_size_estimated, _ = self.__align(alignment_file_path, pixel_size_morph, df_transcripts)
+            dict['pixel_size_um_estimated'] = pixel_size_estimated
+        else:
+            dict['pixel_size_um_estimated'] = pixel_size_morph
+            
+        transcript_df = df_transcripts
+        transcript_df['he_x'] = transcript_df['x_location'] / pixel_size_morph
+        transcript_df['he_y'] = transcript_df['y_location'] / pixel_size_morph
+        return transcript_df, dict
+    
+    
+    def __load_cells(self, feature_matrix_path, cells_path, alignment_file_path, pixel_size_morph, dict):
+        print('Reading cells...')
+        cell_adata = sc.read_10x_h5(feature_matrix_path)
+        df = pd.read_parquet(cells_path)
+        df.set_index(cell_adata.obs_names, inplace=True)
+        cell_adata.obs = df.copy()
+        
+        df_cells = cell_adata.obs[["x_centroid", "y_centroid"]].copy()
+        
+        if alignment_file_path is not None:
+            # convert cell coordinates from um in the morphology image to um in the H&E image
+            df_cells, _, _ = self.__align(alignment_file_path, pixel_size_morph, df_cells, x_key='x_centroid', y_key='y_centroid')
+        df_cells['he_x'] = df_cells['x_centroid'] / pixel_size_morph
+        df_cells['he_y'] = df_cells['y_centroid'] / pixel_size_morph
+        
+        cell_adata.obsm["spatial"] = df_cells[['he_x', 'he_y']].to_numpy()
+        dict['cells_under_tissue'] = len(cell_adata.obs)
+        return cell_adata, dict
     
     
     def read(
@@ -981,20 +1026,19 @@ class XeniumReader(Reader):
         alignment_file_path: str = None,
         feature_matrix_path: str = None, 
         transcripts_path: str = None,
-        cells_csv_path: str = None,
+        cells_path: str = None,
         plot_genes: bool = False,
+        nucleus_bound_path: str = None,
+        cell_bound_path: str = None,
         use_cache: bool = False
     ) -> XeniumHESTData:
-        #if not pseudo_visium and (feature_matrix_path is None or cells_csv_path is None):
-        #    raise ValueError('a feature_matrix_path needs to be specified if not using pseudo-visium pooling')
-        
-        #if pseudo_visium and feature_matrix_path is None or transcripts_path is None:
-        #    raise ValueError('a feature_matrix_path and a transcripts_path need to be specified if using pseudo-visium pooling')
-        
         
         cur_dir = os.path.dirname(transcripts_path)   
+            
         
-        img, pixel_size_embedded = load_image(img_path)
+        print("Loading the WSI... (can be slow for large images)")
+        #img, pixel_size_embedded = load_image(img_path)
+        img, pixel_size_embedded = np.ones((1000, 100, 3), dtype=np.uint8), 0.5
         
         dict = {}
         dict['pixel_size_um_embedded'] = pixel_size_embedded
@@ -1004,55 +1048,43 @@ class XeniumReader(Reader):
             pixel_size_morph = dict_exp['pixel_size']
         dict = {**dict, **dict_exp}
         
-        df_transcripts = pd.read_parquet(transcripts_path)
+        #if cell_bound_path is not None:
+        #    xenium_cell_seg = read_10x_seg(cell_bound_path, 'Cell')
+        if nucleus_bound_path is not None:
+            xenium_nuc_seg =  self.__load_seg(nucleus_bound_path, 'Nucleus', alignment_file_path, pixel_size_morph)
         
-        if alignment_file_path is not None:
-            print('found an alignment file, aligning transcripts...')
-            df_transcripts, pixel_size_estimated = self.__align(alignment_file_path, pixel_size_morph, df_transcripts)
-            dict['pixel_size_um_estimated'] = pixel_size_estimated
-        else:
-            dict['pixel_size_um_estimated'] = pixel_size_morph
-            
-        transcript_df = df_transcripts
-        transcript_df['he_x'] = transcript_df['x_location'] / pixel_size_morph
-        transcript_df['he_y'] = transcript_df['y_location'] / pixel_size_morph
+        print('Loading transcripts...')
+        df_transcripts, dict = self.__load_transcripts(transcripts_path, alignment_file_path, pixel_size_morph, dict)
         
                         
-        
+        print("Pooling xenium transcripts in pseudo-visium spots...")
         adata = xenium_to_pseudo_visium(df_transcripts, dict['pixel_size_um_estimated'], pixel_size_morph)
+        
         dict['spot_diameter'] = 55.
         dict['inter_spot_dist'] = 100.
         dict['spots_under_tissue'] = len(adata.obs)
         
         cell_adata = None
-        if feature_matrix_path is not None and cells_csv_path is not None:
-            cell_adata = sc.read_10x_h5(feature_matrix_path)
-            df = pd.read_csv(cells_csv_path)
-            df.set_index(cell_adata.obs_names, inplace=True)
-            cell_adata.obs = df.copy()
-            
-            df_cells = cell_adata.obs[["x_centroid", "y_centroid"]].copy()
-            
-            # convert cell coordinates to px on the H&E image
-            df_cells, _ = self.__align(alignment_file_path, pixel_size_morph, df_cells)
-            
-            cell_adata.obsm["spatial"] = df_cells.to_numpy()
-            dict['cells_under_tissue'] = len(cell_adata.obs)
-    
+        if feature_matrix_path is not None and cells_path is not None:
+            print('Reading cells...')
+            cell_adata, dict = self.__load_cells(feature_matrix_path, cells_path, alignment_file_path, pixel_size_morph, dict)
+
         register_downscale_img(adata, img, dict['pixel_size_um_estimated'])
 
         
         if plot_genes:
             self.__plot_genes(adata, cur_dir)
             
-
+            
         st_object = XeniumHESTData(
             adata, 
             img, 
             dict['pixel_size_um_estimated'], 
             dict, 
-            transcript_df=transcript_df,
-            cell_adata=cell_adata
+            transcript_df=df_transcripts,
+            cell_adata=cell_adata,
+            xenium_nuc_seg=xenium_nuc_seg,
+            #xenium_cell_seg=xenium_cell_seg
         )
         return st_object
     

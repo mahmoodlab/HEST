@@ -1,12 +1,14 @@
 import concurrent.futures
 import gzip
 import json
+import multiprocessing
 import os
 import shutil
 from cProfile import Profile
 from enum import Enum
 from pstats import SortKey, Stats
-from typing import List, Tuple
+from typing import List, Tuple, Union
+from joblib import Parallel, delayed
 
 import h5py
 import matplotlib.pyplot as plt
@@ -29,6 +31,108 @@ from tqdm import tqdm
 Image.MAX_IMAGE_PIXELS = 93312000000
 ALIGNED_HE_FILENAME = 'aligned_fullres_HE.tif'
 
+
+def df_morph_um_to_pxl(df, x_key, y_key, pixel_size_morph):
+    df[x_key] = df[x_key] / pixel_size_morph
+    df[y_key] = df[y_key] / pixel_size_morph
+    return df
+
+
+def align_xenium_df(alignment_file_path, pixel_size_morph, df_transcripts, x_key, y_key):
+    alignment_file = pd.read_csv(alignment_file_path, header=None)
+    alignment_matrix = alignment_file.values
+    #convert alignment matrix from pixel to um
+    alignment_matrix[0][2] *= pixel_size_morph
+    alignment_matrix[1][2] *= pixel_size_morph
+    he_to_morph_matrix = alignment_matrix
+    alignment_matrix = np.linalg.inv(alignment_matrix)
+    coords = np.column_stack((df_transcripts[x_key].values, df_transcripts[y_key].values, np.ones((len(df_transcripts),))))
+    aligned = (alignment_matrix @ coords.T).T
+    df_transcripts[y_key] = aligned[:,1]
+    df_transcripts[x_key] = aligned[:,0]
+    return df_transcripts, he_to_morph_matrix, alignment_matrix
+
+
+def chunk_sorted_df(df, nb_chunk):
+    l = len(df) // nb_chunk
+    arr = df['cell_id'].values
+    i = 0
+    coords = []
+    while i < len(df):
+        start = i
+        j = i + l
+        while j < len(df):
+            if arr[j] != arr[j - 1]:
+                break
+            j += 1
+        end = min(len(df), j)
+        coords.append((start, end))
+        i = j
+    
+    chunks = []
+    for start, end in coords:
+        chunks.append(df[start:end])
+    return chunks
+    
+
+
+def read_10x_seg(seg_file: Union[str, pd.DataFrame], type: str = 'Nucleus') -> list:
+    
+    color = {
+        'Cell': [
+            255,
+            0,
+            0
+        ],
+        'Nucleus': [
+            255,
+            159,
+            68
+        ]
+    }
+    
+    print(f"Converting 10x segmentation to geojson ({type})... (can take some time)")
+    if isinstance(seg_file, str):
+        df = pd.read_parquet(seg_file)
+    else:
+        df = seg_file
+
+    df['vertex_x'] = df['vertex_x'].astype(float).round(decimals=2)
+    df['vertex_y'] = df['vertex_y'].astype(float).round(decimals=2)
+    
+    df['combined'] = df[['vertex_x', 'vertex_y']].values.tolist()
+    df = df[['cell_id', 'combined']]
+    
+    df['cell_id'], _ = pd.factorize(df['cell_id'])
+    aggr_df = df.groupby('cell_id').agg({
+        'combined': list
+        }
+    )
+    
+    aggr_df['combined'] = [[x] for x in aggr_df['combined']]
+    
+    coords = list(aggr_df['combined'].values)
+    
+    coords = coords[:len(coords) // 100]
+    
+
+    cell = [{
+        'type': 'Feature',
+        'id': type + '-id',
+        'geometry': {
+            'type': 'MultiPolygon',
+            'coordinates': coords
+        },
+        "properties": {
+            "objectType": "annotation",
+            "classification": {
+                "name": type,
+                "color": color[type]
+            }
+        }
+    }]
+    
+    return cell
     
 
 def get_path_relative(file, path) -> str:
@@ -712,7 +816,6 @@ def register_downscale_img(adata: sc.AnnData, img: np.ndarray, pixel_size: float
     Returns:
         Tuple[np.ndarray, float]: downscaled image and it's downscale factor from full resolution
     """
-    print('image size is ', img.shape)
     downscale_factor = target_size / np.max(img.shape)
     downscaled_fullres = imresize(img, downscale_factor)
     

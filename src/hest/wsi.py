@@ -6,15 +6,21 @@ from openslide.deepzoom import DeepZoomGenerator
 
 
 class WSI:
-    def __init__(self, img, patch_size_src=512, overlap=0):
+    def __init__(self, img):
         self.img = img
+        
+        if not isinstance(img, openslide.OpenSlide) and not isinstance(img, CuImage) and not isinstance(img, np.ndarray):
+            raise ValueError(f"Invalid type for img {type(img)}")
         
         self.width, self.height = self.get_dimensions()
         
-        self.patch_size_src = patch_size_src
-        self.overlap = overlap
-        cols, rows = self.get_cols_rows()
         
+        
+    def numpy(self) -> np.ndarray:
+        self.img = self.get_thumbnail(self.width, self.height)
+        
+        return self.img
+
 
     def get_dimensions(self):
         img = self.img
@@ -26,41 +32,18 @@ class WSI:
             width, height = img.resolutions['level_dimensions'][0]
         return width, height
     
-    def get_cols_rows(self):
-        img = self.img
-        if isinstance(img, openslide.OpenSlide):
-            self.dz = DeepZoomGenerator(img, self.patch_size_src, self.overlap)
-            cols, rows = self.dz.level_tiles[-1]
-            self.nb_levels = len(self.dz.level_tiles)
-        elif isinstance(img, CuImage) or isinstance(img, np.ndarray):
-            cols, rows = round(np.ceil((self.width - self.overlap / 2) / (self.patch_size_src - self.overlap / 2))), round(np.ceil((self.height - self.overlap / 2) / (self.patch_size_src - self.overlap / 2)))
-        return cols, rows
     
-    def get_tile(self, col, row):
+    def read_region(self, location, size) -> np.ndarray:
         img = self.img
         if isinstance(img, openslide.OpenSlide):
-            raw_tile = self.dz.get_tile(self.nb_levels - 1, (col, row))
-            addr = self.dz.get_tile_coordinates(self.nb_levels - 1, (col, row))
-            pxl_x, pxl_y = addr[0]
+            return np.array(img.read_region(location, 0, size))
         elif isinstance(img, CuImage):
-            x_begin = round(col * (self.patch_size_src - self.overlap))
-            y_begin = round(row * (self.patch_size_src - self.overlap))
-            raw_tile = self.img.read_region(location=(x_begin, y_begin), level=0, size=(self.patch_size_src + self.overlap, self.patch_size_src + self.overlap))
-            pxl_x = x_begin
-            pxl_y = y_begin
+            return np.array(img.read_region(location=location, level=0, size=size))
         elif isinstance(img, np.ndarray):
-            x_begin = round(col * (self.patch_size_src - self.overlap))
-            x_end = min(x_begin + self.patch_size_src + self.overlap, self.width)
-            y_begin = round(row * (self.patch_size_src - self.overlap))
-            y_end = min(y_begin + self.patch_size_src + self.overlap, self.height)
-            tmp_tile = np.zeros((self.patch_size_src, self.patch_size_src, 3), dtype=np.uint8)
-            tmp_tile[:y_end-y_begin, :x_end-x_begin] += img[y_begin:y_end, x_begin:x_end]
-            pxl_x, pxl_y = x_begin, y_begin
-            raw_tile = tmp_tile
-            
-        tile = np.array(raw_tile)
-        assert pxl_x < self.width and pxl_y < self.height
-        return tile, pxl_x, pxl_y
+            x_start, y_start = location[0], location[1]
+            x_size, y_size = size[0], size[1]
+            return img[y_start:y_start + y_size, x_start:x_start + x_size]
+    
     
     def get_thumbnail(self, width, height):
         img = self.img
@@ -83,3 +66,48 @@ class WSI:
             
         return thumbnail
         
+        
+class WSIPatcher:
+    def __init__(self, wsi: WSI, patch_size_src):
+        self.wsi = wsi
+        self.patch_size_src = patch_size_src
+        self.overlap = 0
+        self.width, self.height = self.wsi.get_dimensions()
+        
+        
+    def get_cols_rows(self):
+        img = self.wsi.img
+        if isinstance(img, openslide.OpenSlide):
+            self.dz = DeepZoomGenerator(img, self.patch_size_src, self.overlap)
+            cols, rows = self.dz.level_tiles[-1]
+            self.nb_levels = len(self.dz.level_tiles)
+        elif isinstance(img, CuImage) or isinstance(img, np.ndarray):
+            cols, rows = round(np.ceil((self.width - self.overlap / 2) / (self.patch_size_src - self.overlap / 2))), round(np.ceil((self.height - self.overlap / 2) / (self.patch_size_src - self.overlap / 2)))
+        return cols, rows
+    
+    
+    def get_tile(self, col, row):
+        img = self.wsi.img
+        if isinstance(img, openslide.OpenSlide):
+            raw_tile = self.dz.get_tile(self.nb_levels - 1, (col, row))
+            addr = self.dz.get_tile_coordinates(self.nb_levels - 1, (col, row))
+            pxl_x, pxl_y = addr[0]
+        elif isinstance(img, CuImage):
+            x_begin = round(col * (self.patch_size_src - self.overlap))
+            y_begin = round(row * (self.patch_size_src - self.overlap))
+            raw_tile = img.read_region(location=(x_begin, y_begin), level=0, size=(self.patch_size_src + self.overlap, self.patch_size_src + self.overlap))
+            pxl_x = x_begin
+            pxl_y = y_begin
+        elif isinstance(img, np.ndarray):
+            x_begin = round(col * (self.patch_size_src - self.overlap))
+            x_end = min(x_begin + self.patch_size_src + self.overlap, self.width)
+            y_begin = round(row * (self.patch_size_src - self.overlap))
+            y_end = min(y_begin + self.patch_size_src + self.overlap, self.height)
+            tmp_tile = np.zeros((self.patch_size_src, self.patch_size_src, 3), dtype=np.uint8)
+            tmp_tile[:y_end-y_begin, :x_end-x_begin] += img[y_begin:y_end, x_begin:x_end]
+            pxl_x, pxl_y = x_begin, y_begin
+            raw_tile = tmp_tile
+            
+        tile = np.array(raw_tile)
+        assert pxl_x < self.width and pxl_y < self.height
+        return tile, pxl_x, pxl_y
