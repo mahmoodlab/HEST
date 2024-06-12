@@ -40,8 +40,8 @@ from spatial_image import SpatialImage
 from spatialdata import SpatialData
 from tqdm import tqdm
 
-from .SegDataset import SegDataset
-from .segmentation import (apply_otsu_thresholding, keep_largest_area,
+from .segmentation.SegDataset import SegDataset
+from .segmentation.segmentation import (apply_otsu_thresholding, keep_largest_area,
                            mask_to_contours, save_pkl, scale_contour_dim,
                            segment_tissue_deep, visualize_tissue_seg)
 from .utils import (ALIGNED_HE_FILENAME, check_arg, get_path_from_meta_row,
@@ -109,6 +109,9 @@ class HESTData:
         self._verify_format(adata)
         self.pixel_size = pixel_size
         self.cellvit_seg = cellvit_seg
+        self.tissue_mask = None
+        self.contours_holes = None
+        self.contours_tissue = None
         
         if 'total_counts' not in self.adata.var_names:
             sc.pp.calculate_qc_metrics(self.adata, inplace=True)
@@ -129,11 +132,12 @@ class HESTData:
         return rep
         
     
-    def save_spatial_plot(self, save_path: str, key='total_counts', pl_kwargs={}):
+    def save_spatial_plot(self, save_path: str, name: str='', key='total_counts', pl_kwargs={}):
         """Save the spatial plot from that STObject
 
         Args:
             save_path (str): path to a directory where the spatial plot will be saved
+            name (str): save plot as {name}spatial_plots.png
             key (str): feature to plot. Default: 'total_counts'
             pl_kwargs(Dict): arguments for sc.pl.spatial
         """
@@ -141,7 +145,7 @@ class HESTData:
              
         sc.pl.spatial(self.adata, show=None, img_key="downscaled_fullres", color=[key], title=f"in_tissue spots", **pl_kwargs)
         
-        filename = f"spatial_plots.png"
+        filename = f"{name}spatial_plots.png"
         
         # Save the figure
         plt.savefig(os.path.join(save_path, filename))
@@ -418,7 +422,7 @@ class HESTData:
             attr_dict['img'] = {'patch_size': patch_size_pxl,
                                 'factor': scale_factor}
 
-            initsave_hdf5(output_datafile, asset_dict, attr_dict, mode=mode_HE, verbose=1)
+            initsave_hdf5(output_datafile, asset_dict, attr_dict, mode=mode_HE)
             mode_HE = 'a'
 
         
@@ -489,6 +493,22 @@ class HESTData:
 
         asset_dict = self.get_tissue_contours()
         save_pkl(os.path.join(save_dir, f'{name}_mask.pkl'), asset_dict)
+        
+    
+    def save_vis(self, save_dir, name) -> None:
+        
+        vis = visualize_tissue_seg(
+            self.wsi.img,
+            self.tissue_mask,
+            self.contours_tissue,
+            self.contours_holes,
+            line_color=(0, 255, 0),
+            hole_color=(0, 0, 255),
+            line_thickness=5,
+            target_width=1000,
+            seg_display=True,
+        )
+        vis.save(os.path.join(save_dir, f'{name}_vis.jpg'))
 
 
     def to_spatial_data(self, lazy_img=True) -> SpatialData:

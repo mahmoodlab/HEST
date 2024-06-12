@@ -1,4 +1,5 @@
 import os
+from typing import List
 import unittest
 from os.path import join as _j
 
@@ -23,13 +24,13 @@ class TestHESTData(unittest.TestCase):
     def setUpClass(self):
         self.cur_dir = get_path_relative(__file__, '')
         cur_dir = self.cur_dir
-        self.output_dir = _j(cur_dir, 'output_tests')
+        self.output_dir = _j(cur_dir, 'output_tests/hestdata_tests')
         
         # Create an instance of HESTData
         adata = sc.read_h5ad(_j(cur_dir, './assets/SPA154.h5ad'))
         pixel_size = 0.9206
         
-        self.st_objects = []
+        self.st_objects: List[HESTData] = []
                     
         
         if CuImage is not None:
@@ -37,33 +38,40 @@ class TestHESTData(unittest.TestCase):
             self.st_objects.append(HESTData(adata, img, pixel_size))
         
         img = openslide.OpenSlide(_j(cur_dir, './assets/SPA154.tif'))
-        self.st_objects.append(HESTData(adata, img, pixel_size))
+        self.st_objects.append({'name': 'numpy', 'st': HESTData(adata, img, pixel_size)})
         
         if CuImage is not None:
             img = WSI(CuImage(_j(cur_dir, './assets/SPA154.tif'))).numpy()
-            self.st_objects.append(HESTData(adata, img, pixel_size))
+            self.st_objects.append({'name': 'cuimage', 'st': HESTData(adata, img, pixel_size)})
         else:
             img = WSI(openslide.OpenSlide(_j(cur_dir, './assets/SPA154.tif'))).numpy()
-            self.st_objects.append(HESTData(adata, img, pixel_size))    
+            self.st_objects.append({'name': 'openslide', 'st': HESTData(adata, img, pixel_size)})    
         
     def test_tissue_seg(self):
         for idx, st in enumerate(self.st_objects):
+            st = st['st']
             with self.subTest(st_object=idx):
                 st.compute_mask(method='deep')
                 st.save_tissue_seg_jpg(self.output_dir, name=f'deep_{idx}')
                 st.save_tissue_seg_pkl(self.output_dir, name=f'deep_{idx}')
+                st.save_vis(self.output_dir, name=f'deep_{idx}')
                 
                 st.compute_mask(method='otsu')
                 st.save_tissue_seg_jpg(self.output_dir, name=f'otsu_{idx}')
                 st.save_tissue_seg_pkl(self.output_dir, name=f'otsu_{idx}')
+                st.save_vis(self.output_dir, name=f'otsu_{idx}')
 
     def test_patching(self):
-        for idx, st in enumerate(self.st_objects):
+        for idx, conf in enumerate(self.st_objects):
+            st = conf['st']
             with self.subTest(st_object=idx):
-                st.dump_patches(self.output_dir)
+                name = ''
+                name += conf['name']
+                st.dump_patches(self.output_dir, name=name)
 
     def test_wsi(self):
         for idx, st in enumerate(self.st_objects):
+            st = st['st']
             with self.subTest(st_object=idx):
                 os.makedirs(_j(self.output_dir, f'test_save_{idx}'), exist_ok=True)
                 st.save(_j(self.output_dir, f'test_save_{idx}'), save_img=True)

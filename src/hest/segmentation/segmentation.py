@@ -12,7 +12,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 from torchvision import models, transforms
 
-from hest.SegDataset import SegDataset
+from hest.segmentation.SegDataset import SegDataset
 from hest.utils import get_path_relative
 from hest.wsi import WSI, WSIPatcher
 
@@ -51,7 +51,7 @@ def segment_tissue_deep(img: Union[np.ndarray, openslide.OpenSlide, 'CuImage', W
     
     width, height = wsi.get_dimensions()
     
-    weights_path = get_path_relative(__file__, '../../models/deeplabv3_seg_v3.ckpt')
+    weights_path = get_path_relative(__file__, '../../../models/deeplabv3_seg_v3.ckpt')
     
     patcher = WSIPatcher(wsi, patch_size_src)
 
@@ -204,6 +204,8 @@ def visualize_tissue_seg(
         
         img = wsi.get_thumbnail(round(width * downsample), round(height * downsample))
         #img = cv2.resize(img, (round(width * downsample), round(height * downsample)))
+        if tissue_mask is None and contours_tissue is None and contour_holes is None:
+            return Image.fromarray(img)
 
         downscaled_mask = cv2.resize(tissue_mask, (img.shape[1], img.shape[0]))
         downscaled_mask = np.expand_dims(downscaled_mask, axis=-1)

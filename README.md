@@ -162,20 +162,15 @@ st.save(save_dir, pyramidal=True)
 
 ## Patching and otsu-based tissue segmentation
 
-Note that by default the whole WSI image is loaded in RAM to speed up the patching process,
-if the image is too large to be loaded in RAM, you can pass `load_in_memory=False` but the patching will be slower.
-
 ```python
 # By default the whole WSI image is loaded in RAM 
 # to speed up the patching process
-load_in_memory = True
 
 st.dump_patches(
     patch_save_dir,
     'demo',
     target_patch_size=224,
-    target_pixel_size=0.5,
-    load_in_memory=load_in_memory
+    target_pixel_size=0.5
 )
 ```
 
