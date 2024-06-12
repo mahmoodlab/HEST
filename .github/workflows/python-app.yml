@@ -26,7 +26,7 @@ jobs:
 
     - name: Download test assets
       run: |
-        wget "https://www.dropbox.com/scl/fi/55xel2c2mitlvce0msukr/assets.zip?rlkey=dfskodyyqc99cikzzboqlfx4p&dl=1"
+        wget -O assets.zip "https://www.dropbox.com/scl/fi/55xel2c2mitlvce0msukr/assets.zip?rlkey=dfskodyyqc99cikzzboqlfx4p&dl=1"
     
     - name: Unzip test assets
       run: |
@@ -38,7 +38,7 @@ jobs:
     - name: Install apt dependencies
       run: |
         sudo apt install libvips libvips-dev openslide-tools
-        
+
     - name: Run reader tests
       run: |
         python reader_tests.py
