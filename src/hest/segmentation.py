@@ -25,11 +25,16 @@ import skimage.color as sk_color
 import skimage.filters as sk_filters
 import skimage.measure as sk_measure
 import skimage.morphology as sk_morphology
-from cucim import CuImage
+try:
+    from cucim import CuImage
+except ImportError:
+    CuImage = None
+    print("CuImage is not available. Ensure you have a GPU and cucim installed to use GPU acceleration.")
+
 from tqdm import tqdm
 
 
-def segment_tissue_deep(img: Union[np.ndarray, openslide.OpenSlide, CuImage, WSI], pixel_size_src, target_pxl_size=1, patch_size=512):
+def segment_tissue_deep(img: Union[np.ndarray, openslide.OpenSlide, 'CuImage', WSI], pixel_size_src, target_pxl_size=1, patch_size=512):
     
     # TODO fix overlap
     overlap=0
@@ -43,7 +48,6 @@ def segment_tissue_deep(img: Union[np.ndarray, openslide.OpenSlide, CuImage, WSI
     else:
         wsi = WSI(img)
     
-    #lazy = isinstance(img, openslide.OpenSlide) or isinstance(img, CuImage)
     
     width, height = wsi.get_dimensions()
     

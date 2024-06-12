@@ -11,7 +11,11 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import tifffile
-from cucim import CuImage
+try:
+    from cucim import CuImage
+except ImportError:
+    CuImage = None
+    print("CuImage is not available. Ensure you have a GPU and cucim installed to use GPU acceleration.")
 
 from hest.wsi import WSI
 
@@ -81,7 +85,7 @@ class HESTData:
     def __init__(
         self, 
         adata: sc.AnnData,
-        img: Union[np.ndarray, openslide.OpenSlide, CuImage],
+        img: Union[np.ndarray, openslide.OpenSlide, 'CuImage'],
         pixel_size: float,
         meta: Dict = {},
         cellvit_seg: Dict=None
@@ -575,7 +579,7 @@ class XeniumHESTData(HESTData):
     def __init__(
         self, 
         adata: sc.AnnData,
-        img: Union[np.ndarray, openslide.OpenSlide, CuImage],
+        img: Union[np.ndarray, openslide.OpenSlide, 'CuImage'],
         pixel_size: float,
         meta: Dict = {},
         cellvit_seg: Dict=None,
@@ -649,7 +653,7 @@ class XeniumHESTData(HESTData):
 
 def read_HESTData(
     adata_path: str, 
-    img: Union[str, np.ndarray, openslide.OpenSlide, CuImage], 
+    img: Union[str, np.ndarray, openslide.OpenSlide, 'CuImage'], 
     metrics_path: str
 ) -> HESTData:
     """ Read a HEST sample from disk
@@ -666,7 +670,10 @@ def read_HESTData(
     """
     
     if isinstance(img, str):
-        img = CuImage(img)
+        if CuImage is not None:
+            img = CuImage(img)
+        else:
+            img = openslide.OpenSlide(img)
     
     
     adata = sc.read_h5ad(adata_path)

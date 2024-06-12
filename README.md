@@ -30,7 +30,16 @@ conda activate hest
 pip install -e .
 ```
 
-additional dependencies (for WSI manipulation):
+#### additional dependencies (GPU acceleration):
+If a GPU is available on your machine, it is strongly recommended to install [cucim](https://docs.rapids.ai/install) on your conda environment. (hest was tested with `cucim-cu12==24.4.0` and `CUDA 12.1`)
+```
+pip install \
+    --extra-index-url=https://pypi.nvidia.com \
+    cudf-cu12==24.6.* dask-cudf-cu12==24.6.* cucim-cu12==24.6.* \
+    raft-dask-cu12==24.6.*
+```
+
+#### additional dependencies (for WSI manipulation):
 ```
 apt install libvips libvips-dev openslide-tools
 ```
