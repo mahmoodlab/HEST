@@ -69,7 +69,7 @@ class HESTData:
             raise ValueError('Downscaled image missing in adata.obs')
         
         features = adata.obs.columns
-        required_features = ['array_col', 'array_row', 'in_tissue', 'pxl_row_in_fullres', 'pxl_col_in_fullres']
+        required_features = []
         missing = []
         for req in required_features:
             if not req in features:
@@ -92,7 +92,6 @@ class HESTData:
         Args:
             adata (sc.AnnData): Spatial Transcriptomics data in a scanpy Anndata object
                 adata must contain a downscaled image in ['spatial']['ST']['images']['downscaled_fullres']
-                and the following columns in adata.obs: ['array_col', 'array_row', 'in_tissue', 'pxl_row_in_fullres', 'pxl_col_in_fullres']
             img (Union[np.ndarray, openslide.OpenSlide, CuImage]): Full resolution image corresponding to the ST data, Openslide/CuImage are lazily loaded, use CuImage for GPU accelerated computation
             pixel_size (float): pixel_size of WSI im um/px, this pixel size will be used to perform operations on the slide, such as patching and segmenting
             meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
@@ -451,7 +450,8 @@ class HESTData:
     
 
     def save_tissue_seg_jpg(self, save_dir: str, name: str = 'hest') -> None:
-        """Save tissue segmentation as a greyscale .jpg file
+        """Save tissue segmentation as a greyscale .jpg file, downscale the tissue mask such that the width 
+        and the height are less than 40k pixels
 
         Args:
             save_dir (str): path to save directory
@@ -460,7 +460,16 @@ class HESTData:
         
         self.__verify_mask()
         
-        img = Image.fromarray(self.tissue_mask)
+        MAX_EDGE = 40000
+        
+        longuest_edge = max(self.tissue_mask.shape[0], self.tissue_mask.shape[1])
+        img = self.tissue_mask
+        if longuest_edge > MAX_EDGE:
+            downscaled = MAX_EDGE / longuest_edge
+            width, height = self.tissue_mask.shape[1], self.tissue_mask.shape[0]
+            img = cv2.resize(img, (round(downscaled * width), round(downscaled * height)))
+        
+        img = Image.fromarray(img)
         img.save(os.path.join(save_dir, f'{name}_mask.jpg'))
         
             
@@ -535,7 +544,7 @@ class VisiumHDHESTData(HESTData):
         Args:
             adata (sc.AnnData): Spatial Transcriptomics data in a scanpy Anndata object
                 adata must contain a downscaled image in ['spatial']['ST']['images']['downscaled_fullres']
-                and the following collomns in adata.obs: ['array_col', 'array_row', 'in_tissue', 'pxl_row_in_fullres', 'pxl_col_in_fullres']
+            pixel_size (float): pixel_size of WSI im um/px, this pixel size will be used to perform operations on the slide, such as patching and segmenting
             img (Union[np.ndarray, str]): Full resolution image corresponding to the ST data, if passed as a path (str) the image is lazily loaded
             meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
             cellvit_seg (Dict): dictionary of cells in the CellViT .geojson format. Default: None
@@ -554,7 +563,7 @@ class STHESTData(HESTData):
         Args:
             adata (sc.AnnData): Spatial Transcriptomics data in a scanpy Anndata object
                 adata must contain a downscaled image in ['spatial']['ST']['images']['downscaled_fullres']
-                and the following collomns in adata.obs: ['array_col', 'array_row', 'in_tissue', 'pxl_row_in_fullres', 'pxl_col_in_fullres']
+            pixel_size (float): pixel_size of WSI im um/px, this pixel size will be used to perform operations on the slide, such as patching and segmenting
             img (Union[np.ndarray, str]): Full resolution image corresponding to the ST data, if passed as a path (str) the image is lazily loaded
             meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
             cellvit_seg (Dict): dictionary of cells in the CellViT .geojson format. Default: None
@@ -581,7 +590,6 @@ class XeniumHESTData(HESTData):
         Args:
             adata (sc.AnnData): Spatial Transcriptomics data in a scanpy Anndata object (pooled by patch for Xenium)
                 adata must contain a downscaled image in ['spatial']['ST']['images']['downscaled_fullres']
-                and the following columns in adata.obs: ['array_col', 'array_row', 'in_tissue', 'pxl_row_in_fullres', 'pxl_col_in_fullres']
             img (Union[np.ndarray, openslide.OpenSlide, CuImage]): Full resolution image corresponding to the ST data, Openslide/CuImage are lazily loaded, use CuImage for GPU accelerated computation
             pixel_size (float): pixel_size of WSI im um/px, this pixel size will be used to perform operations on the slide, such as patching and segmenting
             meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
@@ -639,7 +647,28 @@ class XeniumHESTData(HESTData):
         
 
 
-def read_HESTData(adata_path: str, img: Union[np.ndarray, str], metrics_path: str) -> HESTData:
+def read_HESTData(
+    adata_path: str, 
+    img: Union[str, np.ndarray, openslide.OpenSlide, CuImage], 
+    metrics_path: str
+) -> HESTData:
+    """ Read a HEST sample from disk
+
+    Args:
+        adata_path (str): path to .h5ad adata file containing ST data the 
+            adata object must contain a downscaled image in ['spatial']['ST']['images']['downscaled_fullres']
+        img (Union[str, np.ndarray, openslide.OpenSlide, CuImage]): path to a full resolution image (if passed as str) or full resolution image corresponding to the ST data, Openslide/CuImage are lazily loaded, use CuImage for GPU accelerated computation
+        pixel_size (float): pixel_size of WSI im um/px, this pixel size will be used to perform operations on the slide, such as patching and segmenting
+        metrics_path (str): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
+
+    Returns:
+        HESTData: HESTData object
+    """
+    
+    if isinstance(img, str):
+        img = CuImage(img)
+    
+    
     adata = sc.read_h5ad(adata_path)
     with open(metrics_path) as metrics_f:     
         metrics = json.load(metrics_f)

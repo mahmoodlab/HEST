@@ -113,26 +113,33 @@ def read_10x_seg(seg_file: Union[str, pd.DataFrame], type: str = 'Nucleus') -> l
     
     coords = list(aggr_df['combined'].values)
     
-    coords = coords[:len(coords) // 100]
-    
+    ## Shard the cells in n groups to speed up reading in QuPath
+    n = 10
+    l = round(np.ceil(len(coords) // n))
 
-    cell = [{
-        'type': 'Feature',
-        'id': type + '-id',
-        'geometry': {
-            'type': 'MultiPolygon',
-            'coordinates': coords
-        },
-        "properties": {
-            "objectType": "annotation",
-            "classification": {
-                "name": type,
-                "color": color[type]
+    cells = []
+    for i in range(n):
+        start, end = i * l, (i + 1) * l
+        end = min(end, len(coords))
+
+        cell = {
+            'type': 'Feature',
+            'id': type + '-id-' + str(i),
+            'geometry': {
+                'type': 'MultiPolygon',
+                'coordinates': coords[start:end]
+            },
+            "properties": {
+                "objectType": "annotation",
+                "classification": {
+                    "name": type + ' ' + str(i),
+                    "color": color[type]
+                }
             }
         }
-    }]
+        cells.append(cell)
     
-    return cell
+    return cells
     
 
 def get_path_relative(file, path) -> str:
@@ -835,7 +842,7 @@ def _sample_id_to_filename(id):
     return id + '.tif'            
 
             
-def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal: bool, cp_pixel_vis: bool, cp_adata: bool):
+def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal: bool, cp_pixel_vis: bool, cp_adata: bool, cp_meta: bool):
     """ Internal use method, to transfer images to a `release` folder (`dest`)"""
     try:
         path = get_path_from_meta_row(row)
@@ -851,8 +858,8 @@ def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal:
     if not os.path.exists(path_fullres):
         print(f"couldn't find {path}")
         return
-    print(f"create pyramidal tiff for {row['id']}")
     if cp_pyramidal:
+        print(f"create pyramidal tiff for {row['id']}")
         src_pyramidal = os.path.join(path, 'aligned_fullres_HE.tif')
         dst_pyramidal = os.path.join(dest, 'pyramidal', _sample_id_to_filename(row['id']))
         os.makedirs(os.path.join(dest, 'pyramidal'), exist_ok=True)
@@ -861,6 +868,12 @@ def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal:
         #bigtiff_option = '' if isinstance(row['bigtiff'], float) or not row['bigtiff']  else '--bigtiff'
         #vips_pyr_cmd = f'vips tiffsave "{path_fullres}" "{dst}" --pyramid --tile --tile-width=256 --tile-height=256 --compression=deflate {bigtiff_option}'
         #subprocess.call(vips_pyr_cmd, shell=True)
+        
+    if cp_meta:
+        path_metrics = os.path.join(path, 'metrics.json')
+        os.makedirs(os.path.join(dest, 'metrics'), exist_ok=True)
+        path_dest_metrics = os.path.join(dest, 'metrics', row['id'] + '.json')
+        shutil.copy(path_metrics, path_dest_metrics)
     if cp_downscaled:
         path_downscaled = os.path.join(path, 'downscaled_fullres.jpeg')
         os.makedirs(os.path.join(dest, 'downscaled'), exist_ok=True)
@@ -886,16 +899,15 @@ def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal:
         shutil.copy(path_adata, path_dest_adata)        
         
             
-def copy_processed_images(dest: str, meta_df: pd.DataFrame, cp_spatial=True, cp_downscaled=True, cp_pyramidal=True, cp_pixel_vis=True, cp_adata=True, n_job=6):
+def copy_processed_images(dest: str, meta_df: pd.DataFrame, cp_spatial=True, cp_downscaled=True, cp_pyramidal=True, cp_pixel_vis=True, cp_adata=True, cp_meta=True, n_job=6):
     """ Internal use method, to transfer images to a `release` folder (`dest`)"""
     with concurrent.futures.ThreadPoolExecutor(max_workers=n_job) as executor:
         # Submit tasks to the executor
-        future_results = [executor.submit(_process_row, dest, row, cp_downscaled, cp_spatial, cp_pyramidal, cp_pixel_vis, cp_adata) for _, row in meta_df.iterrows()]
+        future_results = [executor.submit(_process_row, dest, row, cp_downscaled, cp_spatial, cp_pyramidal, cp_pixel_vis, cp_adata, cp_meta) for _, row in meta_df.iterrows()]
 
         # Retrieve results as they complete
-        for future in concurrent.futures.as_completed(future_results):
+        for future in tqdm(concurrent.futures.as_completed(future_results), total=len(meta_df)):
             result = future.result()
-            print(result)  # Example: Print the processed result
     
 
 # taken from https://github.com/scverse/anndata/issues/595
@@ -1001,7 +1013,6 @@ def load_image(img_path: str) -> Tuple[np.ndarray, float]:
         if 'XResolution' in my_img.pages[0].tags and my_img.pages[0].tags['XResolution'].value[0] != 0 and 'ResolutionUnit' in my_img.pages[0].tags:
             # result in micrometers per pixel
             factor = unit_to_micrometers[my_img.pages[0].tags['ResolutionUnit'].value]
-            print('ResolutionUnit: ', my_img.pages[0].tags['ResolutionUnit'].value)
             pixel_size_embedded = (my_img.pages[0].tags['XResolution'].value[1] / my_img.pages[0].tags['XResolution'].value[0]) * factor
     else:
         img = np.array(Image.open(img_path))

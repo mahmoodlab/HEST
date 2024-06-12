@@ -1000,7 +1000,6 @@ class XeniumReader(Reader):
     
     
     def __load_cells(self, feature_matrix_path, cells_path, alignment_file_path, pixel_size_morph, dict):
-        print('Reading cells...')
         cell_adata = sc.read_10x_h5(feature_matrix_path)
         df = pd.read_parquet(cells_path)
         df.set_index(cell_adata.obs_names, inplace=True)
@@ -1037,8 +1036,7 @@ class XeniumReader(Reader):
             
         
         print("Loading the WSI... (can be slow for large images)")
-        #img, pixel_size_embedded = load_image(img_path)
-        img, pixel_size_embedded = np.ones((1000, 100, 3), dtype=np.uint8), 0.5
+        img, pixel_size_embedded = load_image(img_path)
         
         dict = {}
         dict['pixel_size_um_embedded'] = pixel_size_embedded
@@ -1050,8 +1048,8 @@ class XeniumReader(Reader):
         
         #if cell_bound_path is not None:
         #    xenium_cell_seg = read_10x_seg(cell_bound_path, 'Cell')
-        if nucleus_bound_path is not None:
-            xenium_nuc_seg =  self.__load_seg(nucleus_bound_path, 'Nucleus', alignment_file_path, pixel_size_morph)
+        #if nucleus_bound_path is not None:
+        #    xenium_nuc_seg =  self.__load_seg(nucleus_bound_path, 'Nucleus', alignment_file_path, pixel_size_morph)
         
         print('Loading transcripts...')
         df_transcripts, dict = self.__load_transcripts(transcripts_path, alignment_file_path, pixel_size_morph, dict)
@@ -1083,7 +1081,7 @@ class XeniumReader(Reader):
             dict, 
             transcript_df=df_transcripts,
             cell_adata=cell_adata,
-            xenium_nuc_seg=xenium_nuc_seg,
+            #xenium_nuc_seg=xenium_nuc_seg,
             #xenium_cell_seg=xenium_cell_seg
         )
         return st_object
@@ -1104,7 +1102,7 @@ def reader_factory(path: str) -> Reader:
         raise NotImplementedError('')
         
     
-def read_and_save(path: str, save_plots=True, plot_genes=False, pyramidal=True, bigtiff=False):
+def read_and_save(path: str, save_plots=True, plot_genes=False, pyramidal=True, bigtiff=False, plot_pxl_size=False):
     """For internal use, determine the appropriate reader based on the raw data path, and
     automatically process the data at that location, then the processed files are dumped
     to processed/
@@ -1118,10 +1116,11 @@ def read_and_save(path: str, save_plots=True, plot_genes=False, pyramidal=True, 
     print(f'Reading from {path}...')
     reader = reader_factory(path)
     st_object = reader.auto_read(path)
+    print('Loaded object:')
     print(st_object)
     save_path = os.path.join(path, 'processed')
     os.makedirs(save_path, exist_ok=True)
-    st_object.save(save_path, pyramidal, bigtiff=bigtiff)
+    st_object.save(save_path, pyramidal, bigtiff=bigtiff, plot_pxl_size=plot_pxl_size)
     if save_plots:
         st_object.save_spatial_plot(save_path)
     if plot_genes:
@@ -1205,4 +1204,4 @@ def process_meta_df(meta_df, save_spatial_plots=True, plot_genes=False, pyramida
     for _, row in tqdm(meta_df.iterrows(), total=len(meta_df)):
         path = get_path_from_meta_row(row)
         bigtiff = not(isinstance(row['bigtiff'], float) or row['bigtiff'] == 'FALSE')
-        _ = read_and_save(path, save_plots=save_spatial_plots, plot_genes=plot_genes, pyramidal=pyramidal, bigtiff=bigtiff)
+        _ = read_and_save(path, save_plots=save_spatial_plots, plot_genes=plot_genes, pyramidal=pyramidal, bigtiff=bigtiff, plot_pxl_size=True)
