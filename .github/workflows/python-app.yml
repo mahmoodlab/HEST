@@ -38,9 +38,7 @@ jobs:
     - name: Install apt dependencies
       run: |
         sudo apt install libvips libvips-dev openslide-tools
-
-  test:
-
+        
     - name: Run reader tests
       run: |
         python reader_tests.py
