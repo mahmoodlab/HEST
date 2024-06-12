@@ -28,6 +28,10 @@ jobs:
       run: |
         wget -O assets.zip "https://www.dropbox.com/scl/fi/55xel2c2mitlvce0msukr/assets.zip?rlkey=dfskodyyqc99cikzzboqlfx4p&dl=1"
     
+    - name: Download model
+      run: |
+        wget -O deeplabv3_seg_v3.ckpt "https://huggingface.co/pauldoucet/tissue-detector/resolve/main/deeplabv3_seg_v3.ckpt?download=true" && mv deeplabv3_seg_v3.ckpt models/
+
     - name: Unzip test assets
       run: |
         unzip assets.zip && mv assets tests/
@@ -43,7 +47,7 @@ jobs:
       run: |
         python tests/reader_tests.py
       continue-on-error: true
-      
+
     - name: Run hestdata tests
       run: |
         python tests/hestdata_tests.py
