@@ -41,7 +41,7 @@ jobs:
 
     - name: Run reader tests
       run: |
-        python reader_tests.py
+        python tests/reader_tests.py
     - name: Run hestdata tests
       run: |
-        python hestdata_tests.py
+        python tests/hestdata_tests.py
