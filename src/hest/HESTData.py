@@ -192,8 +192,9 @@ class HESTData:
         with open(os.path.join(path, 'metrics.json'), 'w') as json_file:
             json.dump(self.meta, json_file) 
             
-        with open(os.path.join(path, 'cells.geojson'), 'w') as json_file:
-            json.dump(self.cellvit_seg, json_file)
+        if self.cellvit_seg is not None:
+            with open(os.path.join(path, 'cells.geojson'), 'w') as json_file:
+                json.dump(self.cellvit_seg, json_file)
         
         downscaled_img = self.adata.uns['spatial']['ST']['images']['downscaled_fullres']
         down_fact = self.adata.uns['spatial']['ST']['scalefactors']['tissue_downscaled_fullres_scalef']

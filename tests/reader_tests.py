@@ -30,6 +30,7 @@ class TestHESTData(unittest.TestCase):
             bc_matrix_path, # path to filtered_feature_bc_matrix.h5
             spatial_coord_path=spatial_coord_path # path to a space ranger spatial/ folder containing either a tissue_positions.csv or tissue_position_list.csv
         )
+        os.makedirs(_j(self.output_dir, 'img+filtered_matrix+spatial'), exist_ok=True)
         
         st.save(_j(self.output_dir, 'img+filtered_matrix+spatial'), pyramidal=True)
         st.save_spatial_plot(_j(self.output_dir, 'img+filtered_matrix+spatial'), self.output_dir)
@@ -53,6 +54,8 @@ class TestHESTData(unittest.TestCase):
             fullres_img_path, # path to a full res image
             bc_matrix_path, # path to filtered_feature_bc_matrix.h5
         )
+        
+        os.makedirs(_j(self.output_dir, 'img+filtered_matrix'), exist_ok=True)
         st.save(_j(self.output_dir, 'img+filtered_matrix'), pyramidal=True)
         st.save_spatial_plot(_j(self.output_dir, 'img+filtered_matrix'), self.output_dir)
         
