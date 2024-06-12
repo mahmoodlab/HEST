@@ -83,7 +83,11 @@ def segment_tissue_deep(img: Union[np.ndarray, openslide.OpenSlide, 'CuImage', W
             stride=1
         )
         
-        checkpoint = torch.load(weights_path)
+        if torch.cuda.is_available():
+            checkpoint = torch.load(weights_path)
+        else:
+            checkpoint = torch.load(weights_path, map_location=torch.device('cpu'))
+            
         new_state_dict = {}
         for key in checkpoint['state_dict']:
             if 'aux' in key:

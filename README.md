@@ -1,7 +1,13 @@
 # HEST
 
+#### What does the hest library provide?
+- <b>Missing file</b> imputation and automatic alignment for Visium
+- <b>Fast</b> functions for pooling transcripts and tesselating ST/H&E pairs into patches (these functions are GPU optimized with CUCIM if CUDA is available).
+- Functions for interacting with the HEST-1K dataset
+- Deep learning based or Otsu based <b>tissue segmentation</b> for both H&E and IHC stains
+- Compatibility with <b>Scanpy</b> and <b>SpatialData</b>
 
-Hest provides legacy readers for the different Spatial Transcriptomics data formats supporting H&E (Visium/Visium-HD, Xenium and ST) and for automatically aligning them with their associated histology image. Hest was used to assemble the HEST-1k dataset, processing challenging ST datasets from a wide variety of sources and converting them to formats commonly used in pathology (.tif, Scanpy AnnData). The framework also provides helper functions for pooling transcripts and tesselating slides into patches centered around ST spots.
+Hest was used to assemble the HEST-1k dataset, processing challenging ST datasets from a wide variety of sources and converting them to formats commonly used in pathology (.tif, Scanpy AnnData).
 
 <p align="center">
   <img src="figures/fig1.png" alt="Description" style="width: 70%;"/>
@@ -46,11 +52,11 @@ apt install libvips libvips-dev openslide-tools
 
 NOTE: hest was only tested on linux/macOS machines, please report any bugs in the GitHub issues.
 
-## Install CONCH/UNI (Optional, for HEST-bench only)
+### CONCH/UNI installation (Optional, for HEST-bench only)
 
 If you want to benchmark CONCH/UNI, additional steps are necesary
 
-### Install CONCH (model + weights)
+#### CONCH installation (model + weights)
 
 1. Request access to the model weights from the Huggingface model page [here](https://huggingface.co/MahmoodLab/CONCH).
 
@@ -64,7 +70,7 @@ cd CONCH
 pip install -e .
 ```
 
-### Install UNI (weights only)
+#### UNI installation (weights only)
 
 1. Request access to the model weights from the Huggingface model page [here](https://huggingface.co/MahmoodLab/UNI).
 
