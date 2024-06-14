@@ -803,6 +803,8 @@ def load_hest(hest_dir: str) -> List[HESTData]:
         adata_path = os.path.join(hest_dir, 'st', f'{id}.h5ad')
         img_path = os.path.join(hest_dir, 'wsis', f'{id}.tif')
         meta_path = os.path.join(hest_dir, 'metadata', f'{id}.json')
+        masks_path_pkl = None
+        masks_path_jpg = None
         if os.path.exists(os.path.join(hest_dir, 'tissue_seg')):
             masks_path_pkl = os.path.join(hest_dir, 'tissue_seg', f'{id}_mask.pkl')
             masks_path_jpg = os.path.join(hest_dir, 'tissue_seg', f'{id}_mask.jpg')
