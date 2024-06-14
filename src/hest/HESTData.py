@@ -693,6 +693,8 @@ def read_HESTData(
             
     if mask_path_pkl is not None and mask_path_jpg is not None:
         tissue_seg = load_tissue_mask(mask_path_pkl, mask_path_jpg, width, height)
+    else:
+        tissue_seg = None
     
     
     adata = sc.read_h5ad(adata_path)
