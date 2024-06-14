@@ -89,6 +89,7 @@ class TestHESTReader(unittest.TestCase):
         
         fullres_img, _ = load_image(fullres_img_path)
         
+        os.makedirs(_j(self.output_dir, 'img+filtered_matrix'), exist_ok=True)
         autoalign_visium(fullres_img, _j(self.output_dir, 'img+filtered_matrix'))
         
 

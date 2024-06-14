@@ -23,7 +23,7 @@ from .HESTData import (HESTData, STHESTData, VisiumHDHESTData, VisiumHESTData,
                        XeniumHESTData)
 from .utils import (SpotPacking, align_xenium_df, check_arg, df_morph_um_to_pxl,
                     find_biggest_img, find_first_file_endswith,
-                    find_pixel_size_from_spot_coords, get_path_from_meta_row,
+                    find_pixel_size_from_spot_coords, get_path_from_meta_row, get_path_relative,
                     helper_mex, load_image, metric_file_do_dict, read_10x_seg,
                     register_downscale_img)
 
@@ -568,15 +568,13 @@ class VisiumReader(Reader):
 
     def _find_visium_slide_version(self, alignment_df: str, adata: sc.AnnData) -> str:
         highest_nb_match = -1
-        version_file_name = None
-        barcode_dir = './barcode_coords/'
+        barcode_dir = get_path_relative(__file__, '../../barcode_coords/')
         for barcode_path in os.listdir(barcode_dir):
             spatial_aligned = self._find_alignment_barcodes(alignment_df, os.path.join(barcode_dir, barcode_path))
             nb_match = len(pd.merge(spatial_aligned, adata.obs, left_index=True, right_index=True))
             if nb_match > highest_nb_match:
                 highest_nb_match = nb_match
                 match_spatial_aligned = spatial_aligned
-            #if len(spatial_aligned[spatial_aligned.index.isin(adata.obs.index)]) > highest_nb_match:
         
         if highest_nb_match == 0:
             raise Exception(f"Couldn't find a visium having the following spot barcodes: {adata.obs.index}")
