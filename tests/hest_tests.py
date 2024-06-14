@@ -171,6 +171,8 @@ class TestHESTData(unittest.TestCase):
             st = st['st']
             with self.subTest(st_object=idx):
                 os.makedirs(_j(self.output_dir, f'test_save_{idx}'), exist_ok=True)
+                st.meta['pixel_size_um_embedded'] = st.pixel_size / 1.5
+                st.meta['pixel_size_um_estimated'] = st.pixel_size
                 st.save(_j(self.output_dir, f'test_save_{idx}'), save_img=True, plot_pxl_size=True)
 
 
