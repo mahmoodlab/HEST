@@ -3,15 +3,14 @@ import gzip
 import json
 import os
 import shutil
-from cProfile import Profile
 from enum import Enum
-from pstats import SortKey, Stats
-from typing import List, Tuple
+from typing import List, Tuple, Union
 
 import h5py
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
 try:
     import pyvips
 except Exception:
@@ -25,10 +24,130 @@ from scipy import sparse
 from sklearn.neighbors import KDTree
 from tqdm import tqdm
 
-
 Image.MAX_IMAGE_PIXELS = 93312000000
 ALIGNED_HE_FILENAME = 'aligned_fullres_HE.tif'
 
+
+
+def combine_meta_metrics(meta_df, metrics_path, meta_path):
+    for _, row in meta_df.iterrows():
+        row_dict = row.to_dict()
+        with open(os.path.join(metrics_path, row_dict['id'] + '.json')) as f:
+            metrics_dict = json.load(f)
+        combined_dict = {**metrics_dict, **row_dict}
+        with open(os.path.join(meta_path, row_dict['id'] + '.json'), 'w') as f:
+            json.dump(combined_dict, f)
+            
+
+def df_morph_um_to_pxl(df, x_key, y_key, pixel_size_morph):
+    df[x_key] = df[x_key] / pixel_size_morph
+    df[y_key] = df[y_key] / pixel_size_morph
+    return df
+
+
+def align_xenium_df(alignment_file_path, pixel_size_morph, df_transcripts, x_key, y_key):
+    alignment_file = pd.read_csv(alignment_file_path, header=None)
+    alignment_matrix = alignment_file.values
+    #convert alignment matrix from pixel to um
+    alignment_matrix[0][2] *= pixel_size_morph
+    alignment_matrix[1][2] *= pixel_size_morph
+    he_to_morph_matrix = alignment_matrix
+    alignment_matrix = np.linalg.inv(alignment_matrix)
+    coords = np.column_stack((df_transcripts[x_key].values, df_transcripts[y_key].values, np.ones((len(df_transcripts),))))
+    aligned = (alignment_matrix @ coords.T).T
+    df_transcripts[y_key] = aligned[:,1]
+    df_transcripts[x_key] = aligned[:,0]
+    return df_transcripts, he_to_morph_matrix, alignment_matrix
+
+
+def chunk_sorted_df(df, nb_chunk):
+    l = len(df) // nb_chunk
+    arr = df['cell_id'].values
+    i = 0
+    coords = []
+    while i < len(df):
+        start = i
+        j = i + l
+        while j < len(df):
+            if arr[j] != arr[j - 1]:
+                break
+            j += 1
+        end = min(len(df), j)
+        coords.append((start, end))
+        i = j
+    
+    chunks = []
+    for start, end in coords:
+        chunks.append(df[start:end])
+    return chunks
+    
+
+
+def read_10x_seg(seg_file: Union[str, pd.DataFrame], type: str = 'Nucleus') -> list:
+    
+    color = {
+        'Cell': [
+            255,
+            0,
+            0
+        ],
+        'Nucleus': [
+            255,
+            159,
+            68
+        ]
+    }
+    
+    print(f"Converting 10x segmentation to geojson ({type})... (can take some time)")
+    if isinstance(seg_file, str):
+        df = pd.read_parquet(seg_file)
+    else:
+        df = seg_file
+
+    df['vertex_x'] = df['vertex_x'].astype(float).round(decimals=2)
+    df['vertex_y'] = df['vertex_y'].astype(float).round(decimals=2)
+    
+    df['combined'] = df[['vertex_x', 'vertex_y']].values.tolist()
+    df = df[['cell_id', 'combined']]
+    
+    df['cell_id'], _ = pd.factorize(df['cell_id'])
+    aggr_df = df.groupby('cell_id').agg({
+        'combined': list
+        }
+    )
+    
+    aggr_df['combined'] = [[x] for x in aggr_df['combined']]
+    
+    coords = list(aggr_df['combined'].values)
+    
+    ## Shard the cells in n groups to speed up reading in QuPath
+    n = 10
+    l = round(np.ceil(len(coords) // n))
+
+    cells = []
+    for i in range(n):
+        start, end = i * l, (i + 1) * l
+        end = min(end, len(coords))
+
+        cell = {
+            'type': 'Feature',
+            'id': type + '-id-' + str(i),
+            'geometry': {
+                'type': 'MultiPolygon',
+                'coordinates': coords[start:end]
+            },
+            "properties": {
+                "objectType": "annotation",
+                "classification": {
+                    "name": type + ' ' + str(i),
+                    "color": color[type]
+                }
+            }
+        }
+        cells.append(cell)
+    
+    return cells
+    
 
 def get_path_relative(file, path) -> str:
     curr_dir = os.path.dirname(os.path.abspath(file))
@@ -64,13 +183,13 @@ def enc_results_to_table(path) -> str:
     df_str.loc['Average'] = df_int.loc['Average'].astype(str).apply(lambda x: x.ljust(5, '0'))
     
     names = {
-        #'resnet50_trunc': 'ResNet50',
-        #'kimianet': 'KimiaNet',
-        #'ciga': 'Ciga',
+        'resnet50_trunc': 'ResNet50',
+        'kimianet': 'KimiaNet',
+        'ciga': 'Ciga',
         'ctranspath': 'CTransPath',
-        #'remedis': 'Remedis',
-        #'phikon_official_hf': 'Phikon',
-        #'plip': 'PLIP',
+        'remedis': 'Remedis',
+        'phikon_official_hf': 'Phikon',
+        'plip': 'PLIP',
         'uni_v1_official': 'UNI',
         'conch_v1_official': 'CONCH',
         'gigapath': 'gigapath'
@@ -96,21 +215,6 @@ def compare_meta_df(meta_df1, meta_df2):
     print('')
     print('only in meta2: ', diff2)
     return list(diff1), list(diff2)
-
-def profile_fn(fn, **args):
-    """Profile a function and print the runtime stats
-
-    Args:
-        fn (function): function to profile
-    """
-    with Profile() as profile:
-        fn(**args)
-        (
-            Stats(profile)
-            .strip_dirs()
-            .sort_stats(SortKey.TIME)
-            .print_stats()
-        )
 
 
 def normalize_adata(adata: sc.AnnData, scale=1e6, smooth=False) -> sc.AnnData:
@@ -711,7 +815,6 @@ def register_downscale_img(adata: sc.AnnData, img: np.ndarray, pixel_size: float
     Returns:
         Tuple[np.ndarray, float]: downscaled image and it's downscale factor from full resolution
     """
-    print('image size is ', img.shape)
     downscale_factor = target_size / np.max(img.shape)
     downscaled_fullres = imresize(img, downscale_factor)
     
@@ -731,7 +834,7 @@ def _sample_id_to_filename(id):
     return id + '.tif'            
 
             
-def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal: bool, cp_pixel_vis: bool, cp_adata: bool):
+def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal: bool, cp_pixel_vis: bool, cp_adata: bool, cp_meta: bool):
     """ Internal use method, to transfer images to a `release` folder (`dest`)"""
     try:
         path = get_path_from_meta_row(row)
@@ -747,8 +850,8 @@ def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal:
     if not os.path.exists(path_fullres):
         print(f"couldn't find {path}")
         return
-    print(f"create pyramidal tiff for {row['id']}")
     if cp_pyramidal:
+        print(f"create pyramidal tiff for {row['id']}")
         src_pyramidal = os.path.join(path, 'aligned_fullres_HE.tif')
         dst_pyramidal = os.path.join(dest, 'pyramidal', _sample_id_to_filename(row['id']))
         os.makedirs(os.path.join(dest, 'pyramidal'), exist_ok=True)
@@ -757,6 +860,12 @@ def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal:
         #bigtiff_option = '' if isinstance(row['bigtiff'], float) or not row['bigtiff']  else '--bigtiff'
         #vips_pyr_cmd = f'vips tiffsave "{path_fullres}" "{dst}" --pyramid --tile --tile-width=256 --tile-height=256 --compression=deflate {bigtiff_option}'
         #subprocess.call(vips_pyr_cmd, shell=True)
+        
+    if cp_meta:
+        path_metrics = os.path.join(path, 'metrics.json')
+        os.makedirs(os.path.join(dest, 'metrics'), exist_ok=True)
+        path_dest_metrics = os.path.join(dest, 'metrics', row['id'] + '.json')
+        shutil.copy(path_metrics, path_dest_metrics)
     if cp_downscaled:
         path_downscaled = os.path.join(path, 'downscaled_fullres.jpeg')
         os.makedirs(os.path.join(dest, 'downscaled'), exist_ok=True)
@@ -782,16 +891,15 @@ def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal:
         shutil.copy(path_adata, path_dest_adata)        
         
             
-def copy_processed_images(dest: str, meta_df: pd.DataFrame, cp_spatial=True, cp_downscaled=True, cp_pyramidal=True, cp_pixel_vis=True, cp_adata=True, n_job=6):
+def copy_processed_images(dest: str, meta_df: pd.DataFrame, cp_spatial=True, cp_downscaled=True, cp_pyramidal=True, cp_pixel_vis=True, cp_adata=True, cp_meta=True, n_job=6):
     """ Internal use method, to transfer images to a `release` folder (`dest`)"""
     with concurrent.futures.ThreadPoolExecutor(max_workers=n_job) as executor:
         # Submit tasks to the executor
-        future_results = [executor.submit(_process_row, dest, row, cp_downscaled, cp_spatial, cp_pyramidal, cp_pixel_vis, cp_adata) for _, row in meta_df.iterrows()]
+        future_results = [executor.submit(_process_row, dest, row, cp_downscaled, cp_spatial, cp_pyramidal, cp_pixel_vis, cp_adata, cp_meta) for _, row in meta_df.iterrows()]
 
         # Retrieve results as they complete
-        for future in concurrent.futures.as_completed(future_results):
+        for future in tqdm(concurrent.futures.as_completed(future_results), total=len(meta_df)):
             result = future.result()
-            print(result)  # Example: Print the processed result
     
 
 # taken from https://github.com/scverse/anndata/issues/595
@@ -897,7 +1005,6 @@ def load_image(img_path: str) -> Tuple[np.ndarray, float]:
         if 'XResolution' in my_img.pages[0].tags and my_img.pages[0].tags['XResolution'].value[0] != 0 and 'ResolutionUnit' in my_img.pages[0].tags:
             # result in micrometers per pixel
             factor = unit_to_micrometers[my_img.pages[0].tags['ResolutionUnit'].value]
-            print('ResolutionUnit: ', my_img.pages[0].tags['ResolutionUnit'].value)
             pixel_size_embedded = (my_img.pages[0].tags['XResolution'].value[1] / my_img.pages[0].tags['XResolution'].value[0]) * factor
     else:
         img = np.array(Image.open(img_path))

@@ -3,13 +3,10 @@ import math
 import os
 import shutil
 from abc import abstractmethod
-from typing import Dict, Tuple
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import scanpy as sc
-from matplotlib import rcParams
 from tqdm import tqdm
 
 from .autoalign import autoalign_visium
@@ -21,10 +18,11 @@ from .custom_readers import (GSE167096_to_adata, GSE180128_to_adata,
                              raw_count_to_adata, raw_counts_to_pixel)
 from .HESTData import (HESTData, STHESTData, VisiumHDHESTData, VisiumHESTData,
                        XeniumHESTData)
-from .utils import (SpotPacking, check_arg,
-                    find_biggest_img, find_first_file_endswith,
-                    find_pixel_size_from_spot_coords, get_path_from_meta_row,
-                    helper_mex, load_image, metric_file_do_dict,
+from .utils import (SpotPacking, align_xenium_df, check_arg,
+                    df_morph_um_to_pxl, find_biggest_img,
+                    find_first_file_endswith, find_pixel_size_from_spot_coords,
+                    get_path_from_meta_row, get_path_relative, helper_mex,
+                    load_image, metric_file_do_dict, read_10x_seg,
                     register_downscale_img)
 
 
@@ -568,15 +566,13 @@ class VisiumReader(Reader):
 
     def _find_visium_slide_version(self, alignment_df: str, adata: sc.AnnData) -> str:
         highest_nb_match = -1
-        version_file_name = None
-        barcode_dir = './barcode_coords/'
+        barcode_dir = get_path_relative(__file__, '../../barcode_coords/')
         for barcode_path in os.listdir(barcode_dir):
             spatial_aligned = self._find_alignment_barcodes(alignment_df, os.path.join(barcode_dir, barcode_path))
             nb_match = len(pd.merge(spatial_aligned, adata.obs, left_index=True, right_index=True))
             if nb_match > highest_nb_match:
                 highest_nb_match = nb_match
                 match_spatial_aligned = spatial_aligned
-            #if len(spatial_aligned[spatial_aligned.index.isin(adata.obs.index)]) > highest_nb_match:
         
         if highest_nb_match == 0:
             raise Exception(f"Couldn't find a visium having the following spot barcodes: {adata.obs.index}")
@@ -903,7 +899,9 @@ class XeniumReader(Reader):
             alignment_file_path=alignment_path,
             feature_matrix_path=os.path.join(path, 'cell_feature_matrix.h5'), 
             transcripts_path=os.path.join(path, 'transcripts.parquet'),
-            cells_csv_path=os.path.join(path, 'cells.csv')
+            cells_path=os.path.join(path, 'cells.parquet'),
+            nucleus_bound_path=os.path.join(path, 'nucleus_boundaries.parquet'),
+            cell_bound_path=os.path.join(path, 'cell_boundaries.parquet')
         )
         
         return st_object
@@ -933,45 +931,62 @@ class XeniumReader(Reader):
         return adata, dict
     
     
-    def __align(self, alignment_file_path, pixel_size_morph, df_transcripts):
-        alignment_file = pd.read_csv(alignment_file_path, header=None)
-        alignment_matrix = alignment_file.values
-        #convert alignment matrix from pixel to um
-        alignment_matrix[0][2] *= pixel_size_morph
-        alignment_matrix[1][2] *= pixel_size_morph
-        he_to_morph_matrix = alignment_matrix
-        alignment_matrix = np.linalg.inv(alignment_matrix)
-        coords = np.column_stack((df_transcripts["x_location"].values, df_transcripts["y_location"].values, np.ones((len(df_transcripts),))))
-        aligned = (alignment_matrix @ coords.T).T
-        df_transcripts['y_location'] = aligned[:,1]
-        df_transcripts['x_location'] = aligned[:,0]
+    def __align(self, alignment_file_path, pixel_size_morph, df_transcripts, x_key='x_location', y_key='y_location'):
+
+        df_transcripts, he_to_morph_matrix, alignment_matrix = align_xenium_df(alignment_file_path, pixel_size_morph, df_transcripts, x_key, y_key)
+
         pixel_size_estimated = self.__xenium_estimate_pixel_size(pixel_size_morph, he_to_morph_matrix)    
-        return df_transcripts, pixel_size_estimated    
-    
-    
-    def __plot_genes(self, adata, cur_dir):
-        print('saving gene plots...')
-        FIGSIZE = (15, 5)
-        old_figsize = rcParams["figure.figsize"]
-        rcParams["figure.figsize"] = FIGSIZE
-        os.makedirs(os.path.join(cur_dir, 'gene_plots'), exist_ok=True)
-        os.makedirs(os.path.join(cur_dir, 'gene_bar_plots'), exist_ok=True)
-
-        gene_names = [name for name in adata.var_names if ('BLANK' not in name and 'NegControl' not in name and 'DEPRECATED' not in name)]
-
-        adata_df = adata.to_df()
-        for gene_name in tqdm(gene_names):
-            col = adata_df[gene_name]
-            plt.close()
-            #sc.pl.spatial(adata, show=None, img_key="downscaled_fullres", color=gene_name)
-            plt.hist(col.values, bins=50, range=(0, 2000))
-
-            # Add labels and title
-            plt.ylabel(f'{gene_name} count per spot')
+        return df_transcripts, pixel_size_estimated, alignment_matrix
+        
+        
+    def __load_seg(self, path, type, alignment_file_path, pixel_size_morph):
+        raw_nuclei_df = pd.read_parquet(path)
+        
+        x_key = 'vertex_x'
+        y_key = 'vertex_y'
+        
+        aligned_nuclei_df, _, _ = align_xenium_df(alignment_file_path, pixel_size_morph, raw_nuclei_df, x_key=x_key, y_key=y_key)
+        
+        aligned_nuclei_df = df_morph_um_to_pxl(aligned_nuclei_df, x_key, y_key, pixel_size_morph)
+        
+        xenium_nuc_seg = read_10x_seg(aligned_nuclei_df, type)
+        
+        return xenium_nuc_seg
+        
+        
+    def __load_transcripts(self, transcripts_path, alignment_file_path, pixel_size_morph, dict):
+        df_transcripts = pd.read_parquet(transcripts_path)
+        
+        if alignment_file_path is not None:
+            print('found an alignment file, aligning transcripts...')
+            df_transcripts, pixel_size_estimated, _ = self.__align(alignment_file_path, pixel_size_morph, df_transcripts)
+            dict['pixel_size_um_estimated'] = pixel_size_estimated
+        else:
+            dict['pixel_size_um_estimated'] = pixel_size_morph
             
-            plt.savefig(os.path.join(cur_dir, 'gene_bar_plots', f'{gene_name}.png'))
-            plt.close()  # Close the plot to free memory
-        rcParams["figure.figsize"] = old_figsize
+        transcript_df = df_transcripts
+        transcript_df['he_x'] = transcript_df['x_location'] / pixel_size_morph
+        transcript_df['he_y'] = transcript_df['y_location'] / pixel_size_morph
+        return transcript_df, dict
+    
+    
+    def __load_cells(self, feature_matrix_path, cells_path, alignment_file_path, pixel_size_morph, dict):
+        cell_adata = sc.read_10x_h5(feature_matrix_path)
+        df = pd.read_parquet(cells_path)
+        df.set_index(cell_adata.obs_names, inplace=True)
+        cell_adata.obs = df.copy()
+        
+        df_cells = cell_adata.obs[["x_centroid", "y_centroid"]].copy()
+        
+        if alignment_file_path is not None:
+            # convert cell coordinates from um in the morphology image to um in the H&E image
+            df_cells, _, _ = self.__align(alignment_file_path, pixel_size_morph, df_cells, x_key='x_centroid', y_key='y_centroid')
+        df_cells['he_x'] = df_cells['x_centroid'] / pixel_size_morph
+        df_cells['he_y'] = df_cells['y_centroid'] / pixel_size_morph
+        
+        cell_adata.obsm["spatial"] = df_cells[['he_x', 'he_y']].to_numpy()
+        dict['cells_under_tissue'] = len(cell_adata.obs)
+        return cell_adata, dict
     
     
     def read(
@@ -981,20 +996,16 @@ class XeniumReader(Reader):
         alignment_file_path: str = None,
         feature_matrix_path: str = None, 
         transcripts_path: str = None,
-        cells_csv_path: str = None,
-        plot_genes: bool = False,
-        use_cache: bool = False,
-        pseudo_visium: bool = True
+        cells_path: str = None,
+        nucleus_bound_path: str = None,
+        cell_bound_path: str = None,
+        use_cache: bool = False
     ) -> XeniumHESTData:
-        if not pseudo_visium and (feature_matrix_path is None or cells_csv_path is None):
-            raise ValueError('a feature_matrix_path needs to be specified if not using pseudo-visium pooling')
-        
-        if pseudo_visium and feature_matrix_path is None or transcripts_path is None:
-            raise ValueError('a feature_matrix_path and a transcripts_path need to be specified if using pseudo-visium pooling')
-        
         
         cur_dir = os.path.dirname(transcripts_path)   
+            
         
+        print("Loading the WSI... (can be slow for large images)")
         img, pixel_size_embedded = load_image(img_path)
         
         dict = {}
@@ -1005,44 +1016,40 @@ class XeniumReader(Reader):
             pixel_size_morph = dict_exp['pixel_size']
         dict = {**dict, **dict_exp}
         
-        if os.path.exists(os.path.join(cur_dir, 'cached_pseudo_visium.h5ad')) and use_cache:
-            adata, dict = self.__read_cache(cur_dir, dict)
-        else:
+        #if cell_bound_path is not None:
+        #    xenium_cell_seg = read_10x_seg(cell_bound_path, 'Cell')
+        #if nucleus_bound_path is not None:
+        #    xenium_nuc_seg =  self.__load_seg(nucleus_bound_path, 'Nucleus', alignment_file_path, pixel_size_morph)
         
-            df_transcripts = pd.read_parquet(transcripts_path)
-            
-            if alignment_file_path is not None:
-                print('found an alignment file, aligning transcripts...')
-                df_transcripts, pixel_size_estimated = self.__align(alignment_file_path, pixel_size_morph, df_transcripts)
-                dict['pixel_size_um_estimated'] = pixel_size_estimated
-            else:
-                dict['pixel_size_um_estimated'] = pixel_size_morph
-                            
-            
-            if pseudo_visium:
-                adata = xenium_to_pseudo_visium(df_transcripts, dict['pixel_size_um_estimated'], pixel_size_morph)
-                dict['spot_diameter'] = 55.
-                dict['inter_spot_dist'] = 100.
-                dict['spots_under_tissue'] = len(adata.obs)
-            else:
-                adata = sc.read_10x_h5(feature_matrix_path)
-                df = pd.read_csv(cells_csv_path)
-                df.set_index(adata.obs_names, inplace=True)
-                adata.obs = df.copy()
-                adata.obsm["spatial"] = adata.obs[["x_centroid", "y_centroid"]].copy().to_numpy()
-                dict['cells_under_tissue'] = len(adata.obs)
+        print('Loading transcripts...')
+        df_transcripts, dict = self.__load_transcripts(transcripts_path, alignment_file_path, pixel_size_morph, dict)
         
-            register_downscale_img(adata, img, dict['pixel_size_um_estimated'])
-            
-            adata.write_h5ad(os.path.join(cur_dir, 'cached_pseudo_visium.h5ad'))
-            with open(os.path.join(cur_dir, 'cached_metrics.json'), 'w') as f:
-                json.dump(dict, f)
+                        
+        print("Pooling xenium transcripts in pseudo-visium spots...")
+        adata = xenium_to_pseudo_visium(df_transcripts, dict['pixel_size_um_estimated'], pixel_size_morph)
         
-        if plot_genes:
-            self.__plot_genes(adata, cur_dir)
-            
+        dict['spot_diameter'] = 55.
+        dict['inter_spot_dist'] = 100.
+        dict['spots_under_tissue'] = len(adata.obs)
+        
+        cell_adata = None
+        if feature_matrix_path is not None and cells_path is not None:
+            print('Reading cells...')
+            cell_adata, dict = self.__load_cells(feature_matrix_path, cells_path, alignment_file_path, pixel_size_morph, dict)
 
-        st_object = XeniumHESTData(adata, img, dict['pixel_size_um_estimated'], dict)
+        register_downscale_img(adata, img, dict['pixel_size_um_estimated'])
+            
+            
+        st_object = XeniumHESTData(
+            adata, 
+            img, 
+            dict['pixel_size_um_estimated'], 
+            dict, 
+            transcript_df=df_transcripts,
+            cell_adata=cell_adata,
+            #xenium_nuc_seg=xenium_nuc_seg,
+            #xenium_cell_seg=xenium_cell_seg
+        )
         return st_object
     
 
@@ -1061,7 +1068,7 @@ def reader_factory(path: str) -> Reader:
         raise NotImplementedError('')
         
     
-def read_and_save(path: str, save_plots=True, plot_genes=False, pyramidal=True, bigtiff=False):
+def read_and_save(path: str, save_plots=True, pyramidal=True, bigtiff=False, plot_pxl_size=False, save_img=True):
     """For internal use, determine the appropriate reader based on the raw data path, and
     automatically process the data at that location, then the processed files are dumped
     to processed/
@@ -1069,20 +1076,18 @@ def read_and_save(path: str, save_plots=True, plot_genes=False, pyramidal=True, 
     Args:
         path (str): path of the raw data
         save_plots (bool, optional): whenever to save the spatial plots. Defaults to True.
-        plot_genes (bool, optional): whenever to plot the genes. Defaults to False.
         pyramidal (bool, optional): whenever to save as pyramidal. Defaults to True.
     """
     print(f'Reading from {path}...')
     reader = reader_factory(path)
     st_object = reader.auto_read(path)
+    print('Loaded object:')
     print(st_object)
     save_path = os.path.join(path, 'processed')
     os.makedirs(save_path, exist_ok=True)
-    st_object.save(save_path, pyramidal, bigtiff=bigtiff)
+    st_object.save(save_path, pyramidal=pyramidal, bigtiff=bigtiff, plot_pxl_size=plot_pxl_size, save_img=save_img)
     if save_plots:
         st_object.save_spatial_plot(save_path)
-    if plot_genes:
-        st_object.plot_genes(save_path, top_k=800)
         
         
 def xenium_to_pseudo_visium(df: pd.DataFrame, pixel_size_he: float, pixel_size_morph: float) -> sc.AnnData:
@@ -1157,9 +1162,9 @@ def xenium_to_pseudo_visium(df: pd.DataFrame, pixel_size_he: float, pixel_size_m
     return adata
 
 
-def process_meta_df(meta_df, save_spatial_plots=True, plot_genes=False, pyramidal=True):
+def process_meta_df(meta_df, save_spatial_plots=True, pyramidal=True, save_img=True):
     """Internal use method, process all the raw ST data in the meta_df"""
     for _, row in tqdm(meta_df.iterrows(), total=len(meta_df)):
         path = get_path_from_meta_row(row)
         bigtiff = not(isinstance(row['bigtiff'], float) or row['bigtiff'] == 'FALSE')
-        _ = read_and_save(path, save_plots=save_spatial_plots, plot_genes=plot_genes, pyramidal=pyramidal, bigtiff=bigtiff)
+        _ = read_and_save(path, save_plots=save_spatial_plots, pyramidal=pyramidal, bigtiff=bigtiff, plot_pxl_size=True, save_img=save_img)

@@ -25,7 +25,6 @@ dependencies = [
     "pyarrow >= 16.1.0",
     "timm-ctp",
     "spatialdata >= 0.1.2",
-    "spatialdata-io >= 0.1.2",
     "dask >= 2024.2.1",
     "spatial_image >= 0.3.0"
 ]

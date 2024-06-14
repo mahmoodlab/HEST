@@ -86,29 +86,8 @@ def _spots_to_file(path, dict):
         f.write(json_object)
 
 
-
-def _get_orientation(box, boxes):
-    x, y, _, _ = box.xywh[0].numpy().astype(int)
-    min_x = int(np.min(boxes.xywh[:,0].numpy()))
-    max_x = int(np.max(boxes.xywh[:,0].numpy()))
-    min_y = int(np.min(boxes.xywh[:,1].numpy()))
-    max_y = int(np.max(boxes.xywh[:,1].numpy()))
-    
-    if abs(x - min_x) < abs(x - max_x) and abs(y - min_y) < abs(y - max_y):
-        return 0
-    elif abs(x - max_x) < abs(x - min_x) and abs(y - min_y) < abs(y - max_y):
-        return 1
-    elif abs(x - min_x) < abs(x - max_x) and abs(y - max_y) < abs(y - min_y):
-        return 3
-    elif abs(x - max_x) < abs(x - min_x) and abs(y - max_y) < abs(y - min_y):
-        return 2
-    else:
-        return 4
-
-
 def _resize_to_target(img):
     TARGET_PIXEL_EDGE = 1000
-    print('image size is ', img.shape)
     downscale_factor = TARGET_PIXEL_EDGE / np.max(img.shape)
     downscaled_fullres = imresize(img, downscale_factor)
     return downscaled_fullres, downscale_factor
@@ -178,9 +157,9 @@ def _match_template_type(img, boxes):
     ratio = np.mean(edge_lengths) / np.mean(fid_widths)
 
 
-    template65 = SpotGridTemplate('spot_templates/template65.json', '6.5mm', ratio=19./1477)
+    template65 = SpotGridTemplate(get_path_relative(__file__, '../../spot_templates/template65.json'), '6.5mm', ratio=19./1477)
 
-    template11 = SpotGridTemplate('spot_templates/template11.json', '11mm', ratio=20./2622)
+    template11 = SpotGridTemplate(get_path_relative(__file__, '../../spot_templates/template11.json'), '11mm', ratio=20./2622)
 
     if ratio > 25:
         return template11, np.mean(edge_lengths)
