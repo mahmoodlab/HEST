@@ -8,12 +8,12 @@ from cProfile import Profile
 from enum import Enum
 from pstats import SortKey, Stats
 from typing import List, Tuple, Union
-from joblib import Parallel, delayed
 
 import h5py
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from huggingface_hub import snapshot_download
 
 try:
     import pyvips
@@ -31,6 +31,45 @@ from tqdm import tqdm
 Image.MAX_IMAGE_PIXELS = 93312000000
 ALIGNED_HE_FILENAME = 'aligned_fullres_HE.tif'
 
+
+def load_hest_meta(version='v1.0.0') -> pd.DataFrame:
+    meta_df_name = 'HEST_' + version.replace('.', '_') + '.csv'
+    meta_df = pd.read_csv(os.path.join(get_path_relative('../../metadata/'), meta_df_name))
+    return meta_df
+
+def download_hest(meta_df: pd.DataFrame, local_dir):    
+    # TODO add option to download patches
+    
+    ids = meta_df['id'].values
+    list_patterns = []
+    for id in ids:
+        
+        ## what about list_patterns.append(f'*/{id}*')
+        
+        list_patterns.append(f'thumbnails/{id}_downscaled_fullres.jpeg')
+        list_patterns.append(f'st/{id}.h5ad')
+        list_patterns.append(f'wsis/{id}.tif')
+        list_patterns.append(f'metadata/{id}.json')
+        list_patterns.append(f'tissue_seg/{id}_mask.jpg')
+        list_patterns.append(f'tissue_seg/{id}_mask.pkl')
+        list_patterns.append(f'tissue_seg/{id}_vis.jpg')
+        list_patterns.append(f'pixel_size_vis/{id}_pixel_size_vis.png')
+        list_patterns.append(f'cellvit_seg/{id}_cellvit_seg.zip')
+        list_patterns.append(f'spatial_plots/{id}_spatial_plots.png')
+    
+        
+    snapshot_download(repo_id="pauldoucet/hest", repo_type='dataset', allow_patterns=list_patterns, local_dir=local_dir)
+    
+
+def combine_meta_metrics(meta_df, metrics_path, meta_path):
+    for _, row in meta_df.iterrows():
+        row_dict = row.to_dict()
+        with open(os.path.join(metrics_path, row_dict['id'] + '.json')) as f:
+            metrics_dict = json.load(f)
+        combined_dict = {**metrics_dict, **row_dict}
+        with open(os.path.join(meta_path, row_dict['id'] + '.json'), 'w') as f:
+            json.dump(combined_dict, f)
+            
 
 def df_morph_um_to_pxl(df, x_key, y_key, pixel_size_morph):
     df[x_key] = df[x_key] / pixel_size_morph

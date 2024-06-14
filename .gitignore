@@ -28,3 +28,5 @@ hest_vis
 vis
 vis2
 models/deeplabv3*
+.github
+htmlcov

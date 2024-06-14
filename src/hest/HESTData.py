@@ -1,10 +1,11 @@
 import json
 import os
+import pickle
 import shutil
 import tempfile
 import warnings
 from functools import partial
-from typing import Dict, Tuple, Union
+from typing import Dict, List, Tuple, Union
 
 import cv2
 import matplotlib
@@ -17,6 +18,7 @@ except ImportError:
     CuImage = None
     print("CuImage is not available. Ensure you have a GPU and cucim installed to use GPU acceleration.")
 
+from hest.segmentation.TissueMask import TissueMask, load_tissue_mask
 from hest.wsi import WSI
 
 try:
@@ -49,7 +51,7 @@ from .utils import (ALIGNED_HE_FILENAME, check_arg, get_path_from_meta_row,
                     tiff_save)
 from .vst_save_utils import initsave_hdf5
 
-
+        
 class HESTData:
     """
     Object representing a Spatial Transcriptomics sample along with a full resolution H&E image and metadatas
@@ -88,7 +90,8 @@ class HESTData:
         img: Union[np.ndarray, openslide.OpenSlide, 'CuImage'],
         pixel_size: float,
         meta: Dict = {},
-        cellvit_seg: Dict=None
+        cellvit_seg: Dict=None,
+        tissue_seg: TissueMask=None
     ):
         """
         class representing a single ST profile + its associated WSI image
@@ -100,6 +103,7 @@ class HESTData:
             pixel_size (float): pixel_size of WSI im um/px, this pixel size will be used to perform operations on the slide, such as patching and segmenting
             meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
             cellvit_seg (Dict): dictionary of cells in the CellViT .geojson format. Default: None
+            tissue_seg (TissueMask): tissue mask for that sample
         """
         self.adata = adata
         
@@ -112,6 +116,10 @@ class HESTData:
         self.tissue_mask = None
         self.contours_holes = None
         self.contours_tissue = None
+        if tissue_seg is not None:
+            self.tissue_mask = tissue_seg.tissue_mask
+            self.contours_holes = tissue_seg.contours_holes
+            self.contours_tissue = tissue_seg.contours_tissue
         
         if 'total_counts' not in self.adata.var_names:
             sc.pp.calculate_qc_metrics(self.adata, inplace=True)
@@ -153,8 +161,10 @@ class HESTData:
         print(f"H&E overlay spatial plots saved in {save_path}")
     
     
-    def _load_wsi(self):
-        self.wsi, _ = load_image(self.wsi._filename)
+    def load_wsi(self) -> None:
+        """Load the full WSI in memory"""
+        width, height = self.wsi.get_dimensions()
+        self.wsi = WSI(self.wsi.get_thumbnail(width, height))
     
         
     def save(self, path: str, save_img=True, pyramidal=True, bigtiff=False, plot_pxl_size=False):
@@ -231,44 +241,6 @@ class HESTData:
         
         if save_img:
             tiff_save(img, os.path.join(path, ALIGNED_HE_FILENAME), self.pixel_size, pyramidal=pyramidal, bigtiff=bigtiff)
-        
-        
-    def plot_genes(self, path, top_k=300, plot_spatial=True):
-        sums = np.array(np.sum(self.adata.X, axis=0))[0]
-
-        # Sort genes based on variability
-        top_genes_mask = np.argsort(-sums)[:top_k]  # Sort in descending order
-        top_genes = self.adata.var_names[top_genes_mask]
-        
-        
-        print('saving gene plots...')
-        FIGSIZE = (15, 5)
-        old_figsize = rcParams["figure.figsize"]
-        os.makedirs(os.path.join(path, 'gene_plots'), exist_ok=True)
-        if os.path.exists(os.path.join(path, 'gene_bar_plots')):
-            # Remove the directory if it exists
-            shutil.rmtree(os.path.join(path, 'gene_bar_plots'))
-        os.makedirs(os.path.join(path, 'gene_bar_plots'), exist_ok=True)
-
-        gene_names = top_genes
-
-        adata_df = self.adata.to_df()
-        for gene_name in tqdm(gene_names):
-            col = adata_df[gene_name]
-            plt.close()
-            if plot_spatial:
-                sc.pl.spatial(self.adata, show=None, img_key="downscaled_fullres", color=gene_name) 
-                plt.savefig(os.path.join(path, 'gene_plots', f'{gene_name}.png'))
-                plt.close()  # Close the plot to free memory     
-            else:
-                rcParams["figure.figsize"] = FIGSIZE
-                plt.hist(col.values, bins=50, range=(0, 2000))
-                # Add labels and title
-                plt.ylabel(f'{gene_name} count per spot')            
-                plt.savefig(os.path.join(path, 'gene_bar_plots', f'{gene_name}.png'))
-                plt.close()  # Close the plot to free memory
-        rcParams["figure.figsize"] = old_figsize
-        
 
 
     def compute_mask(self, keep_largest=False, thumbnail_width=2000, method: str='deep') -> None:
@@ -413,7 +385,7 @@ class HESTData:
             
             
             # Save ref patches
-            assert image_patch.shape == (224, 224, 3)
+            assert image_patch.shape == (target_patch_size, target_patch_size, 3)
             asset_dict = { 'img': np.expand_dims(image_patch, axis=0),  # (1 x w x h x 3)
                             'coords': np.expand_dims([yImage, xImage], axis=0),   # (1 x 2)
                             'barcode': np.expand_dims([barcode_spot], axis=0)
@@ -553,9 +525,10 @@ class VisiumHESTData(HESTData):
         img: Union[np.ndarray, str],
         pixel_size: float,
         meta: Dict = {},
-        cellvit_seg: Dict=None
+        cellvit_seg: Dict=None,
+        tissue_seg: TissueMask=None
     ):
-        super().__init__(adata, img, pixel_size, meta, cellvit_seg)
+        super().__init__(adata, img, pixel_size, meta, cellvit_seg, tissue_seg)
 
 class VisiumHDHESTData(HESTData): 
     def __init__(self, 
@@ -563,7 +536,8 @@ class VisiumHDHESTData(HESTData):
         img: Union[np.ndarray, str],
         pixel_size: float,
         meta: Dict = {},
-        cellvit_seg: Dict=None
+        cellvit_seg: Dict=None,
+        tissue_seg: TissueMask=None
     ):
         """
         Args:
@@ -573,8 +547,9 @@ class VisiumHDHESTData(HESTData):
             img (Union[np.ndarray, str]): Full resolution image corresponding to the ST data, if passed as a path (str) the image is lazily loaded
             meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
             cellvit_seg (Dict): dictionary of cells in the CellViT .geojson format. Default: None
+            tissue_seg (TissueMask): tissue mask for that sample
         """
-        super().__init__(adata, img, pixel_size, meta, cellvit_seg)        
+        super().__init__(adata, img, pixel_size, meta, cellvit_seg, tissue_seg)        
         
 class STHESTData(HESTData):
     def __init__(self, 
@@ -582,7 +557,8 @@ class STHESTData(HESTData):
         img: Union[np.ndarray, str],
         pixel_size: float,
         meta: Dict = {},
-        cellvit_seg: Dict=None
+        cellvit_seg: Dict=None,
+        tissue_seg: TissueMask=None
     ):
         """
         Args:
@@ -592,8 +568,9 @@ class STHESTData(HESTData):
             img (Union[np.ndarray, str]): Full resolution image corresponding to the ST data, if passed as a path (str) the image is lazily loaded
             meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
             cellvit_seg (Dict): dictionary of cells in the CellViT .geojson format. Default: None
+            tissue_seg (TissueMask): tissue mask for that sample
         """
-        super().__init__(adata, img, pixel_size, meta, cellvit_seg)
+        super().__init__(adata, img, pixel_size, meta, cellvit_seg, tissue_seg)
         
 class XeniumHESTData(HESTData):
 
@@ -604,6 +581,7 @@ class XeniumHESTData(HESTData):
         pixel_size: float,
         meta: Dict = {},
         cellvit_seg: Dict=None,
+        tissue_seg: TissueMask=None,
         xenium_nuc_seg: pd.DataFrame=None,
         xenium_cell_seg: pd.DataFrame=None,
         cell_adata: sc.AnnData=None,
@@ -619,12 +597,13 @@ class XeniumHESTData(HESTData):
             pixel_size (float): pixel_size of WSI im um/px, this pixel size will be used to perform operations on the slide, such as patching and segmenting
             meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
             cellvit_seg (Dict): dictionary of cells in the CellViT .geojson format. Default: None
+            tissue_seg (TissueMask): tissue mask for that sample
             xenium_nuc_seg (pd.DataFrame): content of a xenium nuclei contour file as a dataframe (nucleus_boundaries.parquet)
             xenium_cell_seg (pd.DataFrame): content of a xenium cell contour file as a dataframe (cell_boundaries.parquet)
             cell_adata (sc.AnnData): ST cell data, each row in adata.obs is a cell, each row in obsm is the cell location on the H&E image in pixels
             transcript_df (pd.DataFrame): dataframe of transcripts, each row is a transcript, he_x and he_y is the transcript location on the H&E image in pixels
         """
-        super().__init__(adata, img, pixel_size, meta, cellvit_seg)
+        super().__init__(adata=adata, img=img, pixel_size=pixel_size, meta=meta, cellvit_seg=cellvit_seg, tissue_seg=tissue_seg)
         
         self.xenium_nuc_seg = xenium_nuc_seg
         self.xenium_cell_seg = xenium_cell_seg
@@ -675,7 +654,9 @@ class XeniumHESTData(HESTData):
 def read_HESTData(
     adata_path: str, 
     img: Union[str, np.ndarray, openslide.OpenSlide, 'CuImage'], 
-    metrics_path: str
+    metrics_path: str,
+    mask_path_pkl: str = None,
+    mask_path_jpg: str = None
 ) -> HESTData:
     """ Read a HEST sample from disk
 
@@ -685,6 +666,8 @@ def read_HESTData(
         img (Union[str, np.ndarray, openslide.OpenSlide, CuImage]): path to a full resolution image (if passed as str) or full resolution image corresponding to the ST data, Openslide/CuImage are lazily loaded, use CuImage for GPU accelerated computation
         pixel_size (float): pixel_size of WSI im um/px, this pixel size will be used to perform operations on the slide, such as patching and segmenting
         metrics_path (str): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
+        mask_path_pkl (str): path to a .pkl file containing the tissue segmentation contours. Defaults to None.
+        mask_path_jpg (str): path to a .jog file containing the greyscale tissue segmentation mask. Defaults to None.
 
     Returns:
         HESTData: HESTData object
@@ -693,14 +676,20 @@ def read_HESTData(
     if isinstance(img, str):
         if CuImage is not None:
             img = CuImage(img)
+            width, height = img.resolutions['level_dimensions'][0]
         else:
             img = openslide.OpenSlide(img)
+            width, height = img.dimensions
+            
+            
+    if mask_path_pkl is not None and mask_path_jpg is not None:
+        tissue_seg = load_tissue_mask(mask_path_pkl, mask_path_jpg, width, height)
     
     
     adata = sc.read_h5ad(adata_path)
     with open(metrics_path) as metrics_f:     
         metrics = json.load(metrics_f)
-    return HESTData(adata, img, metrics['pixel_size_um_estimated'], metrics)
+    return HESTData(adata, img, metrics['pixel_size_um_estimated'], metrics, tissue_seg=tissue_seg)
         
 
 def mask_and_patchify_bench(meta_df: pd.DataFrame, save_dir: str, use_mask=True, keep_largest=None):
@@ -786,3 +775,27 @@ def create_splits(dest_dir, splits, K):
         train_df.to_csv(os.path.join(dest_dir, f'train_{i}.csv'), index=False)
         test_df.to_csv(os.path.join(dest_dir, f'test_{i}.csv'), index=False)
         
+
+def load_hest(hest_dir: str) -> List[HESTData]:
+    """Read HESTData objects from a local directory
+
+    Args:
+        hest_dir (str): hest directory containing folders: st, wsis, metadata
+
+    Returns:
+        List[HESTData]: list of HESTData objects
+    """
+    
+    ## TODO also read mask
+
+    hestdata_list = []
+    for st_filename in os.listdir(os.path.join(hest_dir, 'st')):
+        id = st_filename.split('.')[0]
+        adata_path = os.path.join(hest_dir, 'st', f'{id}.h5ad')
+        img_path = os.path.join(hest_dir, 'wsis', f'{id}.tif')
+        meta_path = os.path.join(hest_dir, 'metadata', f'{id}.json')
+        masks_path_pkl = os.path.join(hest_dir, 'tissue_seg', f'{id}_mask.pkl')
+        masks_path_jpg = os.path.join(hest_dir, 'tissue_seg', f'{id}_mask.jpg')
+        st = read_HESTData(adata_path, img_path, meta_path)
+        hestdata_list.append(st)
+    return hestdata_list

@@ -34,7 +34,7 @@ except ImportError:
 from tqdm import tqdm
 
 
-def segment_tissue_deep(img: Union[np.ndarray, openslide.OpenSlide, 'CuImage', WSI], pixel_size_src, target_pxl_size=1, patch_size=512):
+def segment_tissue_deep(img: Union[np.ndarray, openslide.OpenSlide, 'CuImage', WSI], pixel_size_src, target_pxl_size=1, patch_size=512, model_name='deeplabv3_seg_v4.ckpt'):
     
     # TODO fix overlap
     overlap=0
@@ -51,7 +51,7 @@ def segment_tissue_deep(img: Union[np.ndarray, openslide.OpenSlide, 'CuImage', W
     
     width, height = wsi.get_dimensions()
     
-    weights_path = get_path_relative(__file__, '../../../models/deeplabv3_seg_v3.ckpt')
+    weights_path = get_path_relative(__file__, f'../../../models/{model_name}')
     
     patcher = WSIPatcher(wsi, patch_size_src)
 

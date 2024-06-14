@@ -74,7 +74,6 @@ class WSI:
             
         return thumbnail
         
-        
 class WSIPatcher:
     def __init__(self, wsi: WSI, patch_size_src):
         self.wsi = wsi
