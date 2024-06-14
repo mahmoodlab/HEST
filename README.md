@@ -111,7 +111,7 @@ python src/hest/bench/training/predict_expression.py --config bench_config/bench
 6. Read the results from the `results_dir` specified in the `.yaml` config.
 
 
-## Download/Query HEST-1k
+# Download/Query HEST-1k
 
 In order to download/query HEST-1k, please follow [this tutorial](https://huggingface.co/datasets/MahmoodLab/hest).
 The data will be in open access soon!
