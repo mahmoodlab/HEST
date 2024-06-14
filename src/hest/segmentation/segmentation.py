@@ -34,8 +34,14 @@ except ImportError:
 from tqdm import tqdm
 
 
-def segment_tissue_deep(img: Union[np.ndarray, openslide.OpenSlide, 'CuImage', WSI], pixel_size_src, target_pxl_size=1, patch_size=512, model_name='deeplabv3_seg_v4.ckpt'):
-    
+def segment_tissue_deep(
+    img: Union[np.ndarray, openslide.OpenSlide, 'CuImage', WSI],
+    pixel_size_src,
+    target_pxl_size=1,
+    patch_size=512,
+    model_name='deeplabv3_seg_v4.ckpt',
+    batch_size=8
+):    
     # TODO fix overlap
     overlap=0
     
@@ -74,7 +80,7 @@ def segment_tissue_deep(img: Union[np.ndarray, openslide.OpenSlide, 'CuImage', W
         
         eval_transforms = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
         dataset = SegDataset(tmpdirname, eval_transforms)
-        dataloader = DataLoader(dataset, 8)
+        dataloader = DataLoader(dataset, batch_size=batch_size)
         model = torch.hub.load('pytorch/vision:v0.10.0', 'deeplabv3_resnet50', pretrained=False)
         model.classifier[4] = nn.Conv2d(
             in_channels=256,

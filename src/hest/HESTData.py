@@ -243,18 +243,27 @@ class HESTData:
             tiff_save(img, os.path.join(path, ALIGNED_HE_FILENAME), self.pixel_size, pyramidal=pyramidal, bigtiff=bigtiff)
 
 
-    def compute_mask(self, keep_largest=False, thumbnail_width=2000, method: str='deep') -> None:
+    def compute_mask(
+        self, 
+        keep_largest=False, 
+        thumbnail_width=2000, 
+        method: str='deep', 
+        batch_size=8, 
+        model_name='deeplabv3_seg_v4.ckpt'
+    ) -> None:
         """ Compute tissue mask and stores it in the current HESTData object
 
         Args:
             method (str, optional): perform deep learning based segmentation ('deep') or otsu based ('otsu').
-            Deep-learning based segmentation will be more accurate but a GPU is recommended, 'otsu' is faster but less accurate. Defaults to 'deep'.
+                Deep-learning based segmentation will be more accurate but a GPU is recommended, 'otsu' is faster but less accurate. Defaults to 'deep'.
+            batch_size (int, optional): inference batch_size if method=`deep` is selected. Defaults to 8.
+            model_name (str, optional): name of model weights in `models` used if method=`deep` is selected. Defaults to 'deeplabv3_seg_v4.ckpt'.
         """
         
         check_arg(method, 'method', ['deep', 'otsu'])
         
         if method == 'deep':
-            self.tissue_mask, self.contours_tissue, self.contours_holes = segment_tissue_deep(self.wsi, self.pixel_size, target_pxl_size=1, patch_size=512)
+            self.tissue_mask, self.contours_tissue, self.contours_holes = segment_tissue_deep(self.wsi, self.pixel_size, target_pxl_size=1, patch_size=512, batch_size=batch_size, model_name=model_name)
         elif method == 'otsu':
         
             width, height = self.wsi.get_dimensions()
