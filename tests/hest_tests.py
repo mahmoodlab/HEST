@@ -87,11 +87,9 @@ class TestHESTReader(unittest.TestCase):
     def test_autoalign_to_file(self):
         fullres_img_path = _j(self.cur_dir, './assets/WSA_LngSP9258463.jpg')
         
-        fullres_img = load_image(fullres_img_path)
+        fullres_img, _ = load_image(fullres_img_path)
         
         autoalign_visium(fullres_img, _j(self.output_dir, 'img+filtered_matrix'))
-        
-    
         
 
 class TestHESTData(unittest.TestCase):
@@ -111,9 +109,8 @@ class TestHESTData(unittest.TestCase):
         
         if CuImage is not None:
             img = CuImage(_j(cur_dir, './assets/SPA154.tif'))
-            self.st_objects.append(HESTData(adata, img, pixel_size))
-        
-        img = openslide.OpenSlide(_j(cur_dir, './assets/SPA154.tif'))
+        else:
+            img = openslide.OpenSlide(_j(cur_dir, './assets/SPA154.tif'))
         self.st_objects.append({'name': 'numpy', 'st': HESTData(adata, img, pixel_size)})
         
         if CuImage is not None:

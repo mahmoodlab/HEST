@@ -47,7 +47,7 @@ pip install -e .
 
 #### additional dependencies (for WSI manipulation):
 ```
-apt install libvips libvips-dev openslide-tools
+sudo apt install libvips libvips-dev openslide-tools
 ```
 
 #### additional dependencies (GPU acceleration):
@@ -119,10 +119,10 @@ The data will be in open access soon!
 ```python
 st = read_HESTData(
     adata_path='SPA154.h5ad', # aligned ST counts
-    img=cur_dir, 'SPA154.tif', # WSI
-    metrics_path=cur_dir, 'SPA154.json', # metrics/metadata
-    mask_path_pkl=cur_dir, 'SPA154_mask.pkl', # optional (tissue_mask)
-    mask_path_jpg=cur_dir, 'SPA154_mask.jpg' # optional (tissue_mask)
+    img='SPA154.tif', # WSI
+    metrics_path='SPA154.json', # metrics/metadata
+    mask_path_pkl='SPA154_mask.pkl', # optional (tissue_mask)
+    mask_path_jpg='SPA154_mask.jpg' # optional (tissue_mask)
 )
 ```
 
