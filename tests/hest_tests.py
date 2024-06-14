@@ -20,7 +20,7 @@ except ImportError:
 
 from hest import HESTData, read_HESTData
 from hest.utils import get_path_relative
-from hest.wsi import WSI
+from hest.wsi import WSI, wsi_factory
 
 
 class TestHESTReader(unittest.TestCase):
@@ -115,10 +115,10 @@ class TestHESTData(unittest.TestCase):
         self.st_objects.append({'name': 'numpy', 'st': HESTData(adata, img, pixel_size)})
         
         if CuImage is not None:
-            img = WSI(CuImage(_j(cur_dir, './assets/SPA154.tif'))).numpy()
+            img = wsi_factory(CuImage(_j(cur_dir, './assets/SPA154.tif'))).numpy()
             self.st_objects.append({'name': 'cuimage', 'st': HESTData(adata, img, pixel_size)})
         else:
-            img = WSI(openslide.OpenSlide(_j(cur_dir, './assets/SPA154.tif'))).numpy()
+            img = wsi_factory(openslide.OpenSlide(_j(cur_dir, './assets/SPA154.tif'))).numpy()
             self.st_objects.append({'name': 'openslide', 'st': HESTData(adata, img, pixel_size)})    
         
     

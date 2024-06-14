@@ -2,11 +2,7 @@
 # Utils for h5 file saving
 ####
 
-import os
-import pdb
-
 import h5py
-import numpy as np
 
 
 def initsave_hdf5(output_fpath, asset_dict, attr_dict= None, mode='a', static_shape=None, chunk_as_max_shape=False, verbose=0):

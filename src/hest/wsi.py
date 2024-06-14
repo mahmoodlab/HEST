@@ -1,3 +1,4 @@
+from abc import abstractmethod
 import cv2
 import numpy as np
 import openslide
@@ -22,57 +23,98 @@ class WSI:
         
         self.width, self.height = self.get_dimensions()
         
-        
+    @abstractmethod
+    def numpy(self) -> np.ndarray:
+        pass
+
+    @abstractmethod
+    def get_dimensions(self):
+        pass
+    
+    @abstractmethod
+    def read_region(self, location, size) -> np.ndarray:
+        pass
+    
+    @abstractmethod
+    def get_thumbnail(self, width, height):
+        pass
+    
+
+def wsi_factory(img) -> WSI:
+    if isinstance(img, openslide.OpenSlide):
+        return OpenSlideWSI(img)
+    elif isinstance(img, np.ndarray):
+        return NumpyWSI(img)
+    elif is_cuimage(img):
+        return CuImageWSI(img)
+    else:
+        raise ValueError(f'type {type(img)} is not supported')
+
+class NumpyWSI(WSI):
+    def __init__(self, img: np.ndarray):
+        super().__init__(img)
         
     def numpy(self) -> np.ndarray:
-        self.img = self.get_thumbnail(self.width, self.height)
-        
         return self.img
 
-
     def get_dimensions(self):
-        img = self.img
-        if isinstance(img, openslide.OpenSlide):
-            width, height = img.dimensions
-        elif isinstance(img, np.ndarray):
-            width, height = img.shape[1], img.shape[0]
-        elif is_cuimage(img):
-            width, height = img.resolutions['level_dimensions'][0]
-        return width, height
-    
+        return self.img.shape[1], self.img.shape[0]
     
     def read_region(self, location, size) -> np.ndarray:
         img = self.img
-        if isinstance(img, openslide.OpenSlide):
-            return np.array(img.read_region(location, 0, size))
-        elif isinstance(img, np.ndarray):
-            x_start, y_start = location[0], location[1]
-            x_size, y_size = size[0], size[1]
-            return img[y_start:y_start + y_size, x_start:x_start + x_size]
-        elif is_cuimage(img):
-            return np.array(img.read_region(location=location, level=0, size=size))
+        x_start, y_start = location[0], location[1]
+        x_size, y_size = size[0], size[1]
+        return img[y_start:y_start + y_size, x_start:x_start + x_size]
     
+    def get_thumbnail(self, width, height) -> np.ndarray:
+        return cv2.resize(self.img, (width, height))
+    
+
+class OpenSlideWSI(WSI):
+    def __init__(self, img: openslide.OpenSlide):
+        super().__init__(img)
+        
+    def numpy(self) -> np.ndarray:
+        return self.get_thumbnail(self.width, self.height)
+
+    def get_dimensions(self):
+        return self.img.dimensions
+    
+    def read_region(self, location, size) -> np.ndarray:
+        return np.array(self.img.read_region(location, 0, size))
+
+    def get_thumbnail(self, width, height):
+        return np.array(self.img.get_thumbnail((width, height)))
+    
+class CuImageWSI(WSI):
+    def __init__(self, img: 'CuImage'):
+        super().__init__(img)
+
+    def numpy(self) -> np.ndarray:
+        return self.get_thumbnail(self.width, self.height)
+
+    def get_dimensions(self):
+        return self.img.resolutions['level_dimensions'][0]
+    
+    
+    def read_region(self, location, size) -> np.ndarray:
+        return np.array(self.img.read_region(location=location, level=0, size=size))
     
     def get_thumbnail(self, width, height):
-        img = self.img
-        if isinstance(img, np.ndarray):
-            thumbnail = cv2.resize(img, (width, height))
-        elif isinstance(img, openslide.OpenSlide):
-            thumbnail =  np.array(img.get_thumbnail((width, height)))
-        elif is_cuimage(img):
-            downsample = self.width / width
-            downsamples = img.resolutions['level_downsamples']
-            closest = 0
-            for i in range(len(downsamples)):
-                if downsamples[i] > downsample:
-                    break
-                closest = i
-            
-            curr_width, curr_height = img.resolutions['level_dimensions'][closest]
-            thumbnail = np.array(img.read_region(location=(0, 0), level=closest, size=(curr_width, curr_height)))
-            thumbnail = cv2.resize(thumbnail, (width, height))            
+        downsample = self.width / width
+        downsamples = self.img.resolutions['level_downsamples']
+        closest = 0
+        for i in range(len(downsamples)):
+            if downsamples[i] > downsample:
+                break
+            closest = i
+        
+        curr_width, curr_height = self.img.resolutions['level_dimensions'][closest]
+        thumbnail = np.array(self.img.read_region(location=(0, 0), level=closest, size=(curr_width, curr_height)))
+        thumbnail = cv2.resize(thumbnail, (width, height))            
             
         return thumbnail
+    
         
 class WSIPatcher:
     def __init__(self, wsi: WSI, patch_size_src):

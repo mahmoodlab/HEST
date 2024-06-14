@@ -1,19 +1,15 @@
 import concurrent.futures
 import gzip
 import json
-import multiprocessing
 import os
 import shutil
-from cProfile import Profile
 from enum import Enum
-from pstats import SortKey, Stats
 from typing import List, Tuple, Union
 
 import h5py
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from huggingface_hub import snapshot_download
 
 try:
     import pyvips
@@ -219,21 +215,6 @@ def compare_meta_df(meta_df1, meta_df2):
     print('')
     print('only in meta2: ', diff2)
     return list(diff1), list(diff2)
-
-def profile_fn(fn, **args):
-    """Profile a function and print the runtime stats
-
-    Args:
-        fn (function): function to profile
-    """
-    with Profile() as profile:
-        fn(**args)
-        (
-            Stats(profile)
-            .strip_dirs()
-            .sort_stats(SortKey.TIME)
-            .print_stats()
-        )
 
 
 def normalize_adata(adata: sc.AnnData, scale=1e6, smooth=False) -> sc.AnnData:

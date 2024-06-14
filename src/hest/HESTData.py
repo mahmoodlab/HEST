@@ -1,17 +1,15 @@
 import json
 import os
-import pickle
 import shutil
-import tempfile
 import warnings
-from functools import partial
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Union
 
 import cv2
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import tifffile
+
 try:
     from cucim import CuImage
 except ImportError:
@@ -19,7 +17,7 @@ except ImportError:
     print("CuImage is not available. Ensure you have a GPU and cucim installed to use GPU acceleration.")
 
 from hest.segmentation.TissueMask import TissueMask, load_tissue_mask
-from hest.wsi import WSI
+from hest.wsi import WSI, NumpyWSI, wsi_factory
 
 try:
     import openslide
@@ -43,15 +41,17 @@ from spatialdata import SpatialData
 from tqdm import tqdm
 
 from .segmentation.SegDataset import SegDataset
-from .segmentation.segmentation import (apply_otsu_thresholding, keep_largest_area,
-                           mask_to_contours, save_pkl, scale_contour_dim,
-                           segment_tissue_deep, visualize_tissue_seg)
+from .segmentation.segmentation import (apply_otsu_thresholding,
+                                        keep_largest_area, mask_to_contours,
+                                        save_pkl, scale_contour_dim,
+                                        segment_tissue_deep,
+                                        visualize_tissue_seg)
 from .utils import (ALIGNED_HE_FILENAME, check_arg, get_path_from_meta_row,
                     get_path_relative, load_image, plot_verify_pixel_size,
                     tiff_save)
 from .vst_save_utils import initsave_hdf5
 
-        
+
 class HESTData:
     """
     Object representing a Spatial Transcriptomics sample along with a full resolution H&E image and metadatas
@@ -107,7 +107,7 @@ class HESTData:
         """
         self.adata = adata
         
-        self.wsi = WSI(img)
+        self.wsi = wsi_factory(img)
             
         self.meta = meta
         self._verify_format(adata)
@@ -163,8 +163,7 @@ class HESTData:
     
     def load_wsi(self) -> None:
         """Load the full WSI in memory"""
-        width, height = self.wsi.get_dimensions()
-        self.wsi = WSI(self.wsi.get_thumbnail(width, height))
+        self.wsi = NumpyWSI(self.wsi.numpy())
     
         
     def save(self, path: str, save_img=True, pyramidal=True, bigtiff=False, plot_pxl_size=False):

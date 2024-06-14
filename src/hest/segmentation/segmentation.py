@@ -14,7 +14,7 @@ from torchvision import models, transforms
 
 from hest.segmentation.SegDataset import SegDataset
 from hest.utils import get_path_relative
-from hest.wsi import WSI, WSIPatcher
+from hest.wsi import WSI, WSIPatcher, wsi_factory
 
 try:
     import openslide
@@ -52,7 +52,7 @@ def segment_tissue_deep(
     if isinstance(img, WSI):
         wsi = img
     else:
-        wsi = WSI(img)
+        wsi = wsi_factory(img)
     
     
     width, height = wsi.get_dimensions()
@@ -206,7 +206,7 @@ def visualize_tissue_seg(
         hole_fill_color = (0, 0, 0)
     
     
-        wsi = WSI(img)
+        wsi = wsi_factory(img)
     
         width, height = wsi.get_dimensions()
         downsample = target_width / width

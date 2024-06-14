@@ -3,13 +3,10 @@ import math
 import os
 import shutil
 from abc import abstractmethod
-from typing import Dict, Tuple
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import scanpy as sc
-from matplotlib import rcParams
 from tqdm import tqdm
 
 from .autoalign import autoalign_visium
@@ -21,10 +18,11 @@ from .custom_readers import (GSE167096_to_adata, GSE180128_to_adata,
                              raw_count_to_adata, raw_counts_to_pixel)
 from .HESTData import (HESTData, STHESTData, VisiumHDHESTData, VisiumHESTData,
                        XeniumHESTData)
-from .utils import (SpotPacking, align_xenium_df, check_arg, df_morph_um_to_pxl,
-                    find_biggest_img, find_first_file_endswith,
-                    find_pixel_size_from_spot_coords, get_path_from_meta_row, get_path_relative,
-                    helper_mex, load_image, metric_file_do_dict, read_10x_seg,
+from .utils import (SpotPacking, align_xenium_df, check_arg,
+                    df_morph_um_to_pxl, find_biggest_img,
+                    find_first_file_endswith, find_pixel_size_from_spot_coords,
+                    get_path_from_meta_row, get_path_relative, helper_mex,
+                    load_image, metric_file_do_dict, read_10x_seg,
                     register_downscale_img)
 
 

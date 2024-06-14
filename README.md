@@ -113,8 +113,20 @@ python src/hest/bench/training/predict_expression.py --config bench_config/bench
 
 # Download/Query HEST-1k
 
-In order to download/query HEST-1k, please follow [this tutorial](https://huggingface.co/datasets/MahmoodLab/hest).
+In order to download/query HEST-1k, please follow the instructions on the [Hugging Face page](https://huggingface.co/datasets/MahmoodLab/hest).
 The data will be in open access soon!
+
+You can then simply load the dataset as a `List[HESTData]`
+```python
+from hest import load_hest
+
+
+print('load hest...')
+hest_d = load_hest('hest_data') # location of the data
+print('loaded hest')
+for d in data:
+    print(d)
+```
 
 # Tutorials
 

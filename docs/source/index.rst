@@ -6,9 +6,18 @@
 Welcome to hest's documentation!
 ================================
 
-`hest` provides a flexible approach for loading the different Spatial Transcriptomics data formats supporting H&E (Visium/Visium-HD, Xenium and ST) and for automatically aligning them with their associated histology image. `Hest` was used for assembling the `HEST-1k` dataset, processing challenging ST datasets from a wide variety of sources.
+#### What does the hest library provide?
+- Functions for interacting with the <b>HEST-1K</b> dataset
+- <b>Missing file</b> imputation and automatic alignment for Visium
+- <b>Fast</b> functions for pooling transcripts and tesselating ST/H&E pairs into patches (these functions are GPU optimized with CUCIM if CUDA is available).
+- Deep learning based or Otsu based <b>tissue segmentation</b> for both H&E and IHC stains
+- Compatibility with <b>Scanpy</b> and <b>SpatialData</b>
 
+Hest was used to assemble the HEST-1k dataset, processing challenging ST datasets from a wide variety of sources and converting them to formats commonly used in pathology (.tif, Scanpy AnnData).
 
+The main strength of hest is its ability to read ST samples even when files are missing, for example hest is able to read a Visium sample even if only `filtered_bc_matrix.h5` (or a `mex` folder) and a `full_resolution.tif` are provided.
+
+<br/>
 
 .. toctree::
    :maxdepth: 2
