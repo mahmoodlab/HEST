@@ -789,7 +789,7 @@ def load_hest(hest_dir: str) -> List[HESTData]:
     """Read HESTData objects from a local directory
 
     Args:
-        hest_dir (str): hest directory containing folders: st, wsis, metadata
+        hest_dir (str): hest directory containing folders: st, wsis, metadata, tissue_seg (optional)
 
     Returns:
         List[HESTData]: list of HESTData objects
@@ -803,8 +803,9 @@ def load_hest(hest_dir: str) -> List[HESTData]:
         adata_path = os.path.join(hest_dir, 'st', f'{id}.h5ad')
         img_path = os.path.join(hest_dir, 'wsis', f'{id}.tif')
         meta_path = os.path.join(hest_dir, 'metadata', f'{id}.json')
-        masks_path_pkl = os.path.join(hest_dir, 'tissue_seg', f'{id}_mask.pkl')
-        masks_path_jpg = os.path.join(hest_dir, 'tissue_seg', f'{id}_mask.jpg')
-        st = read_HESTData(adata_path, img_path, meta_path)
+        if os.path.exists(os.path.join(hest_dir, 'tissue_seg')):
+            masks_path_pkl = os.path.join(hest_dir, 'tissue_seg', f'{id}_mask.pkl')
+            masks_path_jpg = os.path.join(hest_dir, 'tissue_seg', f'{id}_mask.jpg')
+        st = read_HESTData(adata_path, img_path, meta_path, masks_path_pkl, masks_path_jpg)
         hestdata_list.append(st)
     return hestdata_list

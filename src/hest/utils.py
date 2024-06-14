@@ -32,34 +32,6 @@ Image.MAX_IMAGE_PIXELS = 93312000000
 ALIGNED_HE_FILENAME = 'aligned_fullres_HE.tif'
 
 
-def load_hest_meta(version='v1.0.0') -> pd.DataFrame:
-    meta_df_name = 'HEST_' + version.replace('.', '_') + '.csv'
-    meta_df = pd.read_csv(os.path.join(get_path_relative('../../metadata/'), meta_df_name))
-    return meta_df
-
-def download_hest(meta_df: pd.DataFrame, local_dir):    
-    # TODO add option to download patches
-    
-    ids = meta_df['id'].values
-    list_patterns = []
-    for id in ids:
-        
-        ## what about list_patterns.append(f'*/{id}*')
-        
-        list_patterns.append(f'thumbnails/{id}_downscaled_fullres.jpeg')
-        list_patterns.append(f'st/{id}.h5ad')
-        list_patterns.append(f'wsis/{id}.tif')
-        list_patterns.append(f'metadata/{id}.json')
-        list_patterns.append(f'tissue_seg/{id}_mask.jpg')
-        list_patterns.append(f'tissue_seg/{id}_mask.pkl')
-        list_patterns.append(f'tissue_seg/{id}_vis.jpg')
-        list_patterns.append(f'pixel_size_vis/{id}_pixel_size_vis.png')
-        list_patterns.append(f'cellvit_seg/{id}_cellvit_seg.zip')
-        list_patterns.append(f'spatial_plots/{id}_spatial_plots.png')
-    
-        
-    snapshot_download(repo_id="pauldoucet/hest", repo_type='dataset', allow_patterns=list_patterns, local_dir=local_dir)
-    
 
 def combine_meta_metrics(meta_df, metrics_path, meta_path):
     for _, row in meta_df.iterrows():
