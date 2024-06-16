@@ -6,9 +6,9 @@
 
 <img src="figures/fig1_just_the_dataset.jpg" width="450px" align="right" />
 
-Welcome to the official GitHub repository of the HEST-Library introduced in "HEST-1k: A Dataset for Spatial Transcriptomics and Histology Image Analysis". This project was developed by the [Mahmood Lab](https://faisal.ai/) at Harvard Medical School and Brigham and Women's Hospital. 
+Welcome to the official GitHub repository of the HEST-Library introduced in *"HEST-1k: A Dataset for Spatial Transcriptomics and Histology Image Analysis"*. This project was developed by the [Mahmood Lab](https://faisal.ai/) at Harvard Medical School and Brigham and Women's Hospital. 
 
-**Note: HEST-Library is still under review and in active development. Please report any bugs in the GitHub issues.** 
+**Note: HEST-Library is still under active development. Please report any bugs in the GitHub issues.** 
 <br/>
 
 #### What does the HEST-Library provide?
