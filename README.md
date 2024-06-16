@@ -1,4 +1,4 @@
-# HEST-Library
+# HEST-Library: Bringing Spatial Transcriptomics and Histopathology together
 ## Designed for querying and assembling HEST-1k dataset 
 
 \[ [HEST-1k (incoming)](https://huggingface.co/datasets/MahmoodLab/hest) | [website](https://mahmoodlab.github.io/hest-website/)\]
