@@ -4,6 +4,8 @@
 \[ [HEST-1k (incoming)](https://huggingface.co/datasets/MahmoodLab/hest) | [website](https://mahmoodlab.github.io/hest-website/)\]
 <!-- [ArXiv (stay tuned)]() | [Interactive Demo](http://clam.mahmoodlab.org) | [Cite](#reference) -->
 
+<img src="figures/fig1_just_the_dataset.jpg" width="450px" align="right" />
+
 Welcome to the official GitHub repository of the HEST-Library introduced in "HEST-1k: A Dataset for Spatial Transcriptomics and Histology Image Analysis". This project was developed by the [Mahmood Lab](https://faisal.ai/) at Harvard Medical School and Brigham and Women's Hospital. 
 
 **Note: HEST-Library is still under review and in active development. Please report any bugs in the GitHub issues.** 
@@ -16,8 +18,6 @@ Welcome to the official GitHub repository of the HEST-Library introduced in "HES
 - Deep learning based or Otsu based <b>tissue segmentation</b> for both H&E and IHC stains
 - Integration with <b>Scanpy</b> and <b>SpatialData</b>
 - Running the HEST-Benchmark for assessing foundation models for histology
-
-<img src="figures/fig1_just_the_dataset.jpg" width="300px" align="right" />
 
 <br/>
 
