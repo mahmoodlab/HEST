@@ -1,7 +1,7 @@
 # HEST-Library
 ## Designed for querying and assembling HEST-1k dataset 
 
-\[ [HEST-1k dataset (incoming)](https://huggingface.co/datasets/MahmoodLab/hest) | [website](https://mahmoodlab.github.io/hest-website/)\]
+\[ [HEST-1k (incoming)](https://huggingface.co/datasets/MahmoodLab/hest) | [website](https://mahmoodlab.github.io/hest-website/)\]
 <!-- [ArXiv (stay tuned)]() | [Interactive Demo](http://clam.mahmoodlab.org) | [Cite](#reference) -->
 
 Welcome to the official GitHub repository of the HEST-Library introduced in "HEST-1k: A Dataset for Spatial Transcriptomics and Histology Image Analysis". This project was developed by the [Mahmood Lab](https://faisal.ai/) at Harvard Medical School and Brigham and Women's Hospital. 
@@ -9,33 +9,19 @@ Welcome to the official GitHub repository of the HEST-Library introduced in "HES
 **Note: HEST-Library is still under review and in active development. Please report any bugs in the GitHub issues.** 
 <br/>
 
-#### What does the hest library provide?
-- Functions for interacting with the <b>HEST-1K</b> dataset
+#### What does the HEST-Library provide?
+- Functions for downloading and interacting with the <b>HEST-1K</b> dataset
 - <b>Missing file</b> imputation and automatic alignment for Visium
-- <b>Fast</b> functions for pooling transcripts and tesselating ST/H&E pairs into patches (these functions are GPU optimized with CUCIM if CUDA is available).
+- <b>Fast</b> functions for pooling transcripts and tesselating ST/H&E pairs into patches
 - Deep learning based or Otsu based <b>tissue segmentation</b> for both H&E and IHC stains
-- Compatibility with <b>Scanpy</b> and <b>SpatialData</b>
-
-Hest was used to assemble the HEST-1k dataset, processing challenging ST datasets from a wide variety of sources and converting them to formats commonly used in pathology (.tif, Scanpy AnnData).
+- Integration with <b>Scanpy</b> and <b>SpatialData</b>
+- Running the HEST-Benchmark for assessing foundation models for histology
 
 <p align="center">
   <img src="figures/fig1.png" alt="Description" style="width: 70%;"/>
 </p>
 
-The main strength of hest is its ability to read ST samples even when files are missing, for example hest is able to read a Visium sample even if only `filtered_bc_matrix.h5` (or a `mex` folder) and a `full_resolution.tif` are provided.
-
 <br/>
-
-1. [Installation](#installation)
-2. [Information for reviewers](#information-for-reviewers)
-3. [Documentation](https://hest.readthedocs.io/en/latest/)
-3. [Query HEST-1k](#downloadquery-hest-1k)
-4. [Hest-lib tutorials](#tutorials) \
-5.2 [HESTData](#hestdata-api) \
-5.2 [Hest reader API](#hest-reader-api) \
-5.3 [Hest bench](#hest-bench-tutorial) 
-<br/>
-
 
 # Installation
 
@@ -53,7 +39,7 @@ sudo apt install libvips libvips-dev openslide-tools
 ```
 
 #### additional dependencies (GPU acceleration):
-If a GPU is available on your machine, it is strongly recommended to install [cucim](https://docs.rapids.ai/install) on your conda environment. (hest was tested with `cucim-cu12==24.4.0` and `CUDA 12.1`)
+If a GPU is available on your machine, we recommend installing [cucim](https://docs.rapids.ai/install) on your conda environment. (hest was tested with `cucim-cu12==24.4.0` and `CUDA 12.1`)
 ```
 pip install \
     --extra-index-url=https://pypi.nvidia.com \
@@ -61,16 +47,45 @@ pip install \
     raft-dask-cu12==24.6.*
 ```
 
-NOTE: hest was only tested on linux/macOS machines, please report any bugs in the GitHub issues.
+NOTE: HEST-Library was only tested on Linux/macOS machines, please report any bugs in the GitHub issues.
 
-### Tissue segmentation model
-In order to use the deep-learning based tissue segmentation model:
-1. Download the segmenter weights [here](https://huggingface.co/pauldoucet/tissue-detector/blob/main/deeplabv3_seg_v4.ckpt)
-2. place the weights in the `models/` directory
+# Download/Query HEST-1k
 
-### CONCH/UNI installation (Optional, for HEST-bench only)
+To download/query HEST-1k, follow instructions on the [Hugging Face page](https://huggingface.co/datasets/MahmoodLab/hest). The data will be in open access soon!
 
-If you want to benchmark CONCH/UNI, additional steps are necesary
+You can then simply load the dataset as a `List[HESTData]`
+```python
+from hest import load_hest
+
+print('load hest...')
+hest_d = load_hest('hest_data') # location of the data
+print('loaded hest')
+for d in data:
+    print(d)
+```
+
+# HEST-Benchmark
+
+To reproduce the results of the HEST-Benchmark (Table 1 and Suppl. Table 11), please follow the following steps:
+
+1. Install HEST-Library as explained in section 1
+
+2. Download the benchmark task data `bench_data.zip` from [this link](https://www.dropbox.com/scl/fo/61m7k9s6ujnccdusuv4an/ACcBmaN6LhnluMhDPPGD5fY?rlkey=zqqjxhp7yz0jyrb3ancmo0ofb&dl=0) and unzip it to some directory
+
+3. Download the patch encoder weights `fm_v1.zip` from [this link](https://www.dropbox.com/scl/fo/61m7k9s6ujnccdusuv4an/ACcBmaN6LhnluMhDPPGD5fY?rlkey=zqqjxhp7yz0jyrb3ancmo0ofb&dl=0) and unzip it to some directory
+
+4. Then update the paths in the config file `bench_config/bench_config.yaml`
+
+5. Start the benchmark with the following:
+```bash
+python src/hest/bench/training/predict_expression.py --config bench_config/bench_config.yaml
+```
+
+6. Read the results from the `results_dir` specified in the `.yaml` config.
+
+### CONCH/UNI installation (Optional, for HEST-Benchmark only)
+
+If you want to benchmark CONCH/UNI, additional steps are necessary
 
 #### CONCH installation (model + weights)
 
@@ -92,44 +107,6 @@ pip install -e .
 
 2. Download the model weights (`pytorch_model.bin`) and place them in your `fm_v1` directory `fm_v1/uni_v1_official/pytorch_model.bin`
 
-# Information for reviewers
-
-
-In order to reproduce the results of the HEST-benchmark (Table 1 and Suppl. Table 11), please follow the following steps:
-
-1. Install hest as explained in section 1
-
-2. Download the benchmark task data `bench_data.zip` from [this link](https://www.dropbox.com/scl/fo/61m7k9s6ujnccdusuv4an/ACcBmaN6LhnluMhDPPGD5fY?rlkey=zqqjxhp7yz0jyrb3ancmo0ofb&dl=0) and unzip it to some directory
-
-3. Download the patch encoder weights `fm_v1.zip` from [this link](https://www.dropbox.com/scl/fo/61m7k9s6ujnccdusuv4an/ACcBmaN6LhnluMhDPPGD5fY?rlkey=zqqjxhp7yz0jyrb3ancmo0ofb&dl=0) and unzip it to some directory
-
-4. Then update the paths in the config file `bench_config/bench_config.yaml`
-
-5. Start the benchmark with the following:
-```bash
-python src/hest/bench/training/predict_expression.py --config bench_config/bench_config.yaml
-```
-
-6. Read the results from the `results_dir` specified in the `.yaml` config.
-
-
-# Download/Query HEST-1k
-
-In order to download/query HEST-1k, please follow the instructions on the [Hugging Face page](https://huggingface.co/datasets/MahmoodLab/hest).
-The data will be in open access soon!
-
-You can then simply load the dataset as a `List[HESTData]`
-```python
-from hest import load_hest
-
-
-print('load hest...')
-hest_d = load_hest('hest_data') # location of the data
-print('loaded hest')
-for d in data:
-    print(d)
-```
-
 # Tutorials
 
 ## HESTData API
@@ -145,23 +122,23 @@ st = read_HESTData(
 )
 ```
 
-## Visualizing the spots over a fullres WSI
+## Visualizing the spots over a full-resolution WSI
 ``` python
-# visualize the spots over a downscaled version of the fullres image
+# visualize the spots over a downscaled version of the full resolution image
 st.save_spatial_plot(save_dir)
 ```
 
 ## Saving to pyramidal tiff and h5
 Save `HESTData` object to `.tiff` + expression `.h5ad` and a metadata file.
 ``` python
-# Warning saving a large image to pyramidal tiff (>1GB) can be slow on a hard drive !
+# Warning saving a large image to pyramidal tiff (>1GB) can be slow on a hard drive.
 st.save(save_dir, pyramidal=True)
 
 ```
 
 ## Otsu-based segmentation or deep learning based segmentation
 
-In order to use the deep-learning based detector, please download the weights from [here](https://huggingface.co/pauldoucet/tissue-detector), and deposit then in the `models/` directory.
+To use the deep-learning based detector, please download the weights from [here](https://huggingface.co/pauldoucet/tissue-detector), and deposit them in the `models/` directory.
 
 ```python
 save_dir = '.'
