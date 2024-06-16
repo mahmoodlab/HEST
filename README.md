@@ -62,49 +62,6 @@ for d in data:
     print(d)
 ```
 
-# HEST-Benchmark
-
-To reproduce the results of the HEST-Benchmark (Table 1 and Suppl. Table 11), please follow the following steps:
-
-1. Install HEST-Library as explained in section 1
-
-2. Download the benchmark task data `bench_data.zip` from [this link](https://www.dropbox.com/scl/fo/61m7k9s6ujnccdusuv4an/ACcBmaN6LhnluMhDPPGD5fY?rlkey=zqqjxhp7yz0jyrb3ancmo0ofb&dl=0) and unzip it to some directory
-
-3. Download the patch encoder weights `fm_v1.zip` from [this link](https://www.dropbox.com/scl/fo/61m7k9s6ujnccdusuv4an/ACcBmaN6LhnluMhDPPGD5fY?rlkey=zqqjxhp7yz0jyrb3ancmo0ofb&dl=0) and unzip it to some directory
-
-4. Then update the paths in the config file `bench_config/bench_config.yaml`
-
-5. Start the benchmark with the following:
-```bash
-python src/hest/bench/training/predict_expression.py --config bench_config/bench_config.yaml
-```
-
-6. Read the results from the `results_dir` specified in the `.yaml` config.
-
-### CONCH/UNI installation (Optional, for HEST-Benchmark only)
-
-If you want to benchmark CONCH/UNI, additional steps are necessary
-
-#### CONCH installation (model + weights)
-
-1. Request access to the model weights from the Huggingface model page [here](https://huggingface.co/MahmoodLab/CONCH).
-
-2. Download the model weights (`pytorch_model.bin`) and place them in your `fm_v1` directory `fm_v1/conch_v1_official/pytorch_model.bin`
-
-3. Install the CONCH PyTorch model:
-
-```
-git clone https://github.com/mahmoodlab/CONCH.git
-cd CONCH
-pip install -e .
-```
-
-#### UNI installation (weights only)
-
-1. Request access to the model weights from the Huggingface model page [here](https://huggingface.co/MahmoodLab/UNI).
-
-2. Download the model weights (`pytorch_model.bin`) and place them in your `fm_v1` directory `fm_v1/uni_v1_official/pytorch_model.bin`
-
 # Tutorials
 
 ## HESTData API
@@ -212,15 +169,56 @@ visium_dir = ...
 st = VisiumReader().auto_read(visium_dir)
 ```
 
-## Hest-bench tutorial
+# HEST-Benchmark
 
-In order to benchmark your model with hest
+To reproduce the results of the HEST-Benchmark (Table 1 and Suppl. Table 11), please follow the following steps:
+
+1. Install HEST-Library as explained in section 1
+
+2. Download the benchmark task data `bench_data.zip` from [this link](https://www.dropbox.com/scl/fo/61m7k9s6ujnccdusuv4an/ACcBmaN6LhnluMhDPPGD5fY?rlkey=zqqjxhp7yz0jyrb3ancmo0ofb&dl=0) and unzip it to some directory
+
+3. Download the patch encoder weights `fm_v1.zip` from [this link](https://www.dropbox.com/scl/fo/61m7k9s6ujnccdusuv4an/ACcBmaN6LhnluMhDPPGD5fY?rlkey=zqqjxhp7yz0jyrb3ancmo0ofb&dl=0) and unzip it to some directory
+
+4. Then update the paths in the config file `bench_config/bench_config.yaml`
+
+5. Start the benchmark with the following:
+```bash
+python src/hest/bench/training/predict_expression.py --config bench_config/bench_config.yaml
+```
+
+6. Read the results from the `results_dir` specified in the `.yaml` config.
+
+### CONCH/UNI installation (Optional, for HEST-Benchmark only)
+
+If you want to benchmark CONCH/UNI, additional steps are necessary
+
+#### CONCH installation (model + weights)
+
+1. Request access to the model weights from the Huggingface model page [here](https://huggingface.co/MahmoodLab/CONCH).
+
+2. Download the model weights (`pytorch_model.bin`) and place them in your `fm_v1` directory `fm_v1/conch_v1_official/pytorch_model.bin`
+
+3. Install the CONCH PyTorch model:
+
+```
+git clone https://github.com/mahmoodlab/CONCH.git
+cd CONCH
+pip install -e .
+```
+
+#### UNI installation (weights only)
+
+1. Request access to the model weights from the Huggingface model page [here](https://huggingface.co/MahmoodLab/UNI).
+
+2. Download the model weights (`pytorch_model.bin`) and place them in your `fm_v1` directory `fm_v1/uni_v1_official/pytorch_model.bin`
+
+### Benchmarking your own model
+
+To benchmark your model with hest:
 
 1. Download the benchmark task data `bench_data.zip` from [this link](https://drive.google.com/drive/folders/1x5envjv6lUfH9Hw13hXPIucMJELSJEKl) and unzip it to some directory
 
 2. Then modify the config file in `bench_config/bench_config.yaml`
-
-### Benchmarking your own model
 
 ```python
 from hest.bench import benchmark_encoder
@@ -236,7 +234,7 @@ benchmark_encoder(
 )
 ```
 
-### From the command-line
+#### From the command-line
 
 1. Add your model config in `src/hest/bench/cpath_model_zoo/pretrained_configs`
 2. Launch the benchmark with:
@@ -245,12 +243,12 @@ benchmark_encoder(
 python src/hest/bench/training/predict_expression.py --config bench_config/bench_config.yaml
 ```
 
-## Issues 
+# Issues 
 - The preferred mode of communication is via GitHub issues.
 - If GitHub issues are inappropriate, email `gjaume@bwh.harvard.edu` (and cc `pdoucet@bwh.harvard.edu`). 
 - Immediate response to minor issues may not be available.
 
-## Citation
+# Citation
 
 If you find our work useful in your research, please consider citing:
 ```
