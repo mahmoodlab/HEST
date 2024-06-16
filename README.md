@@ -1,11 +1,13 @@
-# HEST-LIB
+# HEST-Library
+## Designed for querying and assembling HEST-1k dataset 
 
 \[ [HEST-1k dataset (incoming)](https://huggingface.co/datasets/MahmoodLab/hest) | [website](https://mahmoodlab.github.io/hest-website/)\]
 <!-- [ArXiv (stay tuned)]() | [Interactive Demo](http://clam.mahmoodlab.org) | [Cite](#reference) -->
 
-**Note: HEST is still under review and in active development. Please report any bugs in the GitHub issues (The full HEST-1k dataset will be made available soon. Stay tuned)** 
-<br/>
+Welcome to the official GitHub repository of the HEST-Library introduced in "HEST-1k: A Dataset for Spatial Transcriptomics and Histology Image Analysis". This project was developed by the [Mahmood Lab](https://faisal.ai/) at Harvard Medical School and Brigham and Women's Hospital. 
 
+**Note: HEST-Library is still under review and in active development. Please report any bugs in the GitHub issues.** 
+<br/>
 
 #### What does the hest library provide?
 - Functions for interacting with the <b>HEST-1K</b> dataset
@@ -267,3 +269,22 @@ benchmark_encoder(
 ```
 python src/hest/bench/training/predict_expression.py --config bench_config/bench_config.yaml
 ```
+
+## Issues 
+- The preferred mode of communication is via GitHub issues.
+- If GitHub issues are inappropriate, email `gjaume@bwh.harvard.edu` (and cc `pdoucet@bwh.harvard.edu`). 
+- Immediate response to minor issues may not be available.
+
+## Citation
+
+If you find our work useful in your research, please consider citing:
+```
+@inproceedings{jaume2024hest,
+  title={HEST-1k: A Dataset for Spatial Transcriptomics and Histology Image Analysis},
+  author={Jaume, Guillaume and Doucet, Paul and Song, Andrew H. and Lu, Ming Y. and Almagro-Pérez, Cristina and Wagner, Sophia J. and Vaidya, Anurag J. and Chen, Richard J.and Williamson, Drew F.K. and Kim, Ahrong and Mahmood, Faisal},
+  booktitle={arXiv},
+  year={2024}
+}
+```
+
+<img src=docs/joint_logo.png> 
