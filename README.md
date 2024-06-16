@@ -12,11 +12,8 @@ Welcome to the official GitHub repository of the HEST-Library introduced in *"HE
 <br/>
 
 #### What does the HEST-Library provide?
-- Functions for downloading and interacting with the <b>HEST-1K</b> dataset
-- <b>Missing file</b> imputation and automatic alignment for Visium
-- <b>Fast</b> functions for pooling transcripts and tesselating ST/H&E pairs into patches
-- Deep learning based or Otsu based <b>tissue segmentation</b> for both H&E and IHC stains
-- Integration with <b>Scanpy</b> and <b>SpatialData</b>
+- Downloading <b>HEST-1K</b>, the largest dataset of paired Spatial Transcriptomics and Histology
+- A series of helpers to unify ST, Visium, Visium HD, and Xenium data, e.g., automatic ST/WSI alignment
 - Running the HEST-Benchmark for assessing foundation models for histology
 
 <br/>
@@ -49,7 +46,7 @@ NOTE: HEST-Library was only tested on Linux/macOS machines, please report any bu
 
 # Download/Query HEST-1k
 
-To download/query HEST-1k, follow instructions on the [Hugging Face page](https://huggingface.co/datasets/MahmoodLab/hest). The data will be in open access soon!
+To download/query HEST-1k, follow the instructions on the [Hugging Face page](https://huggingface.co/datasets/MahmoodLab/hest). The data will be in open access soon!
 
 You can then simply load the dataset as a `List[HESTData]`
 ```python
@@ -62,9 +59,7 @@ for d in data:
     print(d)
 ```
 
-# Tutorials
-
-## HESTData API
+# HEST-Library API
 
 ## Read a HESTData sample from disk
 ```python
@@ -126,7 +121,6 @@ Most of the time if a spatial/ folder containing a tissue_positions.csv/tissue_p
 
 #### Step 2: check if a .json alignment file is provided
 If a .json alignment file is available, try the following `VisiumReader().read(fullres_img_path, bc_matric_path, spatial_coord_path=spatial_path, alignment_file_path=align_path)` you can also ommit the spatial_coord_path `VisiumReader().read(fullres_img_path, bc_matric_path, alignment_file_path=align_path)`
-
 
 #### Step 3: attempt auto-alignment
 If at least 3 corner fiducials are not cropped out and are reasonably visible, you can attempt an autoalignment with `VisiumReader().read(fullres_img_path, bc_matric_path`. (if no spatial folder and no alignment_file_path is provided, it will attempt autoalignment by default, you can always force auto-alignment by passing `autoalign='always'`)
