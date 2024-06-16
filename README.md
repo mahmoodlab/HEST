@@ -18,7 +18,7 @@ Welcome to the official GitHub repository of the HEST-Library introduced in "HES
 - Running the HEST-Benchmark for assessing foundation models for histology
 
 <p align="center">
-  <img src="figures/fig1.png" alt="Description" style="width: 70%;"/>
+  <img src="figures/fig1.png" alt="Description" style="width: 90%;"/>
 </p>
 
 <br/>
