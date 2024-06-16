@@ -17,9 +17,7 @@ Welcome to the official GitHub repository of the HEST-Library introduced in "HES
 - Integration with <b>Scanpy</b> and <b>SpatialData</b>
 - Running the HEST-Benchmark for assessing foundation models for histology
 
-<p align="center">
-  <img src="figures/fig1.png" alt="Description" style="width: 90%;"/>
-</p>
+<img src="figures/fig1_just_the_dataset.jpg" width="300px" align="right" />
 
 <br/>
 
