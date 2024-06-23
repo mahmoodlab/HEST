@@ -9,6 +9,7 @@ make.bat
 Makefile
 *.parquet
 bench_data
+cell_seg
 src/hest/bench/timm_ctp
 my_notebooks
 tests/assets

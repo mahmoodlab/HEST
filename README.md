@@ -61,11 +61,6 @@ pip install \
 
 NOTE: hest was only tested on linux/macOS machines, please report any bugs in the GitHub issues.
 
-### Tissue segmentation model
-In order to use the deep-learning based tissue segmentation model:
-1. Download the segmenter weights [here](https://huggingface.co/pauldoucet/tissue-detector/blob/main/deeplabv3_seg_v4.ckpt)
-2. place the weights in the `models/` directory
-
 ### CONCH/UNI installation (Optional, for HEST-bench only)
 
 If you want to benchmark CONCH/UNI, additional steps are necesary
@@ -164,7 +159,7 @@ In order to use the deep-learning based detector, please download the weights fr
 ```python
 save_dir = '.'
 
-st.compute_mask(method='deep') # or method='otsu'
+st.segment_tissue(method='deep') # or method='otsu'
 st.save_tissue_seg_pkl(save_dir, name)
 st.save_tissue_seg_jpg(save_dir, name)
 ```

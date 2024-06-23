@@ -148,12 +148,12 @@ class TestHESTData(unittest.TestCase):
         for idx, st in enumerate(self.st_objects):
             st = st['st']
             with self.subTest(st_object=idx):
-                st.compute_mask(method='deep')
+                st.segment_tissue(method='deep')
                 st.save_tissue_seg_jpg(self.output_dir, name=f'deep_{idx}')
                 st.save_tissue_seg_pkl(self.output_dir, name=f'deep_{idx}')
                 st.save_vis(self.output_dir, name=f'deep_{idx}')
                 
-                st.compute_mask(method='otsu')
+                st.segment_tissue(method='otsu')
                 st.save_tissue_seg_jpg(self.output_dir, name=f'otsu_{idx}')
                 st.save_tissue_seg_pkl(self.output_dir, name=f'otsu_{idx}')
                 st.save_vis(self.output_dir, name=f'otsu_{idx}')
