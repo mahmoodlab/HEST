@@ -8,6 +8,8 @@
 
 Welcome to the official GitHub repository of the HEST-Library introduced in *"HEST-1k: A Dataset for Spatial Transcriptomics and Histology Image Analysis"*. This project was developed by the [Mahmood Lab](https://faisal.ai/) at Harvard Medical School and Brigham and Women's Hospital. 
 
+HEST-1k, HEST-Library and HEST-Benchmark are released under the Attribution-NonCommercial-ShareAlike 4.0 International license. 
+
 <br/>
 
 #### What does this repository provide?
@@ -70,7 +72,7 @@ In addition, we provide a complete [documentation](https://hest.readthedocs.io/e
 
 ## HEST-Benchmark
 
-The HEST-Benchmark was designed to assess foundation models for pathology under a new, diverse and challenging benchmark. HEST-Benchmark includes 10 tasks for gene expression prediction (50 highly variable genes) from morphology (112 x 112 um regions at 0.5 um/px) in 10 different organs and 9 cancer types. 
+The HEST-Benchmark was designed to assess foundation models for pathology under a new, diverse and challenging benchmark. HEST-Benchmark includes 10 tasks for gene expression prediction (50 highly variable genes) from morphology (112 x 112 um regions at 0.5 um/px) in 10 different organs and 9 cancer types. We provide a step-by-step tutorial to run HEST-Benchmark and reproduce our results in [4-Running-HEST-Benchmark.ipynb](https://github.com/mahmoodlab/HEST/tree/main/tutorials/4-Running-HEST-Benchmark.ipynb).
 
 ### HEST-Benchmark results (06.24.24)
 
@@ -90,73 +92,11 @@ HEST-Benchmark was used to assess 10 publicly available models. Reported results
 | **LYMPH_IDC**  | 0.205        | 0.206        | 0.218    | 0.238          | 0.243       | 0.243      | 0.229    | 0.234   | **0.249** | _0.248_      |
 | **Average**    | 0.262        | 0.261        | 0.267    | 0.295          | 0.315       | 0.297      | 0.275    | **0.319**| 0.315     | _0.316_      |
 
-We provided a step-by-step tutorial to reproduce HEST-Benchmark results in [4-Running-HEST-Benchmark.ipynb](https://github.com/mahmoodlab/HEST/tree/main/tutorials/4-Running-HEST-Benchmark.ipynb)
-
-**Note:** Spontaneous contributions are encouraged if researchers from the community want to include new models. To do so, simply create a Pull Request (see below). 
-
 ### Benchmarking your own model
 
-To benchmark your model with hest:
+Our tutorial in [4-Running-HEST-Benchmark.ipynb](https://github.com/mahmoodlab/HEST/tree/main/tutorials/4-Running-HEST-Benchmark.ipynb) will guide users interested in benchmarking their own model on HEST-Benchmark.
 
-1. Modify the config file in `bench_config/bench_config.yaml`
-
-2. Launch the following:
-
-```python
-from hest.bench import benchmark_encoder
-
-PATH_TO_CONFIG = .. # path to `bench_config.yaml`
-model = .. # PyTorch model (torch.nn.Module)
-model_transforms = .. # transforms to apply during inference (torchvision.transforms.Compose)
-
-benchmark_encoder(        
-    model, 
-    model_transforms,
-    PATH_TO_CONFIG
-)
-```
-
---> move to tutorial 
-### Reproducing the results from the paper
-
-To reproduce the results of the HEST-Benchmark (Table 1 and Suppl. Table 11), please follow the following steps:
-
-1. Install HEST-Library as explained in section 1
-
-2. Download the patch encoder weights `fm_v1.zip` from [this link](https://www.dropbox.com/scl/fo/61m7k9s6ujnccdusuv4an/ACcBmaN6LhnluMhDPPGD5fY?rlkey=zqqjxhp7yz0jyrb3ancmo0ofb&dl=0) and unzip it to some directory
-
-3. Then update the paths in the config file `bench_config/bench_config.yaml`
-
-4. Start the benchmark with the following:
-```bash
-python src/hest/bench/training/predict_expression.py --config bench_config/bench_config.yaml
-```
-
-5. Read the results from the `results_dir` specified in the `.yaml` config.
-
-### CONCH/UNI installation (Optional, for HEST-Benchmark only)
-
-If you want to benchmark CONCH/UNI, additional steps are necessary
-
-#### CONCH installation (model + weights)
-
-1. Request access to the model weights from the Huggingface model page [here](https://huggingface.co/MahmoodLab/CONCH).
-
-2. Download the model weights (`pytorch_model.bin`) and place them in your `fm_v1` directory `fm_v1/conch_v1_official/pytorch_model.bin`
-
-3. Install the CONCH PyTorch model:
-
-```
-git clone https://github.com/mahmoodlab/CONCH.git
-cd CONCH
-pip install -e .
-```
-
-#### UNI installation (weights only)
-
-1. Request access to the model weights from the Huggingface model page [here](https://huggingface.co/MahmoodLab/UNI).
-
-2. Download the model weights (`pytorch_model.bin`) and place them in your `fm_v1` directory `fm_v1/uni_v1_official/pytorch_model.bin`
+**Note:** Spontaneous contributions are encouraged if researchers from the community want to include new models. To do so, simply create a Pull Request (see below). 
 
 ## Issues 
 - The preferred mode of communication is via GitHub issues.
