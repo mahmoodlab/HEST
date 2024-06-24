@@ -17,10 +17,17 @@ tests/output_tests
 figures/test_paul
 bench_data.zip
 old_bench_data
+tutorials/downloads
+tutorials/processed
 bench_config/my_bench_config.yaml
 src/hest/bench/private
 str.csv
 bench_data_old
+ST_data_emb/
+ST_pred_results/
+hest_data
+fm_v1
+cufile.log
 int.csv
 docs/build
 local
