@@ -152,13 +152,12 @@ class HESTData:
         """
         print("Plotting spatial plots...")
              
-        sc.pl.spatial(self.adata, show=None, img_key="downscaled_fullres", color=[key], title=f"in_tissue spots", **pl_kwargs)
+        fig = sc.pl.spatial(self.adata, show=None, img_key="downscaled_fullres", color=[key], title=f"in_tissue spots", return_fig=True, **pl_kwargs)
         
         filename = f"{name}spatial_plots.png"
         
         # Save the figure
-        plt.savefig(os.path.join(save_path, filename))
-        plt.close()  # Close the plot to free memory
+        fig.savefig(os.path.join(save_path, filename))
         print(f"H&E overlay spatial plots saved in {save_path}")
     
     
@@ -251,8 +250,9 @@ class HESTData:
         thumbnail_width=2000, 
         method: str='deep', 
         batch_size=8, 
-        model_name='deeplabv3_seg_v4.ckpt'
-    ) -> None:
+        model_name='deeplabv3_seg_v4.ckpt',
+        return_vis=True
+    ) -> Union[None, np.ndarray]:
         """ Compute tissue mask and stores it in the current HESTData object
 
         Args:
@@ -277,6 +277,12 @@ class HESTData:
                 mask = keep_largest_area(mask)
             self.tissue_mask = np.round(cv2.resize(mask, (width, height))).astype(np.uint8)
             self.contours_tissue, self.contours_holes = mask_to_contours(self.tissue_mask, pixel_size=self.pixel_size)
+            
+        if return_vis:
+            return self._get_tissue_vis()
+        else:
+            return None
+            
 
 
     def get_tissue_mask(self) -> np.ndarray:
@@ -298,8 +304,7 @@ class HESTData:
         target_pixel_size: float=0.5,
         verbose=0,
         dump_visualization=True,
-        use_mask=True,
-        keep_largest=False
+        use_mask=True
     ):
         """ Dump H&E patches centered around ST spots to a .h5 file
 
@@ -344,7 +349,7 @@ class HESTData:
         downscale_vis = TARGET_VIS_SIZE / img_width
 
         if use_mask:
-            tissue_mask = self.get_tissue_mask(keep_largest)
+            tissue_mask = self.get_tissue_mask()
         else:
             tissue_mask = np.ones((img_height, img_width)).astype(np.uint8)
             
@@ -486,9 +491,8 @@ class HESTData:
         save_pkl(os.path.join(save_dir, f'{name}_mask.pkl'), asset_dict)
         
     
-    def save_vis(self, save_dir, name) -> None:
-        
-        vis = visualize_tissue_seg(
+    def _get_tissue_vis(self):
+         return visualize_tissue_seg(
             self.wsi.img,
             self.tissue_mask,
             self.contours_tissue,
@@ -499,6 +503,10 @@ class HESTData:
             target_width=1000,
             seg_display=True,
         )
+    
+    
+    def save_vis(self, save_dir, name) -> None:
+        vis = self._get_tissue_vis()
         vis.save(os.path.join(save_dir, f'{name}_vis.jpg'))
 
 
