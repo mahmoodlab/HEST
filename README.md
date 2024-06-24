@@ -1,7 +1,7 @@
 # HEST-Library: Bringing Spatial Transcriptomics and Histopathology together
 ## Designed for querying and assembling HEST-1k dataset 
 
-\[ [arXiv](https://mahmoodlab.github.io/hest-website/)\] | [HEST-1k](https://huggingface.co/datasets/MahmoodLab/hest)
+\[ [arXiv](https://mahmoodlab.github.io/hest-website/) | [HEST-1k](https://huggingface.co/datasets/MahmoodLab/hest) \]
 <!-- [ArXiv (stay tuned)]() | [Interactive Demo](http://clam.mahmoodlab.org) | [Cite](#reference) -->
 
 <img src="figures/fig1a.jpg" width="450px" align="right" />
@@ -45,7 +45,7 @@ NOTE: HEST-Library was only tested on Linux/macOS machines, please report any bu
 
 ## Download/Query HEST-1k
 
-To download/query HEST-1k, follow the instructions on the [Hugging Face page](https://huggingface.co/datasets/MahmoodLab/hest).
+To download/query HEST-1k, follow the instructions on the [Hugging Face page](https://huggingface.co/datasets/MahmoodLab/hest) or use the notebook [1-Downloading-HEST-1k.ipynb](https://github.com/mahmoodlab/HEST/tree/develop/tutorials/1-Downloading-HEST-1k.ipynb).
 
 You can then simply view the dataset as, 
 
@@ -63,8 +63,8 @@ for d in hest_data:
 
 The HEST-Library allows **assembling** new samples using HEST format and **interacting** with HEST-1k. We provide two tutorials:
 
-- [2-Assembling-HEST-Data.ipynb](https://github.com/mahmoodlab/HEST/tree/develop/examples): Walkthrough to transform a Visum sample into HEST.
-- [3-Interacting-with-HEST-1k.ipynb](https://github.com/mahmoodlab/HEST/tree/develop/examples): Playing around with HEST data for loading patches, visualizing nuclear segmentation. 
+- [2-Interacting-with-HEST-1k.ipynb](https://github.com/mahmoodlab/HEST/tree/develop/tutorials/2-Interacting-with-HEST-1k.ipynb): Playing around with HEST data for loading patches, visualizing nuclear segmentation.
+- [3-Assembling-HEST-Data.ipynb](https://github.com/mahmoodlab/HEST/tree/develop/tutorials/3-Assembling-HEST-Data.ipynb): Walkthrough to transform a Visum sample into HEST.
 
 In addition, we provide a complete [documentation](https://hest.readthedocs.io/en/latest/).
 

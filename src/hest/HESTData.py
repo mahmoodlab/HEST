@@ -184,6 +184,8 @@ class HESTData:
             pyramidal (bool, optional): whenever to save the full resolution image as pyramidal (can be slow to save, however it's sometimes necessary for loading large images in QuPath). Defaults to True.
             bigtiff (bool, optional): whenever the bigtiff image is more than 4.1GB. Defaults to False.
         """
+        os.makedirs(path, exist_ok=True)
+        
         try:
             self.adata.write(os.path.join(path, 'aligned_adata.h5ad'))
         except:
