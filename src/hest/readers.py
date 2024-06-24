@@ -1017,8 +1017,8 @@ class XeniumReader(Reader):
             pixel_size_morph = dict_exp['pixel_size']
         dict = {**dict, **dict_exp}
         
-        if cell_bound_path is not None:
-            xenium_cell_seg = self.__load_seg(cell_bound_path, 'Cell', alignment_file_path, pixel_size_morph)
+        #if cell_bound_path is not None:
+        #    xenium_cell_seg = self.__load_seg(cell_bound_path, 'Cell', alignment_file_path, pixel_size_morph)
         #if nucleus_bound_path is not None:
         #    xenium_nuc_seg =  self.__load_seg(nucleus_bound_path, 'Nucleus', alignment_file_path, pixel_size_morph)
         
@@ -1049,7 +1049,7 @@ class XeniumReader(Reader):
             transcript_df=df_transcripts,
             cell_adata=cell_adata,
             #xenium_nuc_seg=xenium_nuc_seg,
-            xenium_cell_seg=xenium_cell_seg
+            #xenium_cell_seg=xenium_cell_seg
         )
         return st_object
     
