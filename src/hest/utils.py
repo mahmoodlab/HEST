@@ -31,7 +31,7 @@ Image.MAX_IMAGE_PIXELS = 93312000000
 ALIGNED_HE_FILENAME = 'aligned_fullres_HE.tif'
 
 
-def geojson_to_map(geojson, width, height, color=None):
+def geojson_to_map(geojson: dict, width, height, color=None):
     img = np.zeros((height, width), dtype=np.uint8)
     
     i = 0
