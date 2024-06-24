@@ -14,7 +14,11 @@ from sklearn.discriminant_analysis import StandardScaler
 from sklearn.pipeline import Pipeline
 from tqdm import tqdm
 
+from hest.utils import get_path_relative
+
 torch.multiprocessing.set_sharing_strategy('file_system')
+
+from huggingface_hub import snapshot_download
 
 from hest.bench.cpath_model_zoo.builder import get_encoder
 from hest.bench.data_modules.st_dataset import H5TileDataset, load_adata
@@ -259,11 +263,6 @@ def predict_single_split(train_split, test_split, args, save_dir, dataset_name, 
     X_test, y_test = all_split_assets['test']['embeddings'], all_split_assets['test']['adata']
     
     
-    #scaler = StandardScaler()
-    #scaler.fit(X_train)
-    ##X_train = scaler.transform(X_train)
-    #X_test = scaler.transform(X_test)
-    
     if args.dimreduce == 'PCA':
         print('perform PCA dim reduction')
         pipe = Pipeline([('scaler', StandardScaler()), (f'{args.dimreduce}', eval(args.dimreduce)(n_components=args.latent_dim))])
@@ -354,6 +353,11 @@ def benchmark(args, encoder, enc_transf):
         for key in config:
             if key in args:
                 setattr(args, key, config[key])
+                
+    
+    logger.info(f'Downloading the bench data')
+    bench_data_dir = get_path_relative(__file__, f'../../../../bench_data')
+    snapshot_download(repo_id="MahmoodLab/hest-bench", repo_type='dataset', local_dir=bench_data_dir)
     
     
     logger.info(f'Benchmarking on the following datasets {args.datasets}')
@@ -381,8 +385,9 @@ def benchmark(args, encoder, enc_transf):
     encoders = []
     if encoder is not None:
         encoders.append(LazyEncoder('custom_encoder', weights_root=args.weights_root, private_weights_root=args.private_weights_root, transforms=enc_transf, model=encoder))
-    for enc_name in args.encoders:
-        encoders.append(LazyEncoder(enc_name, weights_root=args.weights_root, private_weights_root=args.private_weights_root))
+    else:
+        for enc_name in args.encoders:
+            encoders.append(LazyEncoder(enc_name, weights_root=args.weights_root, private_weights_root=args.private_weights_root))
         
     
     benchmark_grid(predict_folds, args, device, encoders, datasets, save_dir=save_dir, precision=precision)
