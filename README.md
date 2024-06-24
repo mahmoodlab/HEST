@@ -74,7 +74,7 @@ The HEST-Benchmark was designed to assess foundation models for pathology under 
 
 ### HEST-Benchmark results (06.24.24)
 
-As of 06.24.24, HEST-Benchmark was used to assess 10 publicly available models. Reported results are based on a Random Forest regression model (70 trees). Additional results based on Ridge regression are provided in the paper. 
+HEST-Benchmark was used to assess 10 publicly available models. Reported results are based on a Random Forest regression model (70 trees). Additional results based on Ridge regression are provided in the paper. 
 
 |                | **ResNet50** | **KimiaNet** | **Ciga** | **CTransPath** | **Remedis** | **Phikon** | **PLIP** | **UNI** | **CONCH** | **GigaPath** |
 |----------------|--------------|--------------|----------|----------------|-------------|------------|----------|---------|-----------|--------------|
@@ -90,6 +90,7 @@ As of 06.24.24, HEST-Benchmark was used to assess 10 publicly available models. 
 | **LYMPH_IDC**  | 0.205        | 0.206        | 0.218    | 0.238          | 0.243       | 0.243      | 0.229    | 0.234   | **0.249** | _0.248_      |
 | **Average**    | 0.262        | 0.261        | 0.267    | 0.295          | 0.315       | 0.297      | 0.275    | **0.319**| 0.315     | _0.316_      |
 
+We provided a step-by-step tutorial to reproduce HEST-Benchmark results in [3-HEST-Benchmark.ipynb](https://github.com/mahmoodlab/HEST/tree/develop/examples)
 
 **Note:** Spontaneous contributions are encouraged if researchers from the community want to include new models. To do so, simply create a Pull Request (see below). 
 
@@ -115,6 +116,7 @@ benchmark_encoder(
 )
 ```
 
+--> move to tutorial 
 ### Reproducing the results from the paper
 
 To reproduce the results of the HEST-Benchmark (Table 1 and Suppl. Table 11), please follow the following steps:
