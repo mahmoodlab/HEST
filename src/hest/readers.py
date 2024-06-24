@@ -985,6 +985,7 @@ class XeniumReader(Reader):
         df_cells['he_y'] = df_cells['y_centroid'] / pixel_size_morph
         
         cell_adata.obsm["spatial"] = df_cells[['he_x', 'he_y']].to_numpy()
+        cell_adata.obs[['he_x', 'he_y']] = df_cells[['he_x', 'he_y']]
         dict['cells_under_tissue'] = len(cell_adata.obs)
         return cell_adata, dict
     
@@ -1016,8 +1017,8 @@ class XeniumReader(Reader):
             pixel_size_morph = dict_exp['pixel_size']
         dict = {**dict, **dict_exp}
         
-        #if cell_bound_path is not None:
-        #    xenium_cell_seg = read_10x_seg(cell_bound_path, 'Cell')
+        if cell_bound_path is not None:
+            xenium_cell_seg = self.__load_seg(cell_bound_path, 'Cell', alignment_file_path, pixel_size_morph)
         #if nucleus_bound_path is not None:
         #    xenium_nuc_seg =  self.__load_seg(nucleus_bound_path, 'Nucleus', alignment_file_path, pixel_size_morph)
         
@@ -1048,7 +1049,7 @@ class XeniumReader(Reader):
             transcript_df=df_transcripts,
             cell_adata=cell_adata,
             #xenium_nuc_seg=xenium_nuc_seg,
-            #xenium_cell_seg=xenium_cell_seg
+            xenium_cell_seg=xenium_cell_seg
         )
         return st_object
     

@@ -7,6 +7,7 @@ from typing import Union
 import cv2
 import numpy as np
 import torch
+from huggingface_hub import snapshot_download
 from PIL import Image
 from torch import nn
 from torch.utils.data import DataLoader
@@ -25,6 +26,7 @@ import skimage.color as sk_color
 import skimage.filters as sk_filters
 import skimage.measure as sk_measure
 import skimage.morphology as sk_morphology
+
 try:
     from cucim import CuImage
 except ImportError:
@@ -40,8 +42,11 @@ def segment_tissue_deep(
     target_pxl_size=1,
     patch_size=512,
     model_name='deeplabv3_seg_v4.ckpt',
-    batch_size=8
+    batch_size=8,
+    auto_download=True
 ):    
+    
+    
     # TODO fix overlap
     overlap=0
     
@@ -88,6 +93,10 @@ def segment_tissue_deep(
             kernel_size=1,
             stride=1
         )
+        
+        if auto_download:
+            model_dir = get_path_relative(__file__, f'../../../models')
+            snapshot_download(repo_id="pauldoucet/tissue-detector", repo_type='model', local_dir=model_dir, allow_patterns=model_name)
         
         if torch.cuda.is_available():
             checkpoint = torch.load(weights_path)

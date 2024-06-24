@@ -2,6 +2,7 @@ from abc import abstractmethod
 import cv2
 import numpy as np
 import openslide
+import warnings
 try:
     from cucim import CuImage
 except ImportError:
@@ -47,6 +48,12 @@ def wsi_factory(img) -> WSI:
         return NumpyWSI(img)
     elif is_cuimage(img):
         return CuImageWSI(img)
+    elif isinstance(img, str):
+        if CuImage is not None:
+            return CuImageWSI(CuImage(img))
+        else:
+            warnings.warn("Cucim isn't available, opening the image with OpenSlide (will be slower)")
+            return OpenSlideWSI(openslide.OpenSlide(img))
     else:
         raise ValueError(f'type {type(img)} is not supported')
 
@@ -95,7 +102,6 @@ class CuImageWSI(WSI):
 
     def get_dimensions(self):
         return self.img.resolutions['level_dimensions'][0]
-    
     
     def read_region(self, location, size) -> np.ndarray:
         return np.array(self.img.read_region(location=location, level=0, size=size))

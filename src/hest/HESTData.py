@@ -58,10 +58,10 @@ class HESTData:
     """
     
     tissue_mask: np.ndarray = None
-    """tissue mask for that sample, will be None until compute_mask() is called"""
+    """tissue mask for that sample, will be None until segment_tissue() is called"""
     
     contours_tissue: list = None
-    """tissue contours for that sample, will be None until compute_mask() is called"""
+    """tissue contours for that sample, will be None until segment_tissue() is called"""
     
     cellvit_seg = None
     """dictionary of cells in the CellViT .geojson format"""
@@ -87,7 +87,7 @@ class HESTData:
     def __init__(
         self, 
         adata: sc.AnnData,
-        img: Union[np.ndarray, openslide.OpenSlide, 'CuImage'],
+        img: Union[np.ndarray, openslide.OpenSlide, 'CuImage', str],
         pixel_size: float,
         meta: Dict = {},
         cellvit_seg: Dict=None,
@@ -99,7 +99,8 @@ class HESTData:
         Args:
             adata (sc.AnnData): Spatial Transcriptomics data in a scanpy Anndata object
                 adata must contain a downscaled image in ['spatial']['ST']['images']['downscaled_fullres']
-            img (Union[np.ndarray, openslide.OpenSlide, CuImage]): Full resolution image corresponding to the ST data, Openslide/CuImage are lazily loaded, use CuImage for GPU accelerated computation
+            img (Union[np.ndarray, openslide.OpenSlide, CuImage, str]): Full resolution image corresponding to the ST data, Openslide/CuImage are lazily loaded, use CuImage for GPU accelerated computation. 
+                If a str is passed, the image is opened with cucim if available and OpenSlide otherwise
             pixel_size (float): pixel_size of WSI im um/px, this pixel size will be used to perform operations on the slide, such as patching and segmenting
             meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
             cellvit_seg (Dict): dictionary of cells in the CellViT .geojson format. Default: None
@@ -242,7 +243,7 @@ class HESTData:
             tiff_save(img, os.path.join(path, ALIGNED_HE_FILENAME), self.pixel_size, pyramidal=pyramidal, bigtiff=bigtiff)
 
 
-    def compute_mask(
+    def segment_tissue(
         self, 
         keep_largest=False, 
         thumbnail_width=2000, 
@@ -288,7 +289,7 @@ class HESTData:
         """
         
         if self.tissue_mask is None:
-            self.compute_mask(keep_largest=keep_largest, method=method)
+            self.segment_tissue(keep_largest=keep_largest, method=method)
         return self.tissue_mask
     
 
@@ -525,8 +526,8 @@ class HESTData:
         #TODO add tissue segmentation
         
         return st
+        
     
-
 class VisiumHESTData(HESTData): 
     def __init__(self, 
         adata: sc.AnnData,
@@ -655,9 +656,8 @@ class XeniumHESTData(HESTData):
                 json.dump(self.xenium_cell_seg, f, indent=4)
             
             
-        # TODO save segmentation
+        # TODO save segmentation    
         
-
 
 def read_HESTData(
     adata_path: str, 
