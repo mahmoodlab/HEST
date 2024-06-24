@@ -1,14 +1,14 @@
 # directory containing the data for each task
-source_dataroot: '??/hest/bench_data'
+source_dataroot: './bench_data'
 
 # directory where benchmark results will be dumped
-results_dir: '??/ST_pred_results/'
+results_dir: './ST_pred_results/'
 
 # directory where the vision embeddings will be dumped
-embed_dataroot: '??/ST_data_emb'
+embed_dataroot: './ST_data_emb'
 
 # directory to the model weights root
-weights_root: '??/fm_v1'
+weights_root: './fm_v1'
 
 # inference parameters
 precision: 'fp32'
@@ -24,7 +24,7 @@ encoders: [
   "ciga",
   "ctranspath",
   "phikon_official_hf",
-  "remedis",
+  #"remedis", # uncomment after requesting the weights
   #"conch_v1_official", # uncomment after requesting the weights
 ]
 
@@ -41,4 +41,5 @@ datasets: [
   "LUNG",
   "LYMPH_IDC",
 ]
+
 #dimreduce: "PCA" 

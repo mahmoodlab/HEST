@@ -78,12 +78,20 @@ class LazyEncoder:
             return encoder, img_transforms
             
 
+def get_path(path):
+    src = get_path_relative(__file__, '../../../../')
+    if path.startswith('./'):
+        new_path = os.path.join(src, path)
+    else:
+        new_path = path
+    return new_path
+
 
 def benchmark_grid(fn, args, device, encoders: List[LazyEncoder], datasets: List[str], save_dir, precision):
     "execute fn for each encoders and datasets and dump the results in a nested directory structure"
     dataset_perfs = []
     for dataset in datasets:
-        source_dataroot = os.path.join(args.source_dataroot, dataset)
+        source_dataroot = os.path.join(get_path(args.source_dataroot), dataset)
         enc_perfs = []
         for enc in encoders:
             exp_save_dir = os.path.join(save_dir, dataset, enc.name)
@@ -195,7 +203,7 @@ def predict_single_split(train_split, test_split, args, save_dir, dataset_name, 
     train_df = pd.read_csv(train_split)
     test_df = pd.read_csv(test_split)
     
-    embedding_dir = os.path.join(args.embed_dataroot, dataset_name, lazy_enc.name, args.precision)
+    embedding_dir = os.path.join(get_path(args.embed_dataroot), dataset_name, lazy_enc.name, args.precision)
     os.makedirs(embedding_dir, exist_ok=True)
     
     # perform embedding
@@ -355,9 +363,12 @@ def benchmark(args, encoder, enc_transf):
                 setattr(args, key, config[key])
                 
     
-    logger.info(f'Downloading the bench data')
+    bench_fm_dir = get_path_relative(__file__, f'../../../../')
+    snapshot_download(repo_id="MahmoodLab/hest-bench", repo_type='dataset', local_dir=bench_fm_dir, allow_patterns=['fm_v1/*'])
+    
+    logger.info(f'Fetch the bench data...')
     bench_data_dir = get_path_relative(__file__, f'../../../../bench_data')
-    snapshot_download(repo_id="MahmoodLab/hest-bench", repo_type='dataset', local_dir=bench_data_dir)
+    snapshot_download(repo_id="MahmoodLab/hest-bench", repo_type='dataset', local_dir=bench_data_dir, ignore_patterns=['fm_v1/*'])
     
     
     logger.info(f'Benchmarking on the following datasets {args.datasets}')
@@ -371,10 +382,10 @@ def benchmark(args, encoder, enc_transf):
 
     datasets = args.datasets
     if len(datasets) >= 1 and datasets[0] == '*':
-        datasets = os.listdir(args.source_dataroot)
+        datasets = os.listdir(get_path(args.source_dataroot))
     
     #### Setup Save Directory ####
-    save_dir = args.results_dir
+    save_dir = get_path(args.results_dir)
     if args.exp_code is None:
         exp_code = f"run_{get_current_time()}"
     else:
@@ -383,11 +394,12 @@ def benchmark(args, encoder, enc_transf):
     os.makedirs(save_dir, exist_ok=True)
     
     encoders = []
+    weights_root = get_path(args.weights_root)
     if encoder is not None:
-        encoders.append(LazyEncoder('custom_encoder', weights_root=args.weights_root, private_weights_root=args.private_weights_root, transforms=enc_transf, model=encoder))
+        encoders.append(LazyEncoder('custom_encoder', weights_root=weights_root, private_weights_root=args.private_weights_root, transforms=enc_transf, model=encoder))
     else:
         for enc_name in args.encoders:
-            encoders.append(LazyEncoder(enc_name, weights_root=args.weights_root, private_weights_root=args.private_weights_root))
+            encoders.append(LazyEncoder(enc_name, weights_root=weights_root, private_weights_root=args.private_weights_root))
         
     
     benchmark_grid(predict_folds, args, device, encoders, datasets, save_dir=save_dir, precision=precision)
