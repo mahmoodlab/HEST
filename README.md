@@ -45,7 +45,7 @@ NOTE: HEST-Library was only tested on Linux/macOS machines, please report any bu
 
 ## Download/Query HEST-1k
 
-To download/query HEST-1k, follow the tutorial [1-Downloading-HEST-1k](https://github.com/mahmoodlab/HEST/blob/develop/tutorials/1-Downloading-HEST-1k.ipynb) or follow instructions on [Hugging Face](https://huggingface.co/datasets/MahmoodLab/hest).
+To download/query HEST-1k, follow the tutorial [1-Downloading-HEST-1k](https://github.com/mahmoodlab/HEST/blob/main/tutorials/1-Downloading-HEST-1k.ipynb) or follow instructions on [Hugging Face](https://huggingface.co/datasets/MahmoodLab/hest).
 
 You can then simply view the dataset as, 
 
@@ -63,8 +63,8 @@ for d in hest_data:
 
 The HEST-Library allows **assembling** new samples using HEST format and **interacting** with HEST-1k. We provide two tutorials:
 
-- [2-Interacting-with-HEST-1k.ipynb](https://github.com/mahmoodlab/HEST/tree/develop/tutorials/2-Interacting-with-HEST-1k.ipynb): Playing around with HEST data for loading patches, visualizing nuclear segmentation.
-- [3-Assembling-HEST-Data.ipynb](https://github.com/mahmoodlab/HEST/tree/develop/tutorials/3-Assembling-HEST-Data.ipynb): Walkthrough to transform a Visum sample into HEST.
+- [2-Interacting-with-HEST-1k.ipynb](https://github.com/mahmoodlab/HEST/tree/main/tutorials/2-Interacting-with-HEST-1k.ipynb): Playing around with HEST data for loading patches, visualizing nuclear segmentation.
+- [3-Assembling-HEST-Data.ipynb](https://github.com/mahmoodlab/HEST/tree/main/tutorials/3-Assembling-HEST-Data.ipynb): Walkthrough to transform a Visum sample into HEST.
 
 In addition, we provide a complete [documentation](https://hest.readthedocs.io/en/latest/).
 
@@ -90,7 +90,7 @@ HEST-Benchmark was used to assess 10 publicly available models. Reported results
 | **LYMPH_IDC**  | 0.205        | 0.206        | 0.218    | 0.238          | 0.243       | 0.243      | 0.229    | 0.234   | **0.249** | _0.248_      |
 | **Average**    | 0.262        | 0.261        | 0.267    | 0.295          | 0.315       | 0.297      | 0.275    | **0.319**| 0.315     | _0.316_      |
 
-We provided a step-by-step tutorial to reproduce HEST-Benchmark results in [3-HEST-Benchmark.ipynb]()
+We provided a step-by-step tutorial to reproduce HEST-Benchmark results in [4-Running-HEST-Benchmark.ipynb](https://github.com/mahmoodlab/HEST/tree/main/tutorials/4-Running-HEST-Benchmark.ipynb)
 
 **Note:** Spontaneous contributions are encouraged if researchers from the community want to include new models. To do so, simply create a Pull Request (see below). 
 

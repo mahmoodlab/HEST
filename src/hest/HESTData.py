@@ -304,7 +304,8 @@ class HESTData:
         target_pixel_size: float=0.5,
         verbose=0,
         dump_visualization=True,
-        use_mask=True
+        use_mask=True,
+        keep_largest=False
     ):
         """ Dump H&E patches centered around ST spots to a .h5 file
 
@@ -349,6 +350,8 @@ class HESTData:
         downscale_vis = TARGET_VIS_SIZE / img_width
 
         if use_mask:
+            if self.tissue_mask is None:
+                self.segment_tissue(keep_largest)
             tissue_mask = self.get_tissue_mask()
         else:
             tissue_mask = np.ones((img_height, img_width)).astype(np.uint8)
