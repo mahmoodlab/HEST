@@ -804,6 +804,12 @@ def create_splits(dest_dir, splits, K):
         test_df = pd.DataFrame(data_test, columns=['sample_id', 'patches_path', 'expr_path'])
         train_df.to_csv(os.path.join(dest_dir, f'train_{i}.csv'), index=False)
         test_df.to_csv(os.path.join(dest_dir, f'test_{i}.csv'), index=False)
+      
+
+def _verify_paths(paths):
+    for path in paths:
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"No such file or directory: {path}\nHave you downloaded the dataset? (https://huggingface.co/datasets/MahmoodLab/hest)")
         
 
 def load_hest(hest_dir: str, id_list: List[str] = None) -> List[HESTData]:
@@ -831,6 +837,8 @@ def load_hest(hest_dir: str, id_list: List[str] = None) -> List[HESTData]:
         meta_path = os.path.join(hest_dir, 'metadata', f'{id}.json')
         masks_path_pkl = None
         masks_path_jpg = None
+        _verify_paths([adata_path, img_path, meta_path])
+        
         if os.path.exists(os.path.join(hest_dir, 'tissue_seg')):
             masks_path_pkl = os.path.join(hest_dir, 'tissue_seg', f'{id}_mask.pkl')
             masks_path_jpg = os.path.join(hest_dir, 'tissue_seg', f'{id}_mask.jpg')
