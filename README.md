@@ -45,14 +45,14 @@ NOTE: HEST-Library was only tested on Linux/macOS machines, please report any bu
 
 ## Download/Query HEST-1k
 
-To download/query HEST-1k, follow the instructions on the [Hugging Face page](https://huggingface.co/datasets/MahmoodLab/hest) or use the notebook [1-Downloading-HEST-1k.ipynb](https://github.com/mahmoodlab/HEST/tree/develop/tutorials/1-Downloading-HEST-1k.ipynb).
+To download/query HEST-1k, follow the tutorial [1-Download-HEST-1k](https://github.com/mahmoodlab/HEST/blob/develop/tutorials/1-Download-HEST-1k.ipynb) or follow instructions on [Hugging Face](https://huggingface.co/datasets/MahmoodLab/hest).
 
 You can then simply view the dataset as, 
 
 ```python
 from hest import load_hest
 
-print('load hest...')
+print('Lazy loading of hest...')
 hest_data = load_hest('hest_data') # location of the data
 print('loaded hest')
 for d in hest_data:
