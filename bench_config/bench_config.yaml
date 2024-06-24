@@ -1,0 +1,45 @@
+# directory containing the data for each task
+source_dataroot: './bench_data'
+
+# directory where benchmark results will be dumped
+results_dir: './ST_pred_results/'
+
+# directory where the vision embeddings will be dumped
+embed_dataroot: './ST_data_emb'
+
+# directory to the model weights root
+weights_root: './fm_v1'
+
+# inference parameters
+precision: 'fp32'
+batch_size: 128
+num_workers: 1
+
+# encoders to benchmark
+encoders: [
+  "kimianet",
+  "plip",
+  #"uni_v1_official", # uncomment after requesting the weights
+  "resnet50_trunc",
+  "ciga",
+  "ctranspath",
+  "phikon_official_hf",
+  #"remedis", # uncomment after requesting the weights
+  #"conch_v1_official", # uncomment after requesting the weights
+]
+
+# datasets contained in `source_dataroot` to benchmark
+datasets: [
+  "IDC",
+  "PRAD",
+  "PAAD",
+  "SKCM",
+  "COAD",
+  "READ",
+  "CCRCC",
+  "HCC",
+  "LUNG",
+  "LYMPH_IDC",
+]
+
+#dimreduce: "PCA" 
