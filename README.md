@@ -1,7 +1,7 @@
 # HEST-Library: Bringing Spatial Transcriptomics and Histopathology together
 ## Designed for querying and assembling HEST-1k dataset 
 
-\[ [HEST-1k (incoming)](https://huggingface.co/datasets/MahmoodLab/hest) | [website](https://mahmoodlab.github.io/hest-website/)\]
+\[ [HEST-1k](https://huggingface.co/datasets/MahmoodLab/hest) | [arXiv](https://mahmoodlab.github.io/hest-website/)\]
 <!-- [ArXiv (stay tuned)]() | [Interactive Demo](http://clam.mahmoodlab.org) | [Cite](#reference) -->
 
 <img src="figures/fig1a.jpg" width="450px" align="right" />
@@ -18,7 +18,7 @@ Welcome to the official GitHub repository of the HEST-Library introduced in *"HE
 
 <br/>
 
-# Installation
+## Installation
 
 ```
 git clone https://github.com/mahmoodlab/hest.git
@@ -44,7 +44,7 @@ pip install \
 
 NOTE: HEST-Library was only tested on Linux/macOS machines, please report any bugs in the GitHub issues.
 
-# Download/Query HEST-1k
+## Download/Query HEST-1k
 
 To download/query HEST-1k, follow the instructions on the [Hugging Face page](https://huggingface.co/datasets/MahmoodLab/hest). The data will be in open access soon!
 
@@ -59,13 +59,19 @@ for d in hest_data:
     print(d)
 ```
 
-# HEST-Library API
+## HEST-Library API
 
 To see concrete examples of the HEST-library API, refer to the example notebook in `examples/tutorial.ipynb`.
 
 You can also visit the HEST-library [documentation](https://hest.readthedocs.io/en/latest/).
 
-# HEST-Benchmark
+## HEST-Benchmark
+
+### HEST-Benchmark results (06.24.24)
+
+1- Add current results. 
+
+Note: If you wanna include your own model, create a PR. 
 
 ### Benchmarking your own model
 
@@ -87,15 +93,6 @@ benchmark_encoder(
     model_transforms,
     PATH_TO_CONFIG
 )
-```
-
-#### From the command-line
-
-1. Add your model config in `src/hest/bench/cpath_model_zoo/pretrained_configs`
-2. Launch the benchmark with:
-
-```
-python src/hest/bench/training/predict_expression.py --config bench_config/bench_config.yaml
 ```
 
 ### Reproducing the results from the paper
@@ -139,12 +136,12 @@ pip install -e .
 
 2. Download the model weights (`pytorch_model.bin`) and place them in your `fm_v1` directory `fm_v1/uni_v1_official/pytorch_model.bin`
 
-# Issues 
+## Issues 
 - The preferred mode of communication is via GitHub issues.
 - If GitHub issues are inappropriate, email `gjaume@bwh.harvard.edu` (and cc `pdoucet@bwh.harvard.edu`). 
 - Immediate response to minor issues may not be available.
 
-# Citation
+## Citation
 
 If you find our work useful in your research, please consider citing:
 ```
