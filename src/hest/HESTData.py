@@ -277,19 +277,14 @@ class HESTData:
             self.contours_tissue, self.contours_holes = mask_to_contours(self.tissue_mask, pixel_size=self.pixel_size)
 
 
-    def get_tissue_mask(self, keep_largest=False, method: str='deep') -> np.ndarray:
-        """ Return existing tissue segmentation mask if it exists, implicitly compute it beforehand if it doesn't exists
-
-        Args:
-            method (str, optional): perform deep learning based segmentation ('deep') or otsu based ('otsu').
-            Deep-learning based segmentation will be more accurate but a GPU is recommended, 'otsu' is faster but less accurate. Defaults to 'deep'.
+    def get_tissue_mask(self) -> np.ndarray:
+        """ Return existing tissue segmentation mask if it exists, raise an error if it doesn't exist
 
         Returns:
             np.ndarray: an array with the same resolution as the WSI image, where 1 means tissue and 0 means background
         """
         
-        if self.tissue_mask is None:
-            self.segment_tissue(keep_largest=keep_largest, method=method)
+        self.__verify_mask()
         return self.tissue_mask
     
 
@@ -304,6 +299,18 @@ class HESTData:
         use_mask=True,
         keep_largest=False
     ):
+        """ Dump H&E patches centered around ST spots to a .h5 file
+
+        Args:
+            patch_save_dir (str): directory where the .h5 patch file will be saved
+            name (str, optional): file will be saved as {name}.h5. Defaults to 'patches'.
+            target_patch_size (int, optional): target patch size in pixels (after scaling to match `target_pixel_size`). Defaults to 224.
+            target_pixel_size (float, optional): target patch pixel size in um/px. Defaults to 0.5.
+            verbose (int, optional): verbose. Defaults to 0.
+            dump_visualization (bool, optional): whenever to dump a visualization of the patches on top of the downscaled WSI. Defaults to True.
+            use_mask (bool, optional): whenever to take into account the tissue mask. Defaults to True.
+            keep_largest (bool, optional): whenever to only keep the largest piece of tissue. Defaults to False.
+        """
         
         
         adata = self.adata.copy()
@@ -421,7 +428,7 @@ class HESTData:
     
     def __verify_mask(self):
         if self.tissue_mask is None:
-            raise Exception("compute the tissue mask for this HESTData object with self.compute()")        
+            raise Exception("No existing tissue mask for that sample, compute the tissue mask with self.segment_tissue()")        
     
 
     def get_tissue_contours(self) -> Dict[str, list]:
@@ -786,20 +793,25 @@ def create_splits(dest_dir, splits, K):
         test_df.to_csv(os.path.join(dest_dir, f'test_{i}.csv'), index=False)
         
 
-def load_hest(hest_dir: str) -> List[HESTData]:
+def load_hest(hest_dir: str, id_list: List[str] = None) -> List[HESTData]:
     """Read HESTData objects from a local directory
 
     Args:
         hest_dir (str): hest directory containing folders: st, wsis, metadata, tissue_seg (optional)
+        id_list (List[str], Optional): list of ids to read (ex: ['TENX96', 'TENX99']). Default to None
 
     Returns:
         List[HESTData]: list of HESTData objects
     """
     
-    ## TODO also read mask
-
     hestdata_list = []
-    for st_filename in os.listdir(os.path.join(hest_dir, 'st')):
+    
+    if id_list is not None:
+        st_filenames = id_list
+    else:
+        st_filenames = os.listdir(os.path.join(hest_dir, 'st'))
+        
+    for st_filename in st_filenames:
         id = st_filename.split('.')[0]
         adata_path = os.path.join(hest_dir, 'st', f'{id}.h5ad')
         img_path = os.path.join(hest_dir, 'wsis', f'{id}.tif')

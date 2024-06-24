@@ -53,9 +53,9 @@ You can then simply load the dataset as a `List[HESTData]`
 from hest import load_hest
 
 print('load hest...')
-hest_d = load_hest('hest_data') # location of the data
+hest_data = load_hest('hest_data') # location of the data
 print('loaded hest')
-for d in data:
+for d in hest_data:
     print(d)
 ```
 
