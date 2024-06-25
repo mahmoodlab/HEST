@@ -45,9 +45,11 @@ pip install \
 
 NOTE: HEST-Library was only tested on Linux/macOS machines, please report any bugs in the GitHub issues.
 
-## Download/Query HEST-1k
+## Download/Query HEST-1k (743G)
 
 To download/query HEST-1k, follow the tutorial [1-Downloading-HEST-1k.ipynb](https://github.com/mahmoodlab/HEST/blob/main/tutorials/1-Downloading-HEST-1k.ipynb) or follow instructions on [Hugging Face](https://huggingface.co/datasets/MahmoodLab/hest).
+
+NOTE: The entire dataset weighs 743 GB but you can easily download a subset by querying per id, organ, species...
 
 You can then simply view the dataset as, 
 
