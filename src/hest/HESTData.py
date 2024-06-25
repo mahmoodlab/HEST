@@ -824,13 +824,14 @@ def load_hest(hest_dir: str, id_list: List[str] = None) -> List[HESTData]:
     """
     
     hestdata_list = []
+    warnings.filterwarnings("ignore", message="invalid value encountered in divide")
     
     if id_list is not None:
         st_filenames = id_list
     else:
         st_filenames = os.listdir(os.path.join(hest_dir, 'st'))
         
-    for st_filename in st_filenames:
+    for st_filename in tqdm(st_filenames):
         id = st_filename.split('.')[0]
         adata_path = os.path.join(hest_dir, 'st', f'{id}.h5ad')
         img_path = os.path.join(hest_dir, 'wsis', f'{id}.tif')
@@ -844,4 +845,6 @@ def load_hest(hest_dir: str, id_list: List[str] = None) -> List[HESTData]:
             masks_path_jpg = os.path.join(hest_dir, 'tissue_seg', f'{id}_mask.jpg')
         st = read_HESTData(adata_path, img_path, meta_path, masks_path_pkl, masks_path_jpg)
         hestdata_list.append(st)
+        
+    warnings.resetwarnings()
     return hestdata_list
