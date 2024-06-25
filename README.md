@@ -29,12 +29,12 @@ conda activate hest
 pip install -e .
 ```
 
-#### additional dependencies (for WSI manipulation):
+#### Additional dependencies (for WSI manipulation):
 ```
 sudo apt install libvips libvips-dev openslide-tools
 ```
 
-#### additional dependencies (GPU acceleration):
+#### Additional dependencies (GPU acceleration):
 If a GPU is available on your machine, we recommend installing [cucim](https://docs.rapids.ai/install) on your conda environment. (hest was tested with `cucim-cu12==24.4.0` and `CUDA 12.1`)
 ```
 pip install \
@@ -78,7 +78,7 @@ The HEST-Benchmark was designed to assess foundation models for pathology under 
 
 HEST-Benchmark was used to assess 10 publicly available models. Reported results are based on a Random Forest regression model (70 trees). Additional results based on Ridge regression are provided in the paper. 
 
-|                | **ResNet50** | **KimiaNet** | **Ciga** | **CTransPath** | **Remedis** | **Phikon** | **PLIP** | **UNI** | **CONCH** | **GigaPath** |
+|                | **[ResNet50](https://arxiv.org/abs/1512.03385)** | **[KimiaNet](https://kimialab.uwaterloo.ca/kimia/index.php/data-and-code-2/kimia-net/)** | **[Ciga](https://arxiv.org/abs/2011.13971)** | **[CTransPath](https://www.sciencedirect.com/science/article/abs/pii/S1361841522002043)** | **[Remedis](https://arxiv.org/abs/2205.09723)** | **[Phikon](https://www.medrxiv.org/content/10.1101/2023.07.21.23292757v2)** | **[PLIP](https://www.nature.com/articles/s41591-023-02504-3)** | **[UNI](https://www.nature.com/articles/s41591-024-02857-3)** | **[CONCH](https://www.nature.com/articles/s41591-024-02856-4)** | **[GigaPath](https://www.nature.com/articles/s41586-024-07441-w)** |
 |----------------|--------------|--------------|----------|----------------|-------------|------------|----------|---------|-----------|--------------|
 | **IDC**        | 0.440        | 0.420        | 0.406    | 0.454          | 0.491       | 0.430      | 0.436    | _0.502_ | **0.504** | 0.492        |
 | **PRAD**       | 0.318        | 0.328        | 0.332    | 0.346          | 0.335       | **0.377**  | 0.362    | 0.357   | _0.373_   | 0.372        |
