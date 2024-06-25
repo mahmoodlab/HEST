@@ -1,21 +1,21 @@
 # HEST-Library: Bringing Spatial Transcriptomics and Histopathology together
 ## Designed for querying and assembling HEST-1k dataset 
 
-\[ [arXiv](https://mahmoodlab.github.io/hest-website/) | [HEST-1k](https://huggingface.co/datasets/MahmoodLab/hest) \]
+\[ [arXiv](https://arxiv.org/abs/2406.16192) | [HEST-1k](https://huggingface.co/datasets/MahmoodLab/hest) \]
 <!-- [ArXiv (stay tuned)]() | [Interactive Demo](http://clam.mahmoodlab.org) | [Cite](#reference) -->
 
 <img src="figures/fig1a.jpg" width="450px" align="right" />
 
 Welcome to the official GitHub repository of the HEST-Library introduced in *"HEST-1k: A Dataset for Spatial Transcriptomics and Histology Image Analysis"*. This project was developed by the [Mahmood Lab](https://faisal.ai/) at Harvard Medical School and Brigham and Women's Hospital. 
 
-HEST-1k, HEST-Library and HEST-Benchmark are released under the Attribution-NonCommercial-ShareAlike 4.0 International license. 
+HEST-1k, HEST-Library, and HEST-Benchmark are released under the Attribution-NonCommercial-ShareAlike 4.0 International license. 
 
 <br/>
 
 #### What does this repository provide?
-- **HEST-1k:** Free access to <b>HEST-1K</b>, a datasets of 1,108 paired Spatial Transcriptomics samples with HE-stained whole-slide images 
+- **HEST-1k:** Free access to <b>HEST-1K</b>, a dataset of 1,108 paired Spatial Transcriptomics samples with HE-stained whole-slide images 
 - **HEST-Library:** A series of helpers to assemble new ST samples (from ST, Visium, Visium HD, or Xenium) and work with HEST-1k
-- **HEST-Benchmark:** A new benchmark to assess the predicitve performance of foundation models for histology in predicting gene expression from morphology 
+- **HEST-Benchmark:** A new benchmark to assess the predictive performance of foundation models for histology in predicting gene expression from morphology 
 
 <br/>
 
@@ -47,7 +47,7 @@ NOTE: HEST-Library was only tested on Linux/macOS machines, please report any bu
 
 ## Download/Query HEST-1k
 
-To download/query HEST-1k, follow the tutorial [1-Downloading-HEST-1k](https://github.com/mahmoodlab/HEST/blob/main/tutorials/1-Downloading-HEST-1k.ipynb) or follow instructions on [Hugging Face](https://huggingface.co/datasets/MahmoodLab/hest).
+To download/query HEST-1k, follow the tutorial [1-Downloading-HEST-1k.ipynb](https://github.com/mahmoodlab/HEST/blob/main/tutorials/1-Downloading-HEST-1k.ipynb) or follow instructions on [Hugging Face](https://huggingface.co/datasets/MahmoodLab/hest).
 
 You can then simply view the dataset as, 
 
@@ -68,11 +68,11 @@ The HEST-Library allows **assembling** new samples using HEST format and **inter
 - [2-Interacting-with-HEST-1k.ipynb](https://github.com/mahmoodlab/HEST/tree/main/tutorials/2-Interacting-with-HEST-1k.ipynb): Playing around with HEST data for loading patches, visualizing nuclear segmentation.
 - [3-Assembling-HEST-Data.ipynb](https://github.com/mahmoodlab/HEST/tree/main/tutorials/3-Assembling-HEST-Data.ipynb): Walkthrough to transform a Visum sample into HEST.
 
-In addition, we provide a complete [documentation](https://hest.readthedocs.io/en/latest/).
+In addition, we provide complete [documentation](https://hest.readthedocs.io/en/latest/).
 
 ## HEST-Benchmark
 
-The HEST-Benchmark was designed to assess foundation models for pathology under a new, diverse and challenging benchmark. HEST-Benchmark includes 10 tasks for gene expression prediction (50 highly variable genes) from morphology (112 x 112 um regions at 0.5 um/px) in 10 different organs and 9 cancer types. We provide a step-by-step tutorial to run HEST-Benchmark and reproduce our results in [4-Running-HEST-Benchmark.ipynb](https://github.com/mahmoodlab/HEST/tree/main/tutorials/4-Running-HEST-Benchmark.ipynb).
+The HEST-Benchmark was designed to assess foundation models for pathology under a new, diverse, and challenging benchmark. HEST-Benchmark includes 10 tasks for gene expression prediction (50 highly variable genes) from morphology (112 x 112 um regions at 0.5 um/px) in 10 different organs and 9 cancer types. We provide a step-by-step tutorial to run HEST-Benchmark and reproduce our results in [4-Running-HEST-Benchmark.ipynb](https://github.com/mahmoodlab/HEST/tree/main/tutorials/4-Running-HEST-Benchmark.ipynb).
 
 ### HEST-Benchmark results (06.24.24)
 
@@ -96,7 +96,7 @@ HEST-Benchmark was used to assess 10 publicly available models. Reported results
 
 Our tutorial in [4-Running-HEST-Benchmark.ipynb](https://github.com/mahmoodlab/HEST/tree/main/tutorials/4-Running-HEST-Benchmark.ipynb) will guide users interested in benchmarking their own model on HEST-Benchmark.
 
-**Note:** Spontaneous contributions are encouraged if researchers from the community want to include new models. To do so, simply create a Pull Request (see below). 
+**Note:** Spontaneous contributions are encouraged if researchers from the community want to include new models. To do so, simply create a Pull Request. 
 
 ## Issues 
 - The preferred mode of communication is via GitHub issues.
@@ -107,11 +107,14 @@ Our tutorial in [4-Running-HEST-Benchmark.ipynb](https://github.com/mahmoodlab/H
 
 If you find our work useful in your research, please consider citing:
 ```
-@inproceedings{jaume2024hest,
-  title={HEST-1k: A Dataset for Spatial Transcriptomics and Histology Image Analysis},
-  author={Jaume, Guillaume and Doucet, Paul and Song, Andrew H. and Lu, Ming Y. and Almagro-Pérez, Cristina and Wagner, Sophia J. and Vaidya, Anurag J. and Chen, Richard J.and Williamson, Drew F.K. and Kim, Ahrong and Mahmood, Faisal},
-  booktitle={arXiv},
-  year={2024}
+@article{jaume2024hest,
+	author = {Jaume, Guillaume and Doucet, Paul and Song, Andrew H. and Lu, Ming Y. and Almagro-Perez, Cristina and Wagner, Sophia J. and Vaidya, Anurag J. and Chen, Richard J. and Williamson, Drew F. K. and Kim, Ahrong and Mahmood, Faisal},
+	title = {{HEST-1k: A Dataset for Spatial Transcriptomics and Histology Image Analysis}},
+	journal = {arXiv},
+	year = {2024},
+	month = jun,
+	eprint = {2406.16192},
+	url = {https://arxiv.org/abs/2406.16192v1}
 }
 ```
 
