@@ -78,7 +78,8 @@ The HEST-Benchmark was designed to assess foundation models for pathology under 
 
 ### HEST-Benchmark results (06.24.24)
 
-HEST-Benchmark was used to assess 10 publicly available models. Reported results are based on a Random Forest regression model (70 trees). Additional results based on Ridge regression are provided in the paper. 
+HEST-Benchmark was used to assess 10 publicly available models. Reported results are based on a Random Forest regression model (70 trees). Model performance measured with Pearson correlation. Best is **bold**, second best
+is _underlined_. Models sorted by publication date. Additional results based on Ridge regression are provided in the paper. 
 
 |                | **[ResNet50](https://arxiv.org/abs/1512.03385)** | **[KimiaNet](https://kimialab.uwaterloo.ca/kimia/index.php/data-and-code-2/kimia-net/)** | **[Ciga](https://arxiv.org/abs/2011.13971)** | **[CTransPath](https://www.sciencedirect.com/science/article/abs/pii/S1361841522002043)** | **[Remedis](https://arxiv.org/abs/2205.09723)** | **[Phikon](https://www.medrxiv.org/content/10.1101/2023.07.21.23292757v2)** | **[PLIP](https://www.nature.com/articles/s41591-023-02504-3)** | **[UNI](https://www.nature.com/articles/s41591-024-02857-3)** | **[CONCH](https://www.nature.com/articles/s41591-024-02856-4)** | **[GigaPath](https://www.nature.com/articles/s41586-024-07441-w)** |
 |----------------|--------------|--------------|----------|----------------|-------------|------------|----------|---------|-----------|--------------|
