@@ -49,7 +49,7 @@ parser.add_argument('--batch_size', type=int, default=128, help='Batch size')
 parser.add_argument('--num_workers', type=int, default=1, help='Number of workers for dataloader')
 
 ### specify dataset settings ###
-parser.add_argument('--gene_list', type=str, default=None)
+parser.add_argument('--gene_list', type=str, default='var_50genes.json')
 parser.add_argument('--method', type=str, default='ridge')
 parser.add_argument('--alpha', type=float, default=None)
 parser.add_argument('--kfold', action='store_true', default=False)
@@ -237,14 +237,7 @@ def predict_single_split(train_split, test_split, args, save_dir, dataset_name, 
     # load and gather all data
     all_split_assets = {}
     
-    if args.gene_list is None:
-        files = os.listdir(source_dataroot)
-        for f in files:
-            if f.endswith('.json'):
-                gene_list = f
-                break
-    else:
-        gene_list = args.gene_list
+    gene_list = args.gene_list
 
     print(f'using gene_list {gene_list}')
     with open(os.path.join(source_dataroot, gene_list), 'r') as f:
