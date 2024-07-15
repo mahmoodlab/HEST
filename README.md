@@ -19,7 +19,14 @@ HEST-1k, HEST-Library, and HEST-Benchmark are released under the Attribution-Non
 
 <br/>
 
-## Installation
+## Download/Query HEST-1k (743GB)
+
+To download/query HEST-1k, follow the tutorial [1-Downloading-HEST-1k.ipynb](https://github.com/mahmoodlab/HEST/blob/main/tutorials/1-Downloading-HEST-1k.ipynb) or follow instructions on [Hugging Face](https://huggingface.co/datasets/MahmoodLab/hest).
+
+**NOTE:** The entire dataset weighs 743 GB but you can easily download a subset by querying per id, organ, species...
+
+
+## HEST-Library installation
 
 ```
 git clone https://github.com/mahmoodlab/hest.git
@@ -43,13 +50,9 @@ pip install \
     raft-dask-cu12==24.6.*
 ```
 
-NOTE: HEST-Library was only tested on Linux/macOS machines, please report any bugs in the GitHub issues.
+**NOTE:** HEST-Library was only tested on Linux/macOS machines, please report any bugs in the GitHub issues.
 
-## Download/Query HEST-1k (743GB)
-
-To download/query HEST-1k, follow the tutorial [1-Downloading-HEST-1k.ipynb](https://github.com/mahmoodlab/HEST/blob/main/tutorials/1-Downloading-HEST-1k.ipynb) or follow instructions on [Hugging Face](https://huggingface.co/datasets/MahmoodLab/hest).
-
-NOTE: The entire dataset weighs 743 GB but you can easily download a subset by querying per id, organ, species...
+## Inspect HEST-1k with HEST-Library
 
 You can then simply view the dataset as, 
 
