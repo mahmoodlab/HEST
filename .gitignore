@@ -17,9 +17,15 @@ cells_xenium.geojson
 nuclei_xenium.geojson
 nuclei.tif
 cells.tif
+src_slides
 data64.h5
 tests/assets
+config
 tests/output_tests
+tissue_seg
+
+results
+atlas
 figures/test_paul
 bench_data.zip
 old_bench_data
@@ -45,3 +51,4 @@ vis2
 models/deeplabv3*
 .github
 htmlcov
+models/CellViT-SAM-H-x40.pth
