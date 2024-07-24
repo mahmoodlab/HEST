@@ -22,7 +22,7 @@ from .utils import (SpotPacking, align_xenium_df, check_arg,
                     df_morph_um_to_pxl, find_biggest_img,
                     find_first_file_endswith, find_pixel_size_from_spot_coords,
                     get_path_from_meta_row, get_path_relative, helper_mex,
-                    load_image, metric_file_do_dict, read_10x_seg,
+                    load_image, load_wsi, metric_file_do_dict, read_10x_seg,
                     register_downscale_img)
 
 
@@ -425,7 +425,7 @@ class VisiumReader(Reader):
         adata.var_names_make_unique()
         print(adata)
 
-        img, pixel_size_embedded = load_image(img_path)
+        img, pixel_size_embedded = load_wsi(img_path)
         
         
         print('trim the barcodes')
