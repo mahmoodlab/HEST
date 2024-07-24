@@ -40,6 +40,11 @@ class WSI:
     def get_thumbnail(self, width, height):
         pass
     
+    def __repr__(self) -> str:
+        width, height = self.get_dimensions()
+        
+        return f"<width={width}, height={height}, backend={self.__class__.__name__}>"
+    
 
 def wsi_factory(img) -> WSI:
     if isinstance(img, openslide.OpenSlide):

@@ -5,9 +5,12 @@ import warnings
 from typing import Dict, List, Union
 
 import cv2
+import geopandas as gpd
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+
+from hest.io.seg_readers import write_geojson
 
 try:
     from cucim import CuImage
@@ -15,6 +18,7 @@ except ImportError:
     CuImage = None
     print("CuImage is not available. Ensure you have a GPU and cucim installed to use GPU acceleration.")
 
+from hest.LazyShapes import LazyShapes, convert_old_to_gpd
 from hest.segmentation.TissueMask import TissueMask, load_tissue_mask
 from hest.wsi import WSI, NumpyWSI, wsi_factory
 
@@ -35,19 +39,17 @@ from dask.array import from_delayed
 from matplotlib import rcParams
 from matplotlib.collections import PatchCollection
 from PIL import Image
+from shapely import Point
 from spatialdata import SpatialData
 from spatialdata.models import Image2DModel
 from tqdm import tqdm
 
-from .segmentation.SegDataset import SegDataset
 from .segmentation.segmentation import (apply_otsu_thresholding,
-                                        keep_largest_area, mask_to_contours,
-                                        save_pkl, scale_contour_dim,
-                                        segment_tissue_deep,
-                                        visualize_tissue_seg)
+                                        get_tissue_seg_vis, keep_largest_area,
+                                        mask_to_contours, save_pkl,
+                                        segment_tissue_deep)
 from .utils import (ALIGNED_HE_FILENAME, check_arg, get_path_from_meta_row,
-                    get_path_relative, load_image, plot_verify_pixel_size,
-                    tiff_save, verify_paths)
+                    plot_verify_pixel_size, tiff_save, verify_paths)
 from .vst_save_utils import initsave_hdf5
 
 
@@ -64,6 +66,8 @@ class HESTData:
     
     cellvit_seg = None
     """dictionary of cells in the CellViT .geojson format"""
+    
+    shapes: List[LazyShapes] = []
     
     
     def _verify_format(self, adata):
@@ -90,7 +94,9 @@ class HESTData:
         pixel_size: float,
         meta: Dict = {},
         cellvit_seg: Dict=None,
-        tissue_seg: TissueMask=None
+        tissue_seg: TissueMask=None,
+        tissue_contours: gpd.GeoDataFrame=None,
+        shapes: List[LazyShapes]=[]
     ):
         """
         class representing a single ST profile + its associated WSI image
@@ -102,7 +108,8 @@ class HESTData:
                 If a str is passed, the image is opened with cucim if available and OpenSlide otherwise
             pixel_size (float): pixel_size of WSI im um/px, this pixel size will be used to perform operations on the slide, such as patching and segmenting
             meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
-            cellvit_seg (Dict): dictionary of cells in the CellViT .geojson format. Default: None
+            cellvit_seg (Dict): deprecated argument, will be removed in the future
+            shapes (List[LazyShapes]): dictionary of shapes, note that these shapes will be lazily loaded. Default: None
             tissue_seg (TissueMask): tissue mask for that sample
         """
         self.adata = adata
@@ -112,14 +119,12 @@ class HESTData:
         self.meta = meta
         self._verify_format(adata)
         self.pixel_size = pixel_size
-        self.cellvit_seg = cellvit_seg
-        self.tissue_mask = None
-        self.contours_holes = None
-        self.contours_tissue = None
+        self.shapes = shapes
         if tissue_seg is not None:
-            self.tissue_mask = tissue_seg.tissue_mask
-            self.contours_holes = tissue_seg.contours_holes
-            self.contours_tissue = tissue_seg.contours_tissue
+            warnings.warn('tissue_seg is deprecated, please use tissue_contours instead, you might have to delete and redownload the `tissue_seg` data directory and redownload it from huggingface')
+            self.tissue_contours = convert_old_to_gpd(tissue_seg.contours_holes, tissue_seg.contours_tissue)
+        else:
+            self.tissue_contours = tissue_contours
         
         if 'total_counts' not in self.adata.var_names:
             sc.pp.calculate_qc_metrics(self.adata, inplace=True)
@@ -127,16 +132,12 @@ class HESTData:
         
     def __repr__(self):
         sup_rep = super().__repr__()
-
-        #img_str = 'WSI in memory'if self.is_image_in_mem() else "WSI not in memory"
-
-        width, height = self.wsi.get_dimensions()
-        dim_str = f'WSI has dim height={height}, width={width}'
     
-        rep = f"""{sup_rep}
+        rep =  f"""{sup_rep}
         'pixel_size' is {self.pixel_size}
-        {dim_str}
-        """
+        'wsi' is {self.wsi}
+        'shapes': {self.shapes}"""
+        
         return rep
         
     
@@ -172,8 +173,7 @@ class HESTData:
             - downscaled_fullres.jpeg (a downscaled version of the fullres image)
             - aligned_fullres_HE.tif (the full resolution image)
             - cells.geojson (cell segmentation if it exists)
-            - Optional: tissue_mask.jpg (grayscale image of the tissue segmentation if it exists)
-            - Optional: tissue_mask.pkl (main contours and contours of holes of the tissue segmentation if it exists)
+            - Optional: tissue_contours.geojson (contours of the tissue segmentation if it exists)
             - Optional: tissue_seg_vis.jpg (visualization of tissue contour and holes on downscaled H&E if it exists)
 
         Args:
@@ -220,21 +220,10 @@ class HESTData:
             plot_verify_pixel_size(downscaled_img, down_fact, pixel_size_embedded, pixel_size_estimated, os.path.join(path, 'pixel_size_vis.png'))
 
 
-        if self.tissue_mask is not None:
-            Image.fromarray(self.tissue_mask).save(os.path.join(path, 'tissue_mask.jpg'))
-            self.save_tissue_seg_pkl(path, 'tissue')
+        if self.tissue_contours is not None:
+            write_geojson(self.tissue_contours, os.path.join(path, 'tissue_contours.geojson'), 'tissue_id')
             
-            vis = visualize_tissue_seg(
-                    self.wsi.img,
-                    self.tissue_mask,
-                    self.contours_tissue,
-                    self.contours_holes,
-                    line_color=(0, 255, 0),
-                    hole_color=(0, 0, 255),
-                    line_thickness=5,
-                    target_width=1000,
-                    seg_display=True,
-            )
+            vis = self.get_tissue_vis()
             
             vis.save(os.path.join(path, 'tissue_seg_vis.jpg'))
 
@@ -275,10 +264,13 @@ class HESTData:
             if keep_largest:
                 mask = keep_largest_area(mask)
             self.tissue_mask = np.round(cv2.resize(mask, (width, height))).astype(np.uint8)
-            self.contours_tissue, self.contours_holes = mask_to_contours(self.tissue_mask, pixel_size=self.pixel_size)
+            
+            #TODO directly convert to gpd
+            contours_tissue, contours_holes = mask_to_contours(self.tissue_mask, pixel_size=self.pixel_size)
+            self.tissue_contours = convert_old_to_gpd(contours_holes, contours_tissue)
             
         if return_vis:
-            return self._get_tissue_vis()
+            return self.get_tissue_vis()
         else:
             return None
             
@@ -355,12 +347,7 @@ class HESTData:
         else:
             tissue_mask = np.ones((img_height, img_width)).astype(np.uint8)
             
-        mask_plot = visualize_tissue_seg(
-                        self.wsi.img,
-                        self.tissue_mask,
-                        self.contours_tissue,
-                        self.contours_holes
-                )
+        mask_plot = self.get_tissue_vis()
 
         ax.imshow(mask_plot)
         for _, row in tqdm(adata.obs.iterrows(), total=len(adata.obs)):
@@ -493,14 +480,11 @@ class HESTData:
         save_pkl(os.path.join(save_dir, f'{name}_mask.pkl'), asset_dict)
         
     
-    def _get_tissue_vis(self):
-         return visualize_tissue_seg(
+    def get_tissue_vis(self):
+         return get_tissue_seg_vis(
             self.wsi.img,
-            self.tissue_mask,
-            self.contours_tissue,
-            self.contours_holes,
+            self.tissue_contours,
             line_color=(0, 255, 0),
-            hole_color=(0, 0, 255),
             line_thickness=5,
             target_width=1000,
             seg_display=True,
@@ -508,7 +492,7 @@ class HESTData:
     
     
     def save_vis(self, save_dir, name) -> None:
-        vis = self._get_tissue_vis()
+        vis = self.get_tissue_vis()
         vis.save(os.path.join(save_dir, f'{name}_vis.jpg'))
 
 
@@ -534,10 +518,21 @@ class HESTData:
             
         parsed_image = Image2DModel.parse(arr, dims=("y", "x", "c"))
         
+        shape_validated = []
+        shape_names = []
+        for it in self.shapes:
+            shapes = it.shapes
+            if len(shapes) > 0 and isinstance(shapes.iloc[0], Point):
+                if 'radius' not in shapes.columns:
+                    shapes['radius'] = 1
+            
+            shape_validated.append(shapes)
+            shape_names.append(it.name)
+        
         my_images = {"he": parsed_image}
         my_tables = {"anndata": self.adata}
         
-        st = SpatialData(images=my_images, tables=my_tables)
+        st = SpatialData(images=my_images, tables=my_tables, shapes=dict(shape_names, shape_validated))
         
         #TODO add CellViT
         #TODO add tissue segmentation
@@ -563,7 +558,8 @@ class VisiumHDHESTData(HESTData):
         pixel_size: float,
         meta: Dict = {},
         cellvit_seg: Dict=None,
-        tissue_seg: TissueMask=None
+        tissue_seg: TissueMask=None,
+        shapes: List[LazyShapes]=[]
     ):
         """
         Args:
@@ -572,10 +568,11 @@ class VisiumHDHESTData(HESTData):
             pixel_size (float): pixel_size of WSI im um/px, this pixel size will be used to perform operations on the slide, such as patching and segmenting
             img (Union[np.ndarray, str]): Full resolution image corresponding to the ST data, if passed as a path (str) the image is lazily loaded
             meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
-            cellvit_seg (Dict): dictionary of cells in the CellViT .geojson format. Default: None
+            cellvit_seg (Dict): deprecated argument, will be removed in the future
+            shapes (List[LazyShapes]): dictionary of shapes, note that these shapes will be lazily loaded. Default: None
             tissue_seg (TissueMask): tissue mask for that sample
         """
-        super().__init__(adata, img, pixel_size, meta, cellvit_seg, tissue_seg)        
+        super().__init__(adata, img, pixel_size, meta, cellvit_seg, tissue_seg, shapes)        
         
 class STHESTData(HESTData):
     def __init__(self, 
@@ -584,7 +581,8 @@ class STHESTData(HESTData):
         pixel_size: float,
         meta: Dict = {},
         cellvit_seg: Dict=None,
-        tissue_seg: TissueMask=None
+        tissue_seg: TissueMask=None,
+        shapes: List[LazyShapes]=[]
     ):
         """
         Args:
@@ -596,7 +594,7 @@ class STHESTData(HESTData):
             cellvit_seg (Dict): dictionary of cells in the CellViT .geojson format. Default: None
             tissue_seg (TissueMask): tissue mask for that sample
         """
-        super().__init__(adata, img, pixel_size, meta, cellvit_seg, tissue_seg)
+        super().__init__(adata, img, pixel_size, meta, cellvit_seg, tissue_seg, shapes)
         
 class XeniumHESTData(HESTData):
 
@@ -608,6 +606,7 @@ class XeniumHESTData(HESTData):
         meta: Dict = {},
         cellvit_seg: Dict=None,
         tissue_seg: TissueMask=None,
+        shapes: List[LazyShapes]=[],
         xenium_nuc_seg: pd.DataFrame=None,
         xenium_cell_seg: pd.DataFrame=None,
         cell_adata: sc.AnnData=None,
@@ -622,14 +621,15 @@ class XeniumHESTData(HESTData):
             img (Union[np.ndarray, openslide.OpenSlide, CuImage]): Full resolution image corresponding to the ST data, Openslide/CuImage are lazily loaded, use CuImage for GPU accelerated computation
             pixel_size (float): pixel_size of WSI im um/px, this pixel size will be used to perform operations on the slide, such as patching and segmenting
             meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
-            cellvit_seg (Dict): dictionary of cells in the CellViT .geojson format. Default: None
+            cellvit_seg (Dict): deprecated argument, will be removed in the future
+            shapes (List[LazyShapes]): dictionary of shapes, note that these shapes will be lazily loaded. Default: None
             tissue_seg (TissueMask): tissue mask for that sample
             xenium_nuc_seg (pd.DataFrame): content of a xenium nuclei contour file as a dataframe (nucleus_boundaries.parquet)
             xenium_cell_seg (pd.DataFrame): content of a xenium cell contour file as a dataframe (cell_boundaries.parquet)
             cell_adata (sc.AnnData): ST cell data, each row in adata.obs is a cell, each row in obsm is the cell location on the H&E image in pixels
             transcript_df (pd.DataFrame): dataframe of transcripts, each row is a transcript, he_x and he_y is the transcript location on the H&E image in pixels
         """
-        super().__init__(adata=adata, img=img, pixel_size=pixel_size, meta=meta, cellvit_seg=cellvit_seg, tissue_seg=tissue_seg)
+        super().__init__(adata=adata, img=img, pixel_size=pixel_size, meta=meta, cellvit_seg=cellvit_seg, tissue_seg=tissue_seg, shapes=shapes)
         
         self.xenium_nuc_seg = xenium_nuc_seg
         self.xenium_cell_seg = xenium_cell_seg
@@ -646,8 +646,7 @@ class XeniumHESTData(HESTData):
             - cells.geojson (cell segmentation if it exists)
             - Optional: cells_xenium.geojson (if xenium cell segmentation is attached to this object)
             - Optional: nuclei_xenium.geojson (if xenium cell segmentation is attached to this object)
-            - Optional: tissue_mask.jpg (grayscale image of the tissue segmentation if it exists)
-            - Optional: tissue_mask.pkl (main contours and contours of holes of the tissue segmentation if it exists)
+            - Optional: tissue_contours.geojson (contours of the tissue segmentation if it exists)
 
         Args:
             path (str): save location
@@ -681,7 +680,9 @@ def read_HESTData(
     img: Union[str, np.ndarray, openslide.OpenSlide, 'CuImage'], 
     metrics_path: str,
     mask_path_pkl: str = None,
-    mask_path_jpg: str = None
+    mask_path_jpg: str = None,
+    cellvit_path: str = None,
+    tissue_contours_path: str = None
 ) -> HESTData:
     """ Read a HEST sample from disk
 
@@ -706,17 +707,19 @@ def read_HESTData(
             img = openslide.OpenSlide(img)
             width, height = img.dimensions
             
-            
     if mask_path_pkl is not None and mask_path_jpg is not None:
         tissue_seg = load_tissue_mask(mask_path_pkl, mask_path_jpg, width, height)
     else:
         tissue_seg = None
     
+    shapes = []
+    if cellvit_path is not None:
+        shapes.append(LazyShapes(cellvit_path, 'cellvit', 'he'))
     
     adata = sc.read_h5ad(adata_path)
     with open(metrics_path) as metrics_f:     
         metrics = json.load(metrics_f)
-    return HESTData(adata, img, metrics['pixel_size_um_estimated'], metrics, tissue_seg=tissue_seg)
+    return HESTData(adata, img, metrics['pixel_size_um_estimated'], metrics, tissue_seg=tissue_seg, shapes=shapes)
         
 
 def mask_and_patchify_bench(meta_df: pd.DataFrame, save_dir: str, use_mask=True, keep_largest=None):
@@ -814,6 +817,9 @@ def load_hest(hest_dir: str, id_list: List[str] = None) -> List[HESTData]:
         List[HESTData]: list of HESTData objects
     """
     
+    if not(isinstance(id_list, list) or isinstance(id_list, np.ndarray)):
+        raise ValueError('id_list must a list or a numpy array')
+    
     hestdata_list = []
     warnings.filterwarnings("ignore", message="invalid value encountered in divide")
     
@@ -834,7 +840,21 @@ def load_hest(hest_dir: str, id_list: List[str] = None) -> List[HESTData]:
         if os.path.exists(os.path.join(hest_dir, 'tissue_seg')):
             masks_path_pkl = os.path.join(hest_dir, 'tissue_seg', f'{id}_mask.pkl')
             masks_path_jpg = os.path.join(hest_dir, 'tissue_seg', f'{id}_mask.jpg')
-        st = read_HESTData(adata_path, img_path, meta_path, masks_path_pkl, masks_path_jpg)
+            tissue_contours_path = os.path.join(hest_dir, 'tissue_seg', f'{id}_contours.geojson')
+            if not os.path.exists(tissue_contours_path):
+                warnings.warn('Tissue contours were updated from jpg/.pkl to a .geojson format in the latest hest version, please delete the `tissue_seg` directory and re-download it from huggingface')
+        
+        if os.path.exists(os.path.join(hest_dir, 'cellvit_seg')):
+            cellvit_path = os.path.join(hest_dir, 'cellvit_seg', f'{id}_cellvit_seg.geojson')
+            
+        st = read_HESTData(
+            adata_path, 
+            img_path, 
+            meta_path, 
+            masks_path_pkl, 
+            masks_path_jpg, 
+            cellvit_path=cellvit_path,
+            tissue_contours_path=tissue_contours_path)
         hestdata_list.append(st)
         
     warnings.resetwarnings()
