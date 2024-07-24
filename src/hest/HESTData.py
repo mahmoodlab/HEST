@@ -8,7 +8,6 @@ import cv2
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
-import tifffile
 
 try:
     from cucim import CuImage
@@ -36,8 +35,8 @@ from dask.array import from_delayed
 from matplotlib import rcParams
 from matplotlib.collections import PatchCollection
 from PIL import Image
-from spatial_image import SpatialImage
 from spatialdata import SpatialData
+from spatialdata.models import Image2DModel
 from tqdm import tqdm
 
 from .segmentation.SegDataset import SegDataset
@@ -522,29 +521,27 @@ class HESTData:
         Returns:
             SpatialData: scverse SpatialData object
         """
-        
-        def read_hest_wsi(path):
-            return pyvips.Image.tiffload(path).numpy().transpose((2, 0, 1))
+
+        def read_hest_wsi(wsi: WSI):
+            return wsi.numpy()
     
-        if lazy_img and not (isinstance(self.wsi, np.ndarray)):
-            
-            with tifffile.TiffFile(self.wsi) as tif:
-                page = tif.pages[0]
-                width = page.imagewidth
-                height = page.imagelength
-                
-            
-            img = from_delayed(delayed(read_hest_wsi)(self.wsi), shape=(height, width, 3), dtype=np.int8)
+        if lazy_img:
+            width, height = self.wsi.get_dimensions()
+            arr = from_delayed(delayed(read_hest_wsi)(self.wsi), shape=(height, width, 3), dtype=np.int8)
         else:
             img = self.wsi.numpy()
             arr = da.from_array(img)
-            sp_img = SpatialImage(arr, dims=['c', 'y', 'x'], attrs={'transform': None})
+            
+        parsed_image = Image2DModel.parse(arr, dims=("y", "x", "c"))
         
-        st = SpatialData({'fullres': sp_img}, table=self.adata)
+        my_images = {"he": parsed_image}
+        my_tables = {"anndata": self.adata}
+        
+        st = SpatialData(images=my_images, tables=my_tables)
         
         #TODO add CellViT
         #TODO add tissue segmentation
-        
+
         return st
         
     
