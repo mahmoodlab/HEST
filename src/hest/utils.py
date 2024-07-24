@@ -1082,7 +1082,7 @@ def load_image(img_path: str) -> Tuple[np.ndarray, float]:
         img_path (str): path to image
 
     Returns:
-        Tuple[np.ndarray, float]: image and it's embedded pixel size in um/px
+        Tuple[np.ndarray, float]: image and its embedded pixel size in um/px
     """
     unit_to_micrometers = {
         tifffile.RESUNIT.INCH: 25.4,
