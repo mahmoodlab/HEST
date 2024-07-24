@@ -8,6 +8,7 @@ import openslide
 import pyvips
 import scanpy as sc
 
+import hest
 from hest.autoalign import autoalign_visium
 from hest.readers import VisiumReader
 from hest.utils import get_path_relative, load_image
@@ -101,52 +102,18 @@ class TestHESTData(unittest.TestCase):
         cur_dir = self.cur_dir
         self.output_dir = _j(cur_dir, 'output_tests/hestdata_tests')
         
-        # Create an instance of HESTData
-        adata = sc.read_h5ad(_j(cur_dir, './assets/SPA154.h5ad'))
-        pixel_size = 0.9206
+        id_list = ['SPA154', 'TENX96', 'TENX131']
         
-        self.st_objects: List[HESTData] = []
-                    
-        
-        if CuImage is not None:
-            img = CuImage(_j(cur_dir, './assets/SPA154.tif'))
-        else:
-            img = openslide.OpenSlide(_j(cur_dir, './assets/SPA154.tif'))
-        self.st_objects.append({'name': 'numpy', 'st': HESTData(adata, img, pixel_size)})
-        
-        if CuImage is not None:
-            img = wsi_factory(CuImage(_j(cur_dir, './assets/SPA154.tif'))).numpy()
-            self.st_objects.append({'name': 'cuimage', 'st': HESTData(adata, img, pixel_size)})
-        else:
-            img = wsi_factory(openslide.OpenSlide(_j(cur_dir, './assets/SPA154.tif'))).numpy()
-            self.st_objects.append({'name': 'openslide', 'st': HESTData(adata, img, pixel_size)})    
-        
+        self.sts = hest.load_hest('hest_data', id_list)
+
     
-    def read_hestdata(self):
-        cur_dir = self.cur_dir
-        
-        st = read_HESTData(
-            adata_path=_j(cur_dir, './assets/SPA154.h5ad'),
-            img=_j(cur_dir, './assets/SPA154.tif'), 
-            metrics_path=_j(cur_dir, './assets/SPA154.json'),
-            mask_path_pkl=_j(cur_dir, './assets/SPA154_mask.pkl'),
-            mask_path_jpg=_j(cur_dir, './assets/SPA154_mask.jpg')
-        )
-        
+    def dump_patches(self):
         os.makedirs(_j(self.output_dir, 'read_hestdata'), exist_ok=True)
-        st.dump_patches(_j(self.output_dir, 'read_hestdata'))
+        self.st.dump_patches(_j(self.output_dir, 'read_hestdata'))
         
-    
-        
-    def load_wsi(self):
-        for idx, st in enumerate(self.st_objects):
-            st = st['st']
-            with self.subTest(st_object=idx):
-                st.load_wsi()
         
     def test_tissue_seg(self):
-        for idx, st in enumerate(self.st_objects):
-            st = st['st']
+        for idx, st in enumerate(self.sts):
             with self.subTest(st_object=idx):
                 st.segment_tissue(method='deep')
                 st.save_tissue_seg_jpg(self.output_dir, name=f'deep_{idx}')
@@ -159,16 +126,14 @@ class TestHESTData(unittest.TestCase):
                 st.save_vis(self.output_dir, name=f'otsu_{idx}')
 
     def test_patching(self):
-        for idx, conf in enumerate(self.st_objects):
-            st = conf['st']
+        for idx, st in enumerate(self.sts):
             with self.subTest(st_object=idx):
                 name = ''
-                name += conf['name']
+                name += st.meta['id']
                 st.dump_patches(self.output_dir, name=name)
 
     def test_wsi(self):
-        for idx, st in enumerate(self.st_objects):
-            st = st['st']
+        for idx, st in enumerate(self.sts):
             with self.subTest(st_object=idx):
                 os.makedirs(_j(self.output_dir, f'test_save_{idx}'), exist_ok=True)
                 st.meta['pixel_size_um_embedded'] = st.pixel_size / 1.5
@@ -177,4 +142,8 @@ class TestHESTData(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    #TestHESTReader()
+    
+    loader = unittest.TestLoader()
+    suite = loader.loadTestsFromTestCase(TestHESTData)
+    unittest.TextTestRunner(verbosity=2).run(suite)
