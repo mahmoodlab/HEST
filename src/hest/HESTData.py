@@ -679,8 +679,8 @@ def read_HESTData(
     adata_path: str, 
     img: Union[str, np.ndarray, openslide.OpenSlide, 'CuImage'], 
     metrics_path: str,
-    mask_path_pkl: str = None,
-    mask_path_jpg: str = None,
+    mask_path_pkl: str = None, # Deprecated
+    mask_path_jpg: str = None, # Deprecated
     cellvit_path: str = None,
     tissue_contours_path: str = None
 ) -> HESTData:
@@ -699,6 +699,7 @@ def read_HESTData(
         HESTData: HESTData object
     """
     
+
     if isinstance(img, str):
         if CuImage is not None:
             img = CuImage(img)
@@ -708,6 +709,7 @@ def read_HESTData(
             width, height = img.dimensions
             
     if mask_path_pkl is not None and mask_path_jpg is not None:
+        warnings.warn('mask_path_pkl and  mask_path_jpg are deprecated, please use tissue_contours_path instead')
         tissue_seg = load_tissue_mask(mask_path_pkl, mask_path_jpg, width, height)
     else:
         tissue_seg = None
@@ -841,9 +843,7 @@ def load_hest(hest_dir: str, id_list: List[str] = None) -> List[HESTData]:
             masks_path_pkl = os.path.join(hest_dir, 'tissue_seg', f'{id}_mask.pkl')
             masks_path_jpg = os.path.join(hest_dir, 'tissue_seg', f'{id}_mask.jpg')
             tissue_contours_path = os.path.join(hest_dir, 'tissue_seg', f'{id}_contours.geojson')
-            if not os.path.exists(tissue_contours_path):
-                warnings.warn('Tissue contours were updated from jpg/.pkl to a .geojson format in the latest hest version, please delete the `tissue_seg` directory and re-download it from huggingface')
-        
+
         if os.path.exists(os.path.join(hest_dir, 'cellvit_seg')):
             cellvit_path = os.path.join(hest_dir, 'cellvit_seg', f'{id}_cellvit_seg.geojson')
             
