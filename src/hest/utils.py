@@ -14,7 +14,7 @@ import cv2
 import numpy as np
 import pandas as pd
 
-from hest.wsi import WSIPatcher, wsi_factory
+from hest.wsi import WSI, WSIPatcher, wsi_factory
 
 try:
     import pyvips
@@ -1072,6 +1072,40 @@ def helper_mex(path: str, filename: str) -> None:
         shutil.copy(src, dst)
 
 
+def load_wsi(img_path: str) -> Tuple[WSI, float]:
+    """Load WSI from path and its corresponding embedded pixel size in um/px
+    
+    the embedded pixel size is only determined in tiff/tif/btf/TIF images and
+    only if the tags 'XResolution' and 'YResolution' are set
+
+    Args:
+        img_path (str): path to image
+
+    Returns:
+        Tuple[WSI, float]: WSI and its embedded pixel size in um/px
+    """
+    unit_to_micrometers = {
+        tifffile.RESUNIT.INCH: 25.4,
+        tifffile.RESUNIT.CENTIMETER: 1.e4,
+        tifffile.RESUNIT.MILLIMETER: 1.e3,
+        tifffile.RESUNIT.MICROMETER: 1.,
+        tifffile.RESUNIT.NONE: 1.
+    }
+    pixel_size_embedded = None
+    wsi = wsi_factory(img_path)
+    if img_path.endswith('tiff') or img_path.endswith('tif') or img_path.endswith('btf') or img_path.endswith('TIF'):
+            
+        my_img = tifffile.TiffFile(img_path)
+        
+        if 'XResolution' in my_img.pages[0].tags and my_img.pages[0].tags['XResolution'].value[0] != 0 and 'ResolutionUnit' in my_img.pages[0].tags:
+            # result in micrometers per pixel
+            factor = unit_to_micrometers[my_img.pages[0].tags['ResolutionUnit'].value]
+            pixel_size_embedded = (my_img.pages[0].tags['XResolution'].value[1] / my_img.pages[0].tags['XResolution'].value[0]) * factor
+    
+    return wsi, pixel_size_embedded
+
+
+@deprecated
 def load_image(img_path: str) -> Tuple[np.ndarray, float]:
     """Load image from path and it's corresponding embedded pixel size in um/px
     
