@@ -7,14 +7,15 @@ from typing import Union
 import cv2
 import numpy as np
 import torch
+from geopandas import gpd
 from huggingface_hub import snapshot_download
 from PIL import Image
 from torch import nn
 from torch.utils.data import DataLoader
-from torchvision import models, transforms
+from torchvision import transforms
 
 from hest.segmentation.SegDataset import SegDataset
-from hest.utils import get_path_relative
+from hest.utils import deprecated, get_path_relative
 from hest.wsi import WSI, WSIPatcher, wsi_factory
 
 try:
@@ -201,6 +202,58 @@ def keep_largest_area(mask: np.ndarray) -> np.ndarray:
     return mask
 
 
+def get_tissue_seg_vis(
+            img,
+            tissue_contours: gpd.GeoDataFrame,
+            line_color=(0, 255, 0),
+            line_thickness=5,
+            target_width=1000,
+            seg_display=True,
+    ) -> Image:
+        tissue_contours = tissue_contours.copy()
+    
+        wsi = wsi_factory(img)
+    
+        width, height = wsi.get_dimensions()
+        downsample = target_width / width
+
+        top_left = (0,0)
+        
+        img = wsi.get_thumbnail(round(width * downsample), round(height * downsample))
+
+        if tissue_contours is None:
+            return Image.fromarray(img)
+
+        downscaled_mask = np.zeros(img.shape[:2], dtype=np.uint8)
+        downscaled_mask = np.expand_dims(downscaled_mask, axis=-1)
+        downscaled_mask = downscaled_mask * np.array([0, 0, 0]).astype(np.uint8)
+
+
+        offset = tuple(-(np.array(top_left) * downsample).astype(int))
+        draw_cont = partial(cv2.drawContours, contourIdx=-1, thickness=line_thickness, lineType=cv2.LINE_8, offset=offset)
+        draw_cont_fill = partial(cv2.drawContours, contourIdx=-1, thickness=cv2.FILLED, offset=offset)
+
+
+        if tissue_contours is not None and seg_display:
+            
+            groups = tissue_contours.groupby('tissue_id')
+            for _, group in groups:
+                
+                for _, row in group.iterrows():
+                    cont = np.array([[round(x * downsample), round(y * downsample)] for x, y in row.geometry.exterior.coords])
+                
+                    #cont = np.array(scale_contour_dim(cont, scale))
+                    draw_cont(image=img, contours=[cont], color=line_color)
+                    draw_cont_fill(image=downscaled_mask, contours=[cont], color=line_color)
+
+        alpha = 0.4
+        img = cv2.addWeighted(img, 1 - alpha, downscaled_mask, alpha, 0)
+        img = img.astype(np.uint8)
+
+        return Image.fromarray(img)
+    
+
+@deprecated
 def visualize_tissue_seg(
             img,
             tissue_mask,
