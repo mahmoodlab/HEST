@@ -31,6 +31,12 @@ Image.MAX_IMAGE_PIXELS = 93312000000
 ALIGNED_HE_FILENAME = 'aligned_fullres_HE.tif'
 
 
+def verify_paths(paths):
+    for path in paths:
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"No such file or directory: {path}\nHave you downloaded the dataset? (https://huggingface.co/datasets/MahmoodLab/hest)")
+
+
 def geojson_to_map(geojson: dict, width, height, color=None):
     img = np.zeros((height, width), dtype=np.uint8)
     
