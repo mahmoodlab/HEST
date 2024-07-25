@@ -1,10 +1,11 @@
 import os
 import pickle
-import tempfile
+import time
 from functools import partial
 from typing import Union
 
 import cv2
+import torch.nn.functional as F
 import numpy as np
 import torch
 from geopandas import gpd
@@ -14,7 +15,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
-from hest.segmentation.SegDataset import SegDataset
+from hest.segmentation.SegDataset import SegWSIDataset
 from hest.utils import deprecated, get_path_relative
 from hest.wsi import WSI, WSIPatcher, wsi_factory
 
@@ -44,7 +45,8 @@ def segment_tissue_deep(
     patch_size=512,
     model_name='deeplabv3_seg_v4.ckpt',
     batch_size=8,
-    auto_download=True
+    auto_download=True,
+    contour_patch_size=128
 ):    
     
     
@@ -65,96 +67,85 @@ def segment_tissue_deep(
     
     weights_path = get_path_relative(__file__, f'../../../models/{model_name}')
     
-    patcher = WSIPatcher(wsi, patch_size_src)
-
-    cols, rows = patcher.get_cols_rows()
+    patcher = WSIPatcher(wsi, patch_size_src, patch_size)
+        
+    eval_transforms = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
+    dataset = SegWSIDataset(patcher, eval_transforms)
+    dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=8)
+    model = torch.hub.load('pytorch/vision:v0.10.0', 'deeplabv3_resnet50', pretrained=False)
+    model.classifier[4] = nn.Conv2d(
+        in_channels=256,
+        out_channels=2,
+        kernel_size=1,
+        stride=1
+    )
     
-    with tempfile.TemporaryDirectory() as tmpdirname:
-        print('created temporary directory', tmpdirname)
+    if auto_download:
+        model_dir = get_path_relative(__file__, f'../../../models')
+        snapshot_download(repo_id="pauldoucet/tissue-detector", repo_type='model', local_dir=model_dir, allow_patterns=model_name)
     
-        print('save temp patches...')
-        # saves patches to temp dir
-        for row in tqdm(range(rows)):
-            for col in range(cols):
-                tile, pxl_x, pxl_y = patcher.get_tile(col, row)
-                
-                tile = cv2.resize(tile, (patch_size, patch_size), interpolation=cv2.INTER_CUBIC)
+    if torch.cuda.is_available():
+        checkpoint = torch.load(weights_path)
+    else:
+        checkpoint = torch.load(weights_path, map_location=torch.device('cpu'))
+        
+    new_state_dict = {}
+    for key in checkpoint['state_dict']:
+        if 'aux' in key:
+            continue
+        new_key = key.replace('model.', '')
+        new_state_dict[new_key] = checkpoint['state_dict'][key]
+    model.load_state_dict(new_state_dict)
+    
+    if torch.cuda.is_available():        
+        model.cuda()
+    
+    model.eval()
+    
+    
+    stitched_img = np.zeros((height, width), dtype=np.uint8)
+    with torch.no_grad():
+        print('start inference...')
+        for batch in tqdm(dataloader, total=len(dataloader)):
+            
+            # coords are top left coords of patch
+            imgs, coords = batch
+            if torch.cuda.is_available(): 
+                imgs = imgs.cuda()
+            masks = model(imgs)['out']
+            preds = masks.argmax(1).to(torch.uint8).detach()
+            
+            start_time = time.time()
 
+            preds = preds.cpu().numpy()
+            end_time = time.time()
 
-                Image.fromarray(tile).save(os.path.join(tmpdirname, f'{pxl_x}_{pxl_y}.jpg'))
-                
-        
-        eval_transforms = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
-        dataset = SegDataset(tmpdirname, eval_transforms)
-        dataloader = DataLoader(dataset, batch_size=batch_size)
-        model = torch.hub.load('pytorch/vision:v0.10.0', 'deeplabv3_resnet50', pretrained=False)
-        model.classifier[4] = nn.Conv2d(
-            in_channels=256,
-            out_channels=2,
-            kernel_size=1,
-            stride=1
-        )
-        
-        if auto_download:
-            model_dir = get_path_relative(__file__, f'../../../models')
-            snapshot_download(repo_id="pauldoucet/tissue-detector", repo_type='model', local_dir=model_dir, allow_patterns=model_name)
-        
-        if torch.cuda.is_available():
-            checkpoint = torch.load(weights_path)
-        else:
-            checkpoint = torch.load(weights_path, map_location=torch.device('cpu'))
+            elapsed_time = end_time - start_time
+            print(elapsed_time)
             
-        new_state_dict = {}
-        for key in checkpoint['state_dict']:
-            if 'aux' in key:
-                continue
-            new_key = key.replace('model.', '')
-            new_state_dict[new_key] = checkpoint['state_dict'][key]
-        model.load_state_dict(new_state_dict)
-        
-        if torch.cuda.is_available():        
-            model.cuda()
-        
-        model.eval()
-        
-        
-        stitched_img = np.zeros((height, width))
-        with torch.no_grad():
-            print('start inference...')
-            for batch in tqdm(dataloader, total=len(dataloader)):
+            coords = np.column_stack((coords[0], coords[1]))
+            
+            # stitch the patches
+            for i in range(preds.shape[0]):
+                pred = preds[i]
+                coord = coords[i]
+                x, y = coord[0], coord[1]
                 
-                # coords are top left coords of patch
-                imgs, coords = batch
-                if torch.cuda.is_available(): 
-                    imgs = imgs.cuda()
-                masks = model(imgs)['out']
-                preds = masks.argmax(1)
+                pred = pred.astype(np.uint8)
                 
-                preds = np.array(preds.cpu())
+                pred = cv2.resize(pred, (patch_size_src + overlap, patch_size_src + overlap), interpolation=cv2.INTER_CUBIC)
                 
-                coords = np.column_stack((coords[0], coords[1]))
+                y_end = min(y+patch_size_src + overlap, height)
+                x_end = min(x+patch_size_src + overlap, width)
+                stitched_img[y:y_end, x:x_end] += pred[:y_end-y, :x_end-x]
                 
-                # stitch the patches
-                for i in range(preds.shape[0]):
-                    pred = preds[i]
-                    coord = coords[i]
-                    x, y = coord[0], coord[1]
-                    
-                    pred = pred.astype(np.uint8)
-                    
-                    pred = cv2.resize(pred, (patch_size_src + overlap, patch_size_src + overlap), interpolation=cv2.INTER_CUBIC)
-                    
-                    y_end = min(y+patch_size_src + overlap, height)
-                    x_end = min(x+patch_size_src + overlap, width)
-                    stitched_img[y:y_end, x:x_end] += pred[:y_end-y, :x_end-x]
-                    
 
-            
-        mask = (stitched_img > 0).astype(np.uint8)
-            
-        contours_tissue, contours_holes = mask_to_contours(mask, max_nb_holes=5, pixel_size=pixel_size_src)
-            
-        return mask, contours_tissue, contours_holes
+        
+    mask = (stitched_img > 0).astype(np.uint8)
+        
+    contours_tissue, contours_holes = mask_to_contours(mask, max_nb_holes=5, pixel_size=pixel_size_src)
+        
+    return mask, contours_tissue, contours_holes
 
 
 def save_pkl(filename, save_object):
