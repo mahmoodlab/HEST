@@ -1,4 +1,5 @@
 from abc import abstractmethod
+from typing import Tuple
 import cv2
 import numpy as np
 import openslide
@@ -47,7 +48,9 @@ class WSI:
     
 
 def wsi_factory(img) -> WSI:
-    if isinstance(img, openslide.OpenSlide):
+    if isinstance(img, WSI):
+        return img
+    elif isinstance(img, openslide.OpenSlide):
         return OpenSlideWSI(img)
     elif isinstance(img, np.ndarray):
         return NumpyWSI(img)
@@ -128,14 +131,20 @@ class CuImageWSI(WSI):
     
         
 class WSIPatcher:
-    def __init__(self, wsi: WSI, patch_size_src):
+    def __init__(self, wsi: WSI, patch_size_src: int, patch_size_target: int = None):
         self.wsi = wsi
         self.patch_size_src = patch_size_src
         self.overlap = 0
         self.width, self.height = self.wsi.get_dimensions()
+        self.patch_size_target = patch_size_target
         
         
-    def get_cols_rows(self):
+    def get_cols_rows(self) -> Tuple[int, int]:
+        """ Get the number of columns and rows the associated WSI
+
+        Returns:
+            Tuple[int, int]: (nb_columns, nb_rows)
+        """
         img = self.wsi.img
         if isinstance(img, openslide.OpenSlide):
             self.dz = DeepZoomGenerator(img, self.patch_size_src, self.overlap)
@@ -146,7 +155,16 @@ class WSIPatcher:
         return cols, rows
     
     
-    def get_tile(self, col, row):
+    def get_tile(self, col: int, row: int) -> Tuple[np.ndarray, int, int]:
+        """ get tile at position (column, row)
+
+        Args:
+            col (int): column
+            row (int): row
+
+        Returns:
+            Tuple[np.ndarray, int, int]: (tile, pixel x of top-left corner, pixel_y of top-left corner)
+        """
         img = self.wsi.img
         if isinstance(img, openslide.OpenSlide):
             raw_tile = self.dz.get_tile(self.nb_levels - 1, (col, row))
@@ -169,5 +187,7 @@ class WSIPatcher:
             pxl_y = y_begin            
             
         tile = np.array(raw_tile)
+        if self.patch_size_target is not None:
+            tile = cv2.resize(tile, (self.patch_size_target, self.patch_size_target))
         assert pxl_x < self.width and pxl_y < self.height
         return tile, pxl_x, pxl_y
