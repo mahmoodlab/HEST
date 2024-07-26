@@ -425,7 +425,7 @@ class VisiumReader(Reader):
         adata.var_names_make_unique()
         print(adata)
 
-        img, pixel_size_embedded = load_wsi(img_path)
+        wsi, pixel_size_embedded = load_wsi(img_path)
         
         
         print('trim the barcodes')
@@ -487,23 +487,24 @@ class VisiumReader(Reader):
 
         adata.obs = spatial_aligned
             
-        register_downscale_img(adata, img, pixel_size)
+        register_downscale_img(adata, wsi, pixel_size)
         
         dict = {}
         if metric_file_path is not None:
             dict = metric_file_do_dict(metric_file_path)
-            
+        
+        width, height = wsi.get_dimensions()
         dict['pixel_size_um_embedded'] = pixel_size_embedded
         dict['pixel_size_um_estimated'] = pixel_size
-        dict['fullres_height'] = img.shape[0]
-        dict['fullres_width'] = img.shape[1]
+        dict['fullres_height'] = height
+        dict['fullres_width'] = width
         dict['spots_under_tissue'] = len(adata.obs)
         dict['spot_estimate_dist'] = int(spot_estimate_dist)
         dict['spot_diameter'] = 55.
         dict['inter_spot_dist'] = 100.
         
 
-        return VisiumHESTData(adata, img, dict['pixel_size_um_estimated'], dict)
+        return VisiumHESTData(adata, wsi, dict['pixel_size_um_estimated'], dict)
     
 
     def _alignment_file_to_df(self, path, alignment_json=None):
@@ -1169,3 +1170,4 @@ def process_meta_df(meta_df, save_spatial_plots=True, pyramidal=True, save_img=T
         path = get_path_from_meta_row(row)
         bigtiff = not(isinstance(row['bigtiff'], float) or row['bigtiff'] == 'FALSE')
         _ = read_and_save(path, save_plots=save_spatial_plots, pyramidal=pyramidal, bigtiff=bigtiff, plot_pxl_size=True, save_img=save_img)
+        save_path = os.path.join(path, 'processed')

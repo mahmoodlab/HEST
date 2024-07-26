@@ -34,7 +34,7 @@ class WSI:
         pass
     
     @abstractmethod
-    def read_region(self, location, size) -> np.ndarray:
+    def read_region(self, location, level, size) -> np.ndarray:
         pass
     
     @abstractmethod
@@ -75,7 +75,7 @@ class NumpyWSI(WSI):
     def get_dimensions(self):
         return self.img.shape[1], self.img.shape[0]
     
-    def read_region(self, location, size) -> np.ndarray:
+    def read_region(self, location, level, size) -> np.ndarray:
         img = self.img
         x_start, y_start = location[0], location[1]
         x_size, y_size = size[0], size[1]
@@ -95,11 +95,20 @@ class OpenSlideWSI(WSI):
     def get_dimensions(self):
         return self.img.dimensions
     
-    def read_region(self, location, size) -> np.ndarray:
-        return np.array(self.img.read_region(location, 0, size))
+    def read_region(self, location, level, size) -> np.ndarray:
+        return np.array(self.img.read_region(location, level, size))
 
     def get_thumbnail(self, width, height):
         return np.array(self.img.get_thumbnail((width, height)))
+    
+    def get_best_level_for_downsample(self, downsample):
+        return self.img.get_best_level_for_downsample(downsample)
+    
+    def level_dimensions(self):
+        return self.img.level_dimensions
+    
+    def level_downsamples(self):
+        return self.img.level_downsamples
     
 class CuImageWSI(WSI):
     def __init__(self, img: 'CuImage'):
@@ -111,8 +120,8 @@ class CuImageWSI(WSI):
     def get_dimensions(self):
         return self.img.resolutions['level_dimensions'][0]
     
-    def read_region(self, location, size) -> np.ndarray:
-        return np.array(self.img.read_region(location=location, level=0, size=size))
+    def read_region(self, location, level, size) -> np.ndarray:
+        return np.array(self.img.read_region(location=location, level=level, size=size))
     
     def get_thumbnail(self, width, height):
         downsample = self.width / width
@@ -129,6 +138,22 @@ class CuImageWSI(WSI):
             
         return thumbnail
     
+    def get_best_level_for_downsample(self, downsample):
+        downsamples = self.img.resolutions['level_downsamples']
+        last = 0
+        for i in range(len(downsamples)):
+            down = downsamples[i]
+            if downsample < down:
+                return last
+            last = i
+        return last
+    
+    def level_dimensions(self):
+        return self.img.resolutions['level_dimensions']
+    
+    def level_downsamples(self):
+        return self.img.resolutions['level_downsamples']
+            
         
 class WSIPatcher:
     def __init__(self, wsi: WSI, patch_size_src: int, patch_size_target: int = None):
@@ -137,23 +162,40 @@ class WSIPatcher:
         self.overlap = 0
         self.width, self.height = self.wsi.get_dimensions()
         self.patch_size_target = patch_size_target
+        self.downsample = patch_size_src / patch_size_target
         
+        self._compute_cols_rows()
         
+    def _compute_cols_rows(self) -> None:
+        img = self.wsi.img
+        if isinstance(img, openslide.OpenSlide):
+            self.level = self.wsi.get_best_level_for_downsample(self.downsample)
+            self.level_dimensions = self.wsi.level_dimensions()[self.level]
+            self.level_downsample = self.wsi.level_downsamples()[self.level]
+            self.patch_size_level = round(self.patch_size_src / self.level_downsample)
+            self.dz = DeepZoomGenerator(img, self.patch_size_level, self.overlap)
+            self.nb_levels = len(self.dz.level_tiles)
+            self.cols, self.rows = self.dz.level_tiles[self.nb_levels - self.level - 1]
+        elif isinstance(img, np.ndarray):
+            self.cols, self.rows = round(np.ceil((self.width - self.overlap / 2) / (self.patch_size_src - self.overlap / 2))), round(np.ceil((self.height - self.overlap / 2) / (self.patch_size_src - self.overlap / 2)))
+            self.level = -1
+            self.level_dimensions = (self.width, self.height)
+        elif is_cuimage(img):
+            self.level = self.wsi.get_best_level_for_downsample(self.downsample)
+            self.level_downsample = self.wsi.level_downsamples()[self.level]
+            self.level_dimensions = self.wsi.level_dimensions()[self.level]
+            self.patch_size_level = round(self.patch_size_src / self.level_downsample)
+            level_width, level_height = self.level_dimensions
+            self.cols, self.rows = round(np.ceil((level_width - self.overlap / 2) / (self.patch_size_level - self.overlap / 2))), round(np.ceil((level_height - self.overlap / 2) / (self.patch_size_level - self.overlap / 2)))
+    
+
     def get_cols_rows(self) -> Tuple[int, int]:
         """ Get the number of columns and rows the associated WSI
 
         Returns:
             Tuple[int, int]: (nb_columns, nb_rows)
         """
-        img = self.wsi.img
-        if isinstance(img, openslide.OpenSlide):
-            self.dz = DeepZoomGenerator(img, self.patch_size_src, self.overlap)
-            cols, rows = self.dz.level_tiles[-1]
-            self.nb_levels = len(self.dz.level_tiles)
-        elif is_cuimage(img) or isinstance(img, np.ndarray):
-            cols, rows = round(np.ceil((self.width - self.overlap / 2) / (self.patch_size_src - self.overlap / 2))), round(np.ceil((self.height - self.overlap / 2) / (self.patch_size_src - self.overlap / 2)))
-        return cols, rows
-    
+        return self.cols, self.rows
     
     def get_tile(self, col: int, row: int) -> Tuple[np.ndarray, int, int]:
         """ get tile at position (column, row)
@@ -167,9 +209,11 @@ class WSIPatcher:
         """
         img = self.wsi.img
         if isinstance(img, openslide.OpenSlide):
-            raw_tile = self.dz.get_tile(self.nb_levels - 1, (col, row))
-            addr = self.dz.get_tile_coordinates(self.nb_levels - 1, (col, row))
+            raw_tile = self.dz.get_tile(self.nb_levels - self.level - 1, (col, row))
+            addr = self.dz.get_tile_coordinates(self.nb_levels - self.level - 1, (col, row))
             pxl_x, pxl_y = addr[0]
+            if pxl_x == 556 and pxl_y == 556:
+                a = 1
         elif isinstance(img, np.ndarray):
             x_begin = round(col * (self.patch_size_src - self.overlap))
             x_end = min(x_begin + self.patch_size_src + self.overlap, self.width)
@@ -182,9 +226,9 @@ class WSIPatcher:
         elif is_cuimage(img):
             x_begin = round(col * (self.patch_size_src - self.overlap))
             y_begin = round(row * (self.patch_size_src - self.overlap))
-            raw_tile = img.read_region(location=(x_begin, y_begin), level=0, size=(self.patch_size_src + self.overlap, self.patch_size_src + self.overlap))
+            raw_tile = self.wsi.read_region(location=(x_begin, y_begin), level=self.level, size=(self.patch_size_level + self.overlap, self.patch_size_level + self.overlap))
             pxl_x = x_begin
-            pxl_y = y_begin            
+            pxl_y = y_begin
             
         tile = np.array(raw_tile)
         if self.patch_size_target is not None:

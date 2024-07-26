@@ -45,7 +45,7 @@ from spatialdata.models import Image2DModel
 from tqdm import tqdm
 
 from .segmentation.segmentation import (apply_otsu_thresholding,
-                                        get_tissue_seg_vis, keep_largest_area,
+                                        get_tissue_vis, keep_largest_area,
                                         mask_to_contours, save_pkl,
                                         segment_tissue_deep)
 from .utils import (ALIGNED_HE_FILENAME, check_arg, get_path_from_meta_row,
@@ -63,9 +63,6 @@ class HESTData:
     
     contours_tissue: list = None
     """tissue contours for that sample, will be None until segment_tissue() is called"""
-    
-    cellvit_seg = None
-    """dictionary of cells in the CellViT .geojson format"""
     
     shapes: List[LazyShapes] = []
     
@@ -93,7 +90,6 @@ class HESTData:
         img: Union[np.ndarray, openslide.OpenSlide, 'CuImage', str],
         pixel_size: float,
         meta: Dict = {},
-        cellvit_seg: Dict=None,
         tissue_seg: TissueMask=None,
         tissue_contours: gpd.GeoDataFrame=None,
         shapes: List[LazyShapes]=[]
@@ -108,9 +104,8 @@ class HESTData:
                 If a str is passed, the image is opened with cucim if available and OpenSlide otherwise
             pixel_size (float): pixel_size of WSI im um/px, this pixel size will be used to perform operations on the slide, such as patching and segmenting
             meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
-            cellvit_seg (Dict): deprecated argument, will be removed in the future
             shapes (List[LazyShapes]): dictionary of shapes, note that these shapes will be lazily loaded. Default: None
-            tissue_seg (TissueMask): tissue mask for that sample
+            tissue_seg (TissueMask): *Deprecated* tissue mask for that sample
         """
         self.adata = adata
         
@@ -201,10 +196,6 @@ class HESTData:
         self.meta['fullres_px_height'] = height
         with open(os.path.join(path, 'metrics.json'), 'w') as json_file:
             json.dump(self.meta, json_file) 
-            
-        if self.cellvit_seg is not None:
-            with open(os.path.join(path, 'cells.geojson'), 'w') as json_file:
-                json.dump(self.cellvit_seg, json_file)
         
         downscaled_img = self.adata.uns['spatial']['ST']['images']['downscaled_fullres']
         down_fact = self.adata.uns['spatial']['ST']['scalefactors']['tissue_downscaled_fullres_scalef']
@@ -233,27 +224,54 @@ class HESTData:
 
 
     def segment_tissue(
-        self, 
-        keep_largest=False, 
-        thumbnail_width=2000, 
-        method: str='deep', 
-        batch_size=8, 
+        self,
+        wsi: Union[np.ndarray, openslide.OpenSlide, 'CuImage', WSI],
+        pixel_size: float,
+        fast_mode=False,
+        target_pxl_size=1,
+        patch_size_um=512,
         model_name='deeplabv3_seg_v4.ckpt',
-        return_vis=True
+        batch_size=8,
+        auto_download=True,
+        num_workers=8,
+        thumbnail_width=2000, 
+        method: str='deep'
     ) -> Union[None, np.ndarray]:
         """ Compute tissue mask and stores it in the current HESTData object
 
         Args:
+            wsi (Union[np.ndarray, openslide.OpenSlide, CuImage, WSI]): wsi
+            pixel_size (float): pixel size in um/px for the wsi
+            fast_mode (bool, optional): in fast mode the inference is done at 2 um/px instead of 1 um/px, 
+                note that the inference pixel size is overwritten by the `target_pxl_size` argument if != 1. Defaults to False.
+            target_pxl_size (int, optional): patches are scaled to this pixel size in um/px for inference. Defaults to 1.
+            patch_size_um (int, optional): patch size in um. Defaults to 512.
+            model_name (str, optional): model name in `HEST/models` dir. Defaults to 'deeplabv3_seg_v4.ckpt'.
+            batch_size (int, optional): batch size for inference. Defaults to 8.
+            auto_download (bool, optional): whenever to download the model weights automatically if not found. Defaults to True.
+            num_workers (int, optional): number of workers for the dataloader during inference. Defaults to 8.
+            thumbnail_width (int, optional): size at which otsu segmentation is performed, ignored if method is 'deep'
             method (str, optional): perform deep learning based segmentation ('deep') or otsu based ('otsu').
                 Deep-learning based segmentation will be more accurate but a GPU is recommended, 'otsu' is faster but less accurate. Defaults to 'deep'.
-            batch_size (int, optional): inference batch_size if method=`deep` is selected. Defaults to 8.
-            model_name (str, optional): name of model weights in `models` used if method=`deep` is selected. Defaults to 'deeplabv3_seg_v4.ckpt'.
+                
+        Returns:
+            gpd.GeoDataFrame: a geodataframe of the tissue contours, contains a column `tissue_id` indicating to which tissue the contour belongs to
         """
         
         check_arg(method, 'method', ['deep', 'otsu'])
         
         if method == 'deep':
-            self.tissue_mask, self.contours_tissue, self.contours_holes = segment_tissue_deep(self.wsi, self.pixel_size, target_pxl_size=1, patch_size=512, batch_size=batch_size, model_name=model_name)
+            self.tissue_contours = segment_tissue_deep(
+                wsi,
+                pixel_size,
+                fast_mode,
+                target_pxl_size,
+                patch_size_um,
+                model_name,
+                batch_size,
+                auto_download,
+                num_workers
+            )
         elif method == 'otsu':
         
             width, height = self.wsi.get_dimensions()
@@ -269,12 +287,8 @@ class HESTData:
             contours_tissue, contours_holes = mask_to_contours(self.tissue_mask, pixel_size=self.pixel_size)
             self.tissue_contours = convert_old_to_gpd(contours_holes, contours_tissue)
             
-        if return_vis:
-            return self.get_tissue_vis()
-        else:
-            return None
+        return self.tissue_contours
             
-
 
     def get_tissue_mask(self) -> np.ndarray:
         """ Return existing tissue segmentation mask if it exists, raise an error if it doesn't exist
@@ -370,7 +384,8 @@ class HESTData:
                     print('Warning, patch is out of the image, skipping')
                 continue
             
-            image_patch = self.wsi.read_region((xImage - patch_size_pxl // 2, yImage - patch_size_pxl // 2), (patch_size_pxl, patch_size_pxl))
+            ## TODO reimplement now that we use the pyramidal level
+            image_patch = self.wsi.read_region((xImage - patch_size_pxl // 2, yImage - patch_size_pxl // 2), 0, (patch_size_pxl, patch_size_pxl))
             rect_x = (xImage - patch_size_pxl // 2) * downscale_vis
             rect_y = (yImage - patch_size_pxl // 2) * downscale_vis
             rect_width = patch_size_pxl * downscale_vis
@@ -481,7 +496,7 @@ class HESTData:
         
     
     def get_tissue_vis(self):
-         return get_tissue_seg_vis(
+         return get_tissue_vis(
             self.wsi.img,
             self.tissue_contours,
             line_color=(0, 255, 0),
@@ -546,10 +561,11 @@ class VisiumHESTData(HESTData):
         img: Union[np.ndarray, str],
         pixel_size: float,
         meta: Dict = {},
-        cellvit_seg: Dict=None,
-        tissue_seg: TissueMask=None
+        tissue_seg: TissueMask=None,
+        tissue_contours: gpd.GeoDataFrame=None,
+        shapes: List[LazyShapes]=[]
     ):
-        super().__init__(adata, img, pixel_size, meta, cellvit_seg, tissue_seg)
+        super().__init__(adata, img, pixel_size, meta, tissue_seg=tissue_seg, tissue_contours=tissue_contours, shapes=shapes)
 
 class VisiumHDHESTData(HESTData): 
     def __init__(self, 
@@ -557,8 +573,8 @@ class VisiumHDHESTData(HESTData):
         img: Union[np.ndarray, str],
         pixel_size: float,
         meta: Dict = {},
-        cellvit_seg: Dict=None,
         tissue_seg: TissueMask=None,
+        tissue_contours: gpd.GeoDataFrame=None,
         shapes: List[LazyShapes]=[]
     ):
         """
@@ -568,11 +584,10 @@ class VisiumHDHESTData(HESTData):
             pixel_size (float): pixel_size of WSI im um/px, this pixel size will be used to perform operations on the slide, such as patching and segmenting
             img (Union[np.ndarray, str]): Full resolution image corresponding to the ST data, if passed as a path (str) the image is lazily loaded
             meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
-            cellvit_seg (Dict): deprecated argument, will be removed in the future
             shapes (List[LazyShapes]): dictionary of shapes, note that these shapes will be lazily loaded. Default: None
             tissue_seg (TissueMask): tissue mask for that sample
         """
-        super().__init__(adata, img, pixel_size, meta, cellvit_seg, tissue_seg, shapes)        
+        super().__init__(adata, img, pixel_size, meta, tissue_seg, tissue_contours, shapes)        
         
 class STHESTData(HESTData):
     def __init__(self, 
@@ -580,8 +595,8 @@ class STHESTData(HESTData):
         img: Union[np.ndarray, str],
         pixel_size: float,
         meta: Dict = {},
-        cellvit_seg: Dict=None,
         tissue_seg: TissueMask=None,
+        tissue_contours: gpd.GeoDataFrame=None,
         shapes: List[LazyShapes]=[]
     ):
         """
@@ -591,10 +606,9 @@ class STHESTData(HESTData):
             pixel_size (float): pixel_size of WSI im um/px, this pixel size will be used to perform operations on the slide, such as patching and segmenting
             img (Union[np.ndarray, str]): Full resolution image corresponding to the ST data, if passed as a path (str) the image is lazily loaded
             meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
-            cellvit_seg (Dict): dictionary of cells in the CellViT .geojson format. Default: None
             tissue_seg (TissueMask): tissue mask for that sample
         """
-        super().__init__(adata, img, pixel_size, meta, cellvit_seg, tissue_seg, shapes)
+        super().__init__(adata, img, pixel_size, meta, tissue_seg, tissue_contours, shapes)
         
 class XeniumHESTData(HESTData):
 
@@ -604,8 +618,8 @@ class XeniumHESTData(HESTData):
         img: Union[np.ndarray, openslide.OpenSlide, 'CuImage'],
         pixel_size: float,
         meta: Dict = {},
-        cellvit_seg: Dict=None,
         tissue_seg: TissueMask=None,
+        tissue_contours: gpd.GeoDataFrame=None,
         shapes: List[LazyShapes]=[],
         xenium_nuc_seg: pd.DataFrame=None,
         xenium_cell_seg: pd.DataFrame=None,
@@ -621,7 +635,6 @@ class XeniumHESTData(HESTData):
             img (Union[np.ndarray, openslide.OpenSlide, CuImage]): Full resolution image corresponding to the ST data, Openslide/CuImage are lazily loaded, use CuImage for GPU accelerated computation
             pixel_size (float): pixel_size of WSI im um/px, this pixel size will be used to perform operations on the slide, such as patching and segmenting
             meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
-            cellvit_seg (Dict): deprecated argument, will be removed in the future
             shapes (List[LazyShapes]): dictionary of shapes, note that these shapes will be lazily loaded. Default: None
             tissue_seg (TissueMask): tissue mask for that sample
             xenium_nuc_seg (pd.DataFrame): content of a xenium nuclei contour file as a dataframe (nucleus_boundaries.parquet)
@@ -629,7 +642,7 @@ class XeniumHESTData(HESTData):
             cell_adata (sc.AnnData): ST cell data, each row in adata.obs is a cell, each row in obsm is the cell location on the H&E image in pixels
             transcript_df (pd.DataFrame): dataframe of transcripts, each row is a transcript, he_x and he_y is the transcript location on the H&E image in pixels
         """
-        super().__init__(adata=adata, img=img, pixel_size=pixel_size, meta=meta, cellvit_seg=cellvit_seg, tissue_seg=tissue_seg, shapes=shapes)
+        super().__init__(adata=adata, img=img, pixel_size=pixel_size, meta=meta, tissue_seg=tissue_seg, tissue_contours=tissue_contours, shapes=shapes)
         
         self.xenium_nuc_seg = xenium_nuc_seg
         self.xenium_cell_seg = xenium_cell_seg
@@ -692,8 +705,8 @@ def read_HESTData(
         img (Union[str, np.ndarray, openslide.OpenSlide, CuImage]): path to a full resolution image (if passed as str) or full resolution image corresponding to the ST data, Openslide/CuImage are lazily loaded, use CuImage for GPU accelerated computation
         pixel_size (float): pixel_size of WSI im um/px, this pixel size will be used to perform operations on the slide, such as patching and segmenting
         metrics_path (str): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
-        mask_path_pkl (str): path to a .pkl file containing the tissue segmentation contours. Defaults to None.
-        mask_path_jpg (str): path to a .jog file containing the greyscale tissue segmentation mask. Defaults to None.
+        mask_path_pkl (str): *Deprecated* path to a .pkl file containing the tissue segmentation contours. Defaults to None.
+        mask_path_jpg (str): *Deprecated* path to a .jog file containing the greyscale tissue segmentation mask. Defaults to None.
 
     Returns:
         HESTData: HESTData object
@@ -708,7 +721,8 @@ def read_HESTData(
             img = openslide.OpenSlide(img)
             width, height = img.dimensions
             
-    if mask_path_pkl is not None and mask_path_jpg is not None:
+         
+    if tissue_contours_path is None and mask_path_pkl is not None and mask_path_jpg is not None:
         warnings.warn('mask_path_pkl and  mask_path_jpg are deprecated, please use tissue_contours_path instead')
         tissue_seg = load_tissue_mask(mask_path_pkl, mask_path_jpg, width, height)
     else:
@@ -721,7 +735,7 @@ def read_HESTData(
     adata = sc.read_h5ad(adata_path)
     with open(metrics_path) as metrics_f:     
         metrics = json.load(metrics_f)
-    return HESTData(adata, img, metrics['pixel_size_um_estimated'], metrics, tissue_seg=tissue_seg, shapes=shapes)
+    return HESTData(adata, img, metrics['pixel_size_um_estimated'], metrics, tissue_seg=tissue_seg, shapes=shapes, tissue_contours=tissue_contours_path)
         
 
 def mask_and_patchify_bench(meta_df: pd.DataFrame, save_dir: str, use_mask=True, keep_largest=None):
@@ -844,8 +858,6 @@ def load_hest(hest_dir: str, id_list: List[str] = None) -> List[HESTData]:
             masks_path_jpg = os.path.join(hest_dir, 'tissue_seg', f'{id}_mask.jpg')
             tissue_contours_path = os.path.join(hest_dir, 'tissue_seg', f'{id}_contours.geojson')
 
-        if os.path.exists(os.path.join(hest_dir, 'cellvit_seg')):
-            cellvit_path = os.path.join(hest_dir, 'cellvit_seg', f'{id}_cellvit_seg.geojson')
             
         st = read_HESTData(
             adata_path, 
@@ -859,3 +871,74 @@ def load_hest(hest_dir: str, id_list: List[str] = None) -> List[HESTData]:
         
     warnings.resetwarnings()
     return hestdata_list
+
+
+def get_gene_db(species, cache_dir='.genes') -> pd.DataFrame:
+    os.makedirs(cache_dir, exist_ok=True)
+    path = os.path.join(cache_dir, f'{species}.parquet')
+    if not os.path.exists(path):
+        print('querying biomart... (can take a few seconds)')
+        annots = sc.queries.biomart_annotations(
+            species,
+            ["ensembl_gene_id", 'external_gene_name'],
+        ).set_index('external_gene_name')
+        annots.to_parquet(path)
+    else:
+        annots = pd.read_parquet(path)
+        
+    return annots
+
+
+def unify_gene_names(adata: sc.AnnData, species="hsapiens", cache_dir='.genes', drop=False) -> sc.AnnData:
+    """ unify gene names by resolving aliases
+
+    Args:
+        adata (sc.AnnData): scanpy anndata
+        species (str, optional): species, choose between ["hsapiens", "mmusculus"]. Defaults to "hsapiens".
+        cache_dir (str, optional): directory where biomart database will be cached. Defaults to '.genes'.
+        drop (bool, optional): whenever to drop gene names having no alias. Defaults to False.
+
+    Returns:
+        sc.AnnData: anndata with unified gene names in var_names
+    """
+    adata = adata.copy()
+    import mygene
+    mg = mygene.MyGeneInfo()
+
+    gene_df = get_gene_db(species, cache_dir=cache_dir)
+    
+    
+    std_genes = np.intersect1d(gene_df.index.dropna().values, adata.var_names.values)
+    unknown_genes = np.setdiff1d(adata.var_names.values, std_genes)
+    print(f'Found {len(unknown_genes)} unknown genes out of {len(adata.var_names)}')
+    
+    
+    mg.set_caching('db')
+    
+    # look for aliases
+    res = mg.querymany(unknown_genes, scopes='alias', as_dataframe=True, fields='ensembl', verbose=False)
+    res = res.loc[~res.index.duplicated(keep='first')]
+    
+    gene_df['gene_names'] = gene_df.index
+    res['query'] = res.index
+    
+    # mygenes sometimes return a nan in ensembl.gene, the id then contained in 'ensembl'
+    mask_na = res['ensembl.gene'].isna() & res['ensembl'].apply(lambda x: isinstance(x, list) and len(x) > 0 and 'gene' in x[0])
+    res.loc[mask_na, 'ensembl.gene'] = res.loc[mask_na, 'ensembl'].apply(lambda x: x[0]['gene'])
+    
+    # map alias name to its parent gene name
+    alias_map = res.merge(gene_df, right_on='ensembl_gene_id', left_on='ensembl.gene', how='inner').set_index('query')[['gene_names']]
+    
+    remaining = np.setdiff1d(unknown_genes, alias_map.index.values)
+    
+    print(f"Mapped {len(alias_map)} aliases to their parent name, {len(remaining)} remaining unknown genes")
+    
+    mapped = pd.DataFrame(index=adata.var_names).merge(alias_map, left_index=True, right_index=True, how='left')
+    mask = mapped.isna()['gene_names']
+    mapped.loc[mask,'gene_names'] = mapped.index[mask].values
+    adata.var_names = mapped['gene_names'].values
+    
+    if drop:
+        adata = adata[:, ~remaining]
+    
+    return adata
