@@ -14,7 +14,7 @@ import cv2
 import numpy as np
 import pandas as pd
 
-from hest.wsi import WSI, WSIPatcher, wsi_factory
+from hest.wsi import WSI, NumpyWSI, WSIPatcher, wsi_factory
 
 try:
     import pyvips
@@ -98,7 +98,7 @@ def to_instance_map(img, cells_mask, save_dir, target_pixel_size, src_pixel_size
     for row in tqdm(range(rows)):
         for col in range(cols):
             tile, pxl_x, pxl_y = patcher.get_tile(col, row)
-            mask = cells_mask.read_region((pxl_x, pxl_y), (patch_size_pxl, patch_size_pxl))
+            mask = cells_mask.read_region((pxl_x, pxl_y), 0, (patch_size_pxl, patch_size_pxl))
             mask = mask[:, :, 0]
             mask = cv2.resize(mask, (target_patch_size, target_patch_size), interpolation=cv2.INTER_NEAREST)
             
@@ -898,12 +898,12 @@ def find_pixel_size_from_spot_coords(my_df: pd.DataFrame, inter_spot_dist: float
     return best_approx, max_dist_col
       
 
-def register_downscale_img(adata: sc.AnnData, img: np.ndarray, pixel_size: float, spot_size=55., target_size=1000) -> Tuple[np.ndarray, float]:
+def register_downscale_img(adata: sc.AnnData, wsi: WSI, pixel_size: float, spot_size=55., target_size=1000) -> Tuple[np.ndarray, float]:
     """ registers a downscale version of `img` and it's corresponding scalefactors to `adata` in adata.uns['spatial']['ST']
 
     Args:
         adata (sc.AnnData): anndata to which the downscaled image is registered
-        img (np.ndarray): full resolution image to downscale
+        wsi (np.ndarray): full resolution image to downscale
         pixel_size (float): pixel size in um/px of the full resolution image
         spot_size (_type_, optional): spot diameter in um. Defaults to 55..
         target_size (int, optional): downscaled image biggest edge size. Defaults to 1000.
@@ -911,8 +911,9 @@ def register_downscale_img(adata: sc.AnnData, img: np.ndarray, pixel_size: float
     Returns:
         Tuple[np.ndarray, float]: downscaled image and it's downscale factor from full resolution
     """
-    downscale_factor = target_size / np.max(img.shape)
-    downscaled_fullres = imresize(img, downscale_factor)
+    width, height = wsi.get_dimensions()
+    downscale_factor = target_size / np.max((width, height))
+    downscaled_fullres = wsi.get_thumbnail(round(width * downscale_factor), round(height * downscale_factor))
     
     # register the image
     adata.uns['spatial'] = {}
@@ -949,8 +950,8 @@ def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal:
     if cp_pyramidal:
         print(f"create pyramidal tiff for {row['id']}")
         src_pyramidal = os.path.join(path, 'aligned_fullres_HE.tif')
-        dst_pyramidal = os.path.join(dest, 'pyramidal', _sample_id_to_filename(row['id']))
-        os.makedirs(os.path.join(dest, 'pyramidal'), exist_ok=True)
+        dst_pyramidal = os.path.join(dest, 'wsis', _sample_id_to_filename(row['id']))
+        os.makedirs(os.path.join(dest, 'wsis'), exist_ok=True)
         shutil.copy(src_pyramidal, dst_pyramidal)
         #dst = os.path.join(dest, 'pyramidal', _sample_id_to_filename(row['id']))
         #bigtiff_option = '' if isinstance(row['bigtiff'], float) or not row['bigtiff']  else '--bigtiff'
@@ -964,8 +965,8 @@ def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal:
         shutil.copy(path_metrics, path_dest_metrics)
     if cp_downscaled:
         path_downscaled = os.path.join(path, 'downscaled_fullres.jpeg')
-        os.makedirs(os.path.join(dest, 'downscaled'), exist_ok=True)
-        path_dest_downscaled = os.path.join(dest, 'downscaled', row['id'] + '_downscaled_fullres.jpeg')
+        os.makedirs(os.path.join(dest, 'thumbnails'), exist_ok=True)
+        path_dest_downscaled = os.path.join(dest, 'thumbnails', row['id'] + '_downscaled_fullres.jpeg')
         shutil.copy(path_downscaled, path_dest_downscaled)
     if cp_spatial:
         path_spatial = os.path.join(path, 'spatial_plots.png')
@@ -974,16 +975,16 @@ def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal:
         shutil.copy(path_spatial, path_dest_spatial)
     if cp_pixel_vis:
         path_pixel_vis = os.path.join(path, 'pixel_size_vis.png')
-        os.makedirs(os.path.join(dest, 'pixel_vis'), exist_ok=True)
-        path_dest_pixel_vis = os.path.join(dest, 'pixel_vis', row['id'] + '_pixel_size_vis.png')
+        os.makedirs(os.path.join(dest, 'pixel_size_vis'), exist_ok=True)
+        path_dest_pixel_vis = os.path.join(dest, 'pixel_size_vis', row['id'] + '_pixel_size_vis.png')
         if not os.path.exists(path_pixel_vis):
             print(f"couldn't find {path_pixel_vis}")
         else:
             shutil.copy(path_pixel_vis, path_dest_pixel_vis)
     if cp_adata:
         path_adata = os.path.join(path, 'aligned_adata.h5ad')
-        os.makedirs(os.path.join(dest, 'adata'), exist_ok=True)
-        path_dest_adata = os.path.join(dest, 'adata', row['id'] + '.h5ad')
+        os.makedirs(os.path.join(dest, 'st'), exist_ok=True)
+        path_dest_adata = os.path.join(dest, 'st', row['id'] + '.h5ad')
         shutil.copy(path_adata, path_dest_adata)        
         
             
@@ -1092,7 +1093,10 @@ def load_wsi(img_path: str) -> Tuple[WSI, float]:
         tifffile.RESUNIT.NONE: 1.
     }
     pixel_size_embedded = None
-    wsi = wsi_factory(img_path)
+    
+    img = tifffile.imread(img_path)
+    
+    wsi = NumpyWSI(img)
     if img_path.endswith('tiff') or img_path.endswith('tif') or img_path.endswith('btf') or img_path.endswith('TIF'):
             
         my_img = tifffile.TiffFile(img_path)

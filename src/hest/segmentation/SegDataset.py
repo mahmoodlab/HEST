@@ -1,10 +1,8 @@
 import os
-from math import floor
 
 import numpy as np
 from PIL import Image
 from torch.utils.data import Dataset
-from torchvision import transforms
 from tqdm import tqdm
 
 from hest.wsi import WSI, WSIPatcher
@@ -60,17 +58,14 @@ class SegWSIDataset(Dataset):
         self.size = self.cols * self.rows
         
         self.transform = transform
-        
-    def _index_to_col_row(self, index):
-        col = index % self.cols
-        row = index // self.rows
-        return col, row                        
+                              
 
     def __len__(self):
         return self.size
     
     def __getitem__(self, index):
-        col, row = self._index_to_col_row(index)
+        col = index % self.cols
+        row = index // self.cols
         tile, x, y = self.patcher.get_tile(col, row)
         
         if self.transform:
