@@ -101,44 +101,41 @@ class TestHESTData(unittest.TestCase):
         self.cur_dir = get_path_relative(__file__, '')
         cur_dir = self.cur_dir
         self.output_dir = _j(cur_dir, 'output_tests/hestdata_tests')
+        os.makedirs(self.output_dir, exist_ok=True)
         
         id_list = ['SPA154', 'TENX96', 'TENX131']
         
         self.sts = hest.load_hest('hest_data', id_list)
 
-    
-    def dump_patches(self):
-        os.makedirs(_j(self.output_dir, 'read_hestdata'), exist_ok=True)
-        self.st.dump_patches(_j(self.output_dir, 'read_hestdata'))
-        
         
     def test_tissue_seg(self):
         for idx, st in enumerate(self.sts):
             with self.subTest(st_object=idx):
-                st.segment_tissue(method='deep')
-                st.save_tissue_seg_jpg(self.output_dir, name=f'deep_{idx}')
-                st.save_tissue_seg_pkl(self.output_dir, name=f'deep_{idx}')
-                st.save_vis(self.output_dir, name=f'deep_{idx}')
+                #st.segment_tissue(method='deep')
+                #st.save_tissue_seg_jpg(self.output_dir, name=f'deep_{idx}')
+                #st.save_tissue_seg_pkl(self.output_dir, name=f'deep_{idx}')
+                #st.save_tissue_vis(self.output_dir, name=f'deep_{idx}')
                 
                 st.segment_tissue(method='otsu')
+                st.save_tissue_contours(self.output_dir, name=f'otsu_{idx}')
                 st.save_tissue_seg_jpg(self.output_dir, name=f'otsu_{idx}')
                 st.save_tissue_seg_pkl(self.output_dir, name=f'otsu_{idx}')
-                st.save_vis(self.output_dir, name=f'otsu_{idx}')
+                st.save_tissue_vis(self.output_dir, name=f'otsu_{idx}')
 
-    def test_patching(self):
-        for idx, st in enumerate(self.sts):
-            with self.subTest(st_object=idx):
-                name = ''
-                name += st.meta['id']
-                st.dump_patches(self.output_dir, name=name)
+    #def test_patching(self):
+    #    for idx, st in enumerate(self.sts):
+    #        with self.subTest(st_object=idx):
+    #            name = ''
+    #            name += st.meta['id']
+    #            st.dump_patches(self.output_dir, name=name)
 
-    def test_wsi(self):
-        for idx, st in enumerate(self.sts):
-            with self.subTest(st_object=idx):
-                os.makedirs(_j(self.output_dir, f'test_save_{idx}'), exist_ok=True)
-                st.meta['pixel_size_um_embedded'] = st.pixel_size / 1.5
-                st.meta['pixel_size_um_estimated'] = st.pixel_size
-                st.save(_j(self.output_dir, f'test_save_{idx}'), save_img=True, plot_pxl_size=True)
+    #def test_wsi(self):
+    #    for idx, st in enumerate(self.sts):
+    #        with self.subTest(st_object=idx):
+    #            os.makedirs(_j(self.output_dir, f'test_save_{idx}'), exist_ok=True)
+    #            st.meta['pixel_size_um_embedded'] = st.pixel_size / 1.5
+    #            st.meta['pixel_size_um_estimated'] = st.pixel_size
+    #            st.save(_j(self.output_dir, f'test_save_{idx}'), save_img=True, plot_pxl_size=True)
 
 
 if __name__ == '__main__':

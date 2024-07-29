@@ -1,13 +1,19 @@
+from concurrent.futures import ThreadPoolExecutor
 import json
 import math
 import os
 import shutil
 from abc import abstractmethod
+import threading
+import zipfile
 
 import numpy as np
 import pandas as pd
 import scanpy as sc
 from tqdm import tqdm
+
+from hest.io.seg_readers import write_geojson
+from hest.segmentation.cell_segmenters import segment_cellvit
 
 from .autoalign import autoalign_visium
 from .custom_readers import (GSE167096_to_adata, GSE180128_to_adata,
@@ -20,7 +26,7 @@ from .HESTData import (HESTData, STHESTData, VisiumHDHESTData, VisiumHESTData,
                        XeniumHESTData)
 from .utils import (SpotPacking, align_xenium_df, check_arg,
                     df_morph_um_to_pxl, find_biggest_img,
-                    find_first_file_endswith, find_pixel_size_from_spot_coords,
+                    find_first_file_endswith, find_pixel_size_from_spot_coords, get_col_selection,
                     get_path_from_meta_row, get_path_relative, helper_mex,
                     load_image, load_wsi, metric_file_do_dict, read_10x_seg,
                     register_downscale_img)
@@ -1008,7 +1014,7 @@ class XeniumReader(Reader):
             
         
         print("Loading the WSI... (can be slow for large images)")
-        img, pixel_size_embedded = load_image(img_path)
+        img, pixel_size_embedded = load_wsi(img_path)
         
         dict = {}
         dict['pixel_size_um_embedded'] = pixel_size_embedded
@@ -1070,7 +1076,7 @@ def reader_factory(path: str) -> Reader:
         raise NotImplementedError('')
         
     
-def read_and_save(path: str, save_plots=True, pyramidal=True, bigtiff=False, plot_pxl_size=False, save_img=True):
+def read_and_save(path: str, save_plots=True, pyramidal=True, bigtiff=False, plot_pxl_size=False, save_img=True, segment_tissue=False):
     """For internal use, determine the appropriate reader based on the raw data path, and
     automatically process the data at that location, then the processed files are dumped
     to processed/
@@ -1085,12 +1091,15 @@ def read_and_save(path: str, save_plots=True, pyramidal=True, bigtiff=False, plo
     st_object = reader.auto_read(path)
     print('Loaded object:')
     print(st_object)
+    print('Segment tissue')
+    if segment_tissue:
+        st_object.segment_tissue()
     save_path = os.path.join(path, 'processed')
     os.makedirs(save_path, exist_ok=True)
     st_object.save(save_path, pyramidal=pyramidal, bigtiff=bigtiff, plot_pxl_size=plot_pxl_size, save_img=save_img)
     if save_plots:
         st_object.save_spatial_plot(save_path)
-        
+    return st_object
         
 def xenium_to_pseudo_visium(df: pd.DataFrame, pixel_size_he: float, pixel_size_morph: float) -> sc.AnnData:
     """Convert a xenium transcripts dataframe to a 10x Visium type spot grid with
@@ -1160,14 +1169,70 @@ def xenium_to_pseudo_visium(df: pd.DataFrame, pixel_size_he: float, pixel_size_m
     adata.obs.index = [str(row).zfill(3) + 'x' + str(col).zfill(3) for row, col in  zip(adata.obs['array_row'], adata.obs['array_col'])]
     sc.pp.filter_cells(adata, min_counts=1)
     
-    
     return adata
 
 
-def process_meta_df(meta_df, save_spatial_plots=True, pyramidal=True, save_img=True):
+def process_meta_df(meta_df, save_spatial_plots=True, pyramidal=True, save_img=True, cellvit=False, depr_seg=False):
     """Internal use method, process all the raw ST data in the meta_df"""
     for _, row in tqdm(meta_df.iterrows(), total=len(meta_df)):
         path = get_path_from_meta_row(row)
         bigtiff = not(isinstance(row['bigtiff'], float) or row['bigtiff'] == 'FALSE')
-        _ = read_and_save(path, save_plots=save_spatial_plots, pyramidal=pyramidal, bigtiff=bigtiff, plot_pxl_size=True, save_img=save_img)
-        save_path = os.path.join(path, 'processed')
+        st = read_and_save(path, save_plots=save_spatial_plots, pyramidal=pyramidal, bigtiff=bigtiff, plot_pxl_size=True, save_img=save_img, segment_tissue=True)
+        row_dict = row.to_dict()
+
+        if depr_seg:
+            st.save_tissue_seg_pkl('', 'TENX24')
+            st.save_tissue_seg_jpg('', 'TENX24')
+        
+        # remove all whitespace values
+        row_dict = {k: (np.nan if isinstance(v, str) and not v.strip() else v) for k, v in row_dict.items()}
+        combined_meta = {**st.meta, **row_dict}
+        cols = get_col_selection()
+        combined_meta = {k: v for k, v in combined_meta.items() if k in cols}
+        with open(os.path.join(path, 'processed', f'meta.json'), 'w') as f:
+            json.dump(combined_meta, f, indent=3)
+            
+        st.dump_patches(os.path.join(path, 'processed'), 'patches')
+        a = 1
+        
+
+def _process_cellvit(available_gpus, available_gpus_lock, row, dest):
+    with available_gpus_lock:
+        gpu_id = available_gpus.pop()
+        print(f'get gpu {gpu_id}', flush=True)
+        
+    path = get_path_from_meta_row(row)
+    wsi_path = os.path.join(path, 'processed', 'aligned_fullres_HE.tif')
+    with open(os.path.join(path, 'processed', 'metrics.json')) as f:
+        meta = json.load(f)
+    src_cell_path = segment_cellvit(wsi_path, row['id'], meta['pixel_size_um_estimated'], gpu=gpu_id)
+    dst_cell_path = os.path.join(path, 'processed', 'cellvit_seg.geojson')
+    shutil.copy(src_cell_path, dst_cell_path)
+    
+    archive_path = os.path.join(path, 'processed', f'cellvit_seg.zip')
+    
+    id = row['id']
+    
+    with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        zipf.write(os.path.join(path, 'processed', f'cellvit_seg.geojson'), f'{id}_cellvit_seg.geojson')
+    os.makedirs(os.path.join(dest, 'cellvit_seg'), exist_ok=True)
+    path_cellvit = os.path.join(path, 'processed', f'cellvit_seg.zip')
+    id = row['id']
+    path_dest_cellvit = os.path.join(dest, 'cellvit_seg', f'{id}_cellvit_seg.zip')
+    shutil.copy(path_cellvit, path_dest_cellvit)
+
+
+    with available_gpus_lock:
+        available_gpus.add(gpu_id)
+        print(f'release gpu {gpu_id}', flush=True)
+        
+def cellvit_meta_df(meta_df, dest):
+    import concurrent
+    available_gpus_lock = threading.Lock()
+    available_gpus = {0, 1, 2}
+    
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        future_results = [executor.submit(_process_cellvit, available_gpus, available_gpus_lock, row, dest) for _, row in meta_df.iterrows()]
+
+        for future in concurrent.futures.as_completed(future_results):
+            future.result()

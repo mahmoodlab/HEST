@@ -87,7 +87,7 @@ def segment_tissue_deep(
     eval_transforms = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
     dataset = SegWSIDataset(patcher, eval_transforms)
     dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers)
-    model = torch.hub.load('pytorch/vision:v0.10.0', 'deeplabv3_resnet50', pretrained=False)
+    model = torch.hub.load('pytorch/vision:v0.10.0', 'deeplabv3_resnet50')
     model.classifier[4] = nn.Conv2d(
         in_channels=256,
         out_channels=2,
@@ -124,7 +124,6 @@ def segment_tissue_deep(
     
     with torch.inference_mode(), torch.autocast(device_type="cuda", dtype=torch.float16):
         
-        print('start inference...')
         for batch in tqdm(dataloader, total=len(dataloader)):
             
             # coords are top left coords of patch
@@ -202,6 +201,32 @@ def keep_largest_area(mask: np.ndarray) -> np.ndarray:
     return mask
 
 
+def contours_to_img(
+    contours: gpd.GeoDataFrame, 
+    img: np.ndarray, 
+    draw_contours=False, 
+    thickness=1, 
+    downsample=1.,
+    line_color=(0, 255, 0)
+) -> np.ndarray:
+    draw_cont = partial(cv2.drawContours, contourIdx=-1, thickness=thickness, lineType=cv2.LINE_8)
+    draw_cont_fill = partial(cv2.drawContours, contourIdx=-1, thickness=cv2.FILLED)
+    
+    groups = contours.groupby('tissue_id')
+    for _, group in groups:
+        
+        for _, row in group.iterrows():
+            cont = np.array([[round(x * downsample), round(y * downsample)] for x, y in row.geometry.exterior.coords])
+        
+            if row['type'] == 'tissue':
+                draw_cont_fill(image=img, contours=[cont], color=line_color)
+            else:
+                draw_cont_fill(image=img, contours=[cont], color=(0, 0, 0))
+            if draw_contours:
+                draw_cont(image=img, contours=[cont], color=line_color)
+    return img
+
+
 def get_tissue_vis(
             img: Union[np.ndarray, openslide.OpenSlide, 'CuImage', WSI],
             tissue_contours: gpd.GeoDataFrame,
@@ -228,23 +253,15 @@ def get_tissue_vis(
         downscaled_mask = np.expand_dims(downscaled_mask, axis=-1)
         downscaled_mask = downscaled_mask * np.array([0, 0, 0]).astype(np.uint8)
 
-
-        offset = tuple(-(np.array(top_left) * downsample).astype(int))
-        draw_cont = partial(cv2.drawContours, contourIdx=-1, thickness=line_thickness, lineType=cv2.LINE_8, offset=offset)
-        draw_cont_fill = partial(cv2.drawContours, contourIdx=-1, thickness=cv2.FILLED, offset=offset)
-
-
         if tissue_contours is not None and seg_display:
-            
-            groups = tissue_contours.groupby('tissue_id')
-            for _, group in groups:
-                
-                for _, row in group.iterrows():
-                    cont = np.array([[round(x * downsample), round(y * downsample)] for x, y in row.geometry.exterior.coords])
-                
-                    #cont = np.array(scale_contour_dim(cont, scale))
-                    draw_cont(image=img, contours=[cont], color=line_color)
-                    draw_cont_fill(image=downscaled_mask, contours=[cont], color=line_color)
+            downscaled_mask = contours_to_img(
+                tissue_contours, 
+                downscaled_mask, 
+                draw_contours=True, 
+                thickness=line_thickness, 
+                downsample=downsample,
+                line_color=line_color
+            )
 
         alpha = 0.4
         img = cv2.addWeighted(img, 1 - alpha, downscaled_mask, alpha, 0)
@@ -286,9 +303,8 @@ def visualize_tissue_seg(
         downscaled_mask = downscaled_mask * np.array([0, 0, 0]).astype(np.uint8)
 
 
-        offset = tuple(-(np.array(top_left) * scale).astype(int))
-        draw_cont = partial(cv2.drawContours, contourIdx=-1, thickness=line_thickness, lineType=cv2.LINE_8, offset=offset)
-        draw_cont_fill = partial(cv2.drawContours, contourIdx=-1, thickness=cv2.FILLED, offset=offset)
+        draw_cont = partial(cv2.drawContours, contourIdx=-1, thickness=line_thickness, lineType=cv2.LINE_8)
+        draw_cont_fill = partial(cv2.drawContours, contourIdx=-1, thickness=cv2.FILLED)
 
         if contours_tissue is not None and seg_display:
             for _, cont in enumerate(contours_tissue):
@@ -468,14 +484,11 @@ def mask_to_contours(mask: np.ndarray, keep_ids = [], exclude_ids=[], max_nb_hol
     hole_poly = [Polygon(contours_holes[i][0].squeeze(1)) for i in contour_ids if len(contours_holes[i]) > 0]
     geometry = tissue_poly + hole_poly
     tissue_ids = [i for i in contour_ids] + [i for i in contour_ids if len(contours_holes[i]) > 0]
+    tissue_types = ['tissue' for _ in contour_ids] + ['hole' for i in contour_ids if len(contours_holes[i]) > 0]
     
-    gdf_contours = gpd.GeoDataFrame(pd.Series(tissue_ids, name='tissue_id'), geometry=geometry)
+    gdf_contours = gpd.GeoDataFrame(pd.DataFrame(tissue_ids, columns=['tissue_id']), geometry=geometry)
+    gdf_contours['type'] = tissue_types
     
-    
-    #contours_tissue = [contours_tissue[i] for i in contour_ids]
-    #contours_holes = [contours_holes[i] for i in contour_ids]
-
-    #print('Num Contours After Filtering:', len(wsi.contours_tissue))
     return gdf_contours
     
 

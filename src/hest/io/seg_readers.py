@@ -1,5 +1,6 @@
 import json
 from abc import abstractmethod
+import warnings
 
 import geopandas as gpd
 import numpy as np
@@ -77,10 +78,19 @@ class GeojsonCellReader(CellReader):
             raise ValueError("Doesn't recognize type {geom_type}, must be either MultiPoint or MultiPolygon")
         
         name = x['properties']['classification']['name']
-        return gpd.GeoDataFrame(np.column_stack((coords, [name for _ in range(len(coords))])), columns=['geometry', 'class'])
+        
+        gdf = gpd.GeoDataFrame(geometry=coords)
+        gdf['class'] = [name for _ in range(len(gdf))]
+        
+        extra_props = [k for k in x['properties'].keys() if k not in ['objectType', 'classification']]
+        for prop in extra_props:
+            val = x['properties'][prop]
+            gdf[prop] = [val for _ in range(len(gdf))]
+            
+        return gdf
     
     
-    def read_gdf(self, path) -> gpd.GeoDataFrame:
+    def read_gdf(self, path, class_name=None) -> gpd.GeoDataFrame:
         with open(path) as f:
             logger.info("Load geojson file...")
             ls = json.load(f)
@@ -91,6 +101,8 @@ class GeojsonCellReader(CellReader):
     
             gdf = gpd.GeoDataFrame(pd.concat(sub_gdfs, ignore_index=True))
             gdf['cell_id'] = np.arange(len(gdf))
+            
+            
             
         return gdf
     
@@ -154,7 +166,7 @@ class CellWriter:
     def write(gdf: gpd.GeoDataFrame, path: str) -> None:
         pass
     
-def write_geojson(gdf: gpd.GeoDataFrame, path: str, category_key: str) -> None:
+def write_geojson(gdf: gpd.GeoDataFrame, path: str, category_key: str, extra_prop=False, uniform_prop=True) -> None:
         
     if isinstance(gdf.geometry.iloc[0], Point):
         geometry = 'MultiPoint'
@@ -163,12 +175,32 @@ def write_geojson(gdf: gpd.GeoDataFrame, path: str, category_key: str) -> None:
     else:
         raise ValueError(f"gdf.geometry[0] must be of type Point or Polygon, got {type(gdf.geometry.iloc[0])}")
     
-    clusters = np.unique(gdf[category_key])
-    colors = generate_colors(clusters)
+    groups = np.unique(gdf[category_key])
+    colors = generate_colors(groups)
     cells = []
-    for cluster in tqdm(clusters):
+    for group in tqdm(groups):
 
-        shapes = gdf[gdf[category_key] == cluster].geometry
+        slice = gdf[gdf[category_key] == group]
+        shapes = slice.geometry
+        
+        properties = {
+            "objectType": "annotation",
+            "classification": {
+                "name": str(group),
+                "color": colors[group]
+            }
+        }
+        
+        if extra_prop:
+            props = {}
+            for col in [c for c in gdf.columns if c not in [category_key, 'geometry']]:
+                if uniform_prop:
+                    unique = np.unique(slice[col])
+                    if len(unique) != 1:
+                        warnings.warn(f"extra property {col} is not uniform for group {group}, found {unique}")
+                props[col] = slice[col].iloc[0]
+            
+            properties = {**properties, **props}
         
         if isinstance(gdf.geometry.iloc[0], Point):
             shapes = [[point.x, point.y] for point in shapes]
@@ -176,23 +208,17 @@ def write_geojson(gdf: gpd.GeoDataFrame, path: str, category_key: str) -> None:
             shapes = [[[[x, y] for x, y in polygon.exterior.coords]] for polygon in shapes]
         cell = {
             'type': 'Feature',
-            'id': (str(id(path)) + '-id-' + str(cluster)).replace('.', '-'),
+            'id': (str(id(path)) + '-id-' + str(group)).replace('.', '-'),
             'geometry': {
                 'type': geometry,
                 'coordinates': shapes
             },
-            "properties": {
-                "objectType": "annotation",
-                "classification": {
-                    "name": str(cluster),
-                    "color": colors[cluster]
-                }
-            }
+            "properties": properties
         }
         cells.append(cell)
     
     with open(path, 'w') as f:
-        json.dump(cells, f)
+        json.dump(cells, f, indent=4)
             
     
     

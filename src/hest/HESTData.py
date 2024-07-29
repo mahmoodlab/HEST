@@ -10,7 +10,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 
-from hest.io.seg_readers import write_geojson
+from hest.io.seg_readers import GeojsonCellReader, write_geojson
 
 try:
     from cucim import CuImage
@@ -44,11 +44,11 @@ from spatialdata import SpatialData
 from spatialdata.models import Image2DModel
 from tqdm import tqdm
 
-from .segmentation.segmentation import (apply_otsu_thresholding,
+from .segmentation.segmentation import (apply_otsu_thresholding, contours_to_img,
                                         get_tissue_vis, keep_largest_area,
                                         mask_to_contours, save_pkl,
                                         segment_tissue_deep)
-from .utils import (ALIGNED_HE_FILENAME, check_arg, get_path_from_meta_row,
+from .utils import (ALIGNED_HE_FILENAME, check_arg, deprecated, find_first_file_endswith, get_path_from_meta_row,
                     plot_verify_pixel_size, tiff_save, verify_paths)
 from .vst_save_utils import initsave_hdf5
 
@@ -116,10 +116,10 @@ class HESTData:
         self.pixel_size = pixel_size
         self.shapes = shapes
         if tissue_seg is not None:
-            warnings.warn('tissue_seg is deprecated, please use tissue_contours instead, you might have to delete and redownload the `tissue_seg` data directory and redownload it from huggingface')
-            self.tissue_contours = convert_old_to_gpd(tissue_seg.contours_holes, tissue_seg.contours_tissue)
+            warnings.warn('tissue_seg is deprecated, please use tissue_contours instead, you might have to delete and redownload the `tissue_seg` data directory from huggingface')
+            self._tissue_contours = convert_old_to_gpd(tissue_seg.contours_holes, tissue_seg.contours_tissue)
         else:
-            self.tissue_contours = tissue_contours
+            self._tissue_contours = tissue_contours
         
         if 'total_counts' not in self.adata.var_names:
             sc.pp.calculate_qc_metrics(self.adata, inplace=True)
@@ -211,12 +211,9 @@ class HESTData:
             plot_verify_pixel_size(downscaled_img, down_fact, pixel_size_embedded, pixel_size_estimated, os.path.join(path, 'pixel_size_vis.png'))
 
 
-        if self.tissue_contours is not None:
-            write_geojson(self.tissue_contours, os.path.join(path, 'tissue_contours.geojson'), 'tissue_id')
-            
-            vis = self.get_tissue_vis()
-            
-            vis.save(os.path.join(path, 'tissue_seg_vis.jpg'))
+        if self._tissue_contours is not None:
+            self.save_tissue_contours(path, 'tissue')         
+            self.save_tissue_vis(path, 'tissue_seg')
 
         
         if save_img:
@@ -225,8 +222,6 @@ class HESTData:
 
     def segment_tissue(
         self,
-        wsi: Union[np.ndarray, openslide.OpenSlide, 'CuImage', WSI],
-        pixel_size: float,
         fast_mode=False,
         target_pxl_size=1,
         patch_size_um=512,
@@ -240,8 +235,6 @@ class HESTData:
         """ Compute tissue mask and stores it in the current HESTData object
 
         Args:
-            wsi (Union[np.ndarray, openslide.OpenSlide, CuImage, WSI]): wsi
-            pixel_size (float): pixel size in um/px for the wsi
             fast_mode (bool, optional): in fast mode the inference is done at 2 um/px instead of 1 um/px, 
                 note that the inference pixel size is overwritten by the `target_pxl_size` argument if != 1. Defaults to False.
             target_pxl_size (int, optional): patches are scaled to this pixel size in um/px for inference. Defaults to 1.
@@ -255,15 +248,16 @@ class HESTData:
                 Deep-learning based segmentation will be more accurate but a GPU is recommended, 'otsu' is faster but less accurate. Defaults to 'deep'.
                 
         Returns:
-            gpd.GeoDataFrame: a geodataframe of the tissue contours, contains a column `tissue_id` indicating to which tissue the contour belongs to
+            gpd.GeoDataFrame: a geodataframe of the tissue contours, contains a column `tissue_id` indicating to which tissue the contour belongs to and a 
+                `type` column to indicate if the shape corresponds to a `tissue` contour or a `hole`
         """
         
         check_arg(method, 'method', ['deep', 'otsu'])
         
         if method == 'deep':
-            self.tissue_contours = segment_tissue_deep(
-                wsi,
-                pixel_size,
+            self._tissue_contours = segment_tissue_deep(
+                self.wsi,
+                self.pixel_size,
                 fast_mode,
                 target_pxl_size,
                 patch_size_um,
@@ -279,17 +273,25 @@ class HESTData:
             thumbnail = self.wsi.get_thumbnail(round(width * scale), round(height * scale))
             mask = apply_otsu_thresholding(thumbnail).astype(np.uint8)
             mask = 1 - mask
-            if keep_largest:
-                mask = keep_largest_area(mask)
-            self.tissue_mask = np.round(cv2.resize(mask, (width, height))).astype(np.uint8)
+            tissue_mask = np.round(cv2.resize(mask, (width, height))).astype(np.uint8)
             
             #TODO directly convert to gpd
-            contours_tissue, contours_holes = mask_to_contours(self.tissue_mask, pixel_size=self.pixel_size)
-            self.tissue_contours = convert_old_to_gpd(contours_holes, contours_tissue)
+            gdf_contours = mask_to_contours(tissue_mask, pixel_size=self.pixel_size)
+            self._tissue_contours = gdf_contours
             
         return self.tissue_contours
+    
+    
+    def save_tissue_contours(self, save_dir: str, name: str) -> None:
+        write_geojson(
+            self.tissue_contours, 
+            os.path.join(save_dir, name + '_contours.geojson'),
+            'tissue_id',
+            extra_prop=True
+        )
             
 
+    @deprecated
     def get_tissue_mask(self) -> np.ndarray:
         """ Return existing tissue segmentation mask if it exists, raise an error if it doesn't exist
 
@@ -309,8 +311,7 @@ class HESTData:
         target_pixel_size: float=0.5,
         verbose=0,
         dump_visualization=True,
-        use_mask=True,
-        keep_largest=False
+        use_mask=True
     ):
         """ Dump H&E patches centered around ST spots to a .h5 file
 
@@ -322,7 +323,6 @@ class HESTData:
             verbose (int, optional): verbose. Defaults to 0.
             dump_visualization (bool, optional): whenever to dump a visualization of the patches on top of the downscaled WSI. Defaults to True.
             use_mask (bool, optional): whenever to take into account the tissue mask. Defaults to True.
-            keep_largest (bool, optional): whenever to only keep the largest piece of tissue. Defaults to False.
         """
         
         
@@ -333,10 +333,10 @@ class HESTData:
                 warnings.warn("indices of adata.obs should all have the same length to avoid problems when saving to h5", UserWarning)
                 
         
-        src_pixel_size =  self.pixel_size
+        src_pixel_size = self.pixel_size
         
         # minimum intersection percecentage with the tissue mask to keep a patch
-        TISSUE_INTER_THRESH = 0.05
+        TISSUE_INTER_THRESH = 0.7
         TARGET_VIS_SIZE = 1000
         
         scale_factor = target_pixel_size / src_pixel_size
@@ -355,9 +355,13 @@ class HESTData:
         downscale_vis = TARGET_VIS_SIZE / img_width
 
         if use_mask:
-            if self.tissue_mask is None:
-                self.segment_tissue(keep_largest)
-            tissue_mask = self.get_tissue_mask()
+            tissue_mask = np.zeros((img_height, img_width, 3), dtype=np.uint8)
+            tissue_mask = contours_to_img(
+                self.tissue_contours, 
+                tissue_mask, 
+                draw_contours=False, 
+                line_color=(1, 1, 1)
+            )[:, :, 0]
         else:
             tissue_mask = np.ones((img_height, img_width)).astype(np.uint8)
             
@@ -429,21 +433,23 @@ class HESTData:
         if dump_visualization:
             ax.add_collection(PatchCollection(patch_rectangles, facecolor='none', edgecolor='black', linewidth=0.3))
             ax.set_axis_off()
-            os.makedirs(os.path.join(patch_save_dir, 'vis'), exist_ok=True)
             plt.tight_layout()
-            plt.savefig(os.path.join(patch_save_dir, 'vis', name + '.png'), dpi=400, bbox_inches = 'tight')
+            plt.savefig(os.path.join(patch_save_dir, name + '_patch_vis.png'), dpi=400, bbox_inches = 'tight')
             
         if verbose:
             print(f'found {patch_count} valid patches')
             
     
     def __verify_mask(self):
-        if self.tissue_mask is None:
+        if self.tissue_contours is None:
             raise Exception("No existing tissue mask for that sample, compute the tissue mask with self.segment_tissue()")        
     
 
+    @deprecated
     def get_tissue_contours(self) -> Dict[str, list]:
-        """Get the tissue contours and holes
+        """*Deprecated* use `self.tissue_contours` instead. 
+        
+        Get the tissue contours and holes
 
         Returns:
             Dict[str, list]: dictionnary of contours and holes in the tissue
@@ -451,14 +457,27 @@ class HESTData:
         
         self.__verify_mask()
         
-        asset_dict = {'holes': self.contours_holes, 
-                      'tissue': self.contours_tissue, 
+
+        contours_tissue = self.tissue_contours.geometry.values
+        contours_tissue = [list(c.exterior.coords) for c in contours_tissue]
+        contours_holes = [[] for _ in range(len(contours_tissue))]
+        
+        
+        asset_dict = {'holes': contours_holes, 
+                      'tissue': contours_tissue, 
                       'groups': None}
         return asset_dict
     
+    
+    @property
+    def tissue_contours(self) -> gpd.GeoDataFrame:
+        if self._tissue_contours is None:
+            raise Exception("No tissue segmentation attached to this sample, segment tissue first by calling `segment_tissue()` for this object")
+        return self._tissue_contours
 
+    @deprecated
     def save_tissue_seg_jpg(self, save_dir: str, name: str = 'hest') -> None:
-        """Save tissue segmentation as a greyscale .jpg file, downscale the tissue mask such that the width 
+        """*Deprecated* Save tissue segmentation as a greyscale .jpg file, downscale the tissue mask such that the width 
         and the height are less than 40k pixels
 
         Args:
@@ -468,21 +487,31 @@ class HESTData:
         
         self.__verify_mask()
         
+        img_width, img_height = self.wsi.get_dimensions()
+        tissue_mask = np.zeros((img_height, img_width, 3), dtype=np.uint8)
+        tissue_mask = contours_to_img(
+                self.tissue_contours, 
+                tissue_mask, 
+                draw_contours=False, 
+                line_color=(1, 1, 1)
+        )[:, :, 0]
+        
         MAX_EDGE = 40000
         
-        longuest_edge = max(self.tissue_mask.shape[0], self.tissue_mask.shape[1])
-        img = self.tissue_mask
+        longuest_edge = max(tissue_mask.shape[0], tissue_mask.shape[1])
+        img = tissue_mask
         if longuest_edge > MAX_EDGE:
             downscaled = MAX_EDGE / longuest_edge
-            width, height = self.tissue_mask.shape[1], self.tissue_mask.shape[0]
+            width, height = tissue_mask.shape[1], tissue_mask.shape[0]
             img = cv2.resize(img, (round(downscaled * width), round(downscaled * height)))
         
         img = Image.fromarray(img)
         img.save(os.path.join(save_dir, f'{name}_mask.jpg'))
         
-            
+    
+    @deprecated
     def save_tissue_seg_pkl(self, save_dir: str, name: str) -> None:
-        """Save tissue segmentation contour as a .pkl file
+        """*Deprecated* Save tissue segmentation contour as a .pkl file
 
         Args:
             save_dir (str): path to pkl file
@@ -506,7 +535,19 @@ class HESTData:
         )
     
     
+    @deprecated
     def save_vis(self, save_dir, name) -> None:
+        """ *Deprecated* use save_tissue_vis instead"""
+        vis = self.get_tissue_vis()
+        vis.save(os.path.join(save_dir, f'{name}_vis.jpg'))
+        
+    def save_tissue_vis(self, save_dir: str, name: str) -> None:
+        """ Save a visualization of the tissue segmentation on top of the downscaled H&E
+
+        Args:
+            save_dir (str): directory where the visualization will be saved
+            name (str): file is saved as {save_dir}/{name}_vis.jpg
+        """
         vis = self.get_tissue_vis()
         vis.save(os.path.join(save_dir, f'{name}_vis.jpg'))
 
@@ -721,9 +762,10 @@ def read_HESTData(
             img = openslide.OpenSlide(img)
             width, height = img.dimensions
             
-         
-    if tissue_contours_path is None and mask_path_pkl is not None and mask_path_jpg is not None:
-        warnings.warn('mask_path_pkl and  mask_path_jpg are deprecated, please use tissue_contours_path instead')
+    tissue_contours = None
+    if tissue_contours_path is not None:
+        tissue_contours = GeojsonCellReader().read_gdf(tissue_contours_path)
+    elif mask_path_pkl is not None and mask_path_jpg is not None:
         tissue_seg = load_tissue_mask(mask_path_pkl, mask_path_jpg, width, height)
     else:
         tissue_seg = None
@@ -735,7 +777,7 @@ def read_HESTData(
     adata = sc.read_h5ad(adata_path)
     with open(metrics_path) as metrics_f:     
         metrics = json.load(metrics_f)
-    return HESTData(adata, img, metrics['pixel_size_um_estimated'], metrics, tissue_seg=tissue_seg, shapes=shapes, tissue_contours=tissue_contours_path)
+    return HESTData(adata, img, metrics['pixel_size_um_estimated'], metrics, tissue_seg=tissue_seg, shapes=shapes, tissue_contours=tissue_contours)
         
 
 def mask_and_patchify_bench(meta_df: pd.DataFrame, save_dir: str, use_mask=True, keep_largest=None):
@@ -849,15 +891,19 @@ def load_hest(hest_dir: str, id_list: List[str] = None) -> List[HESTData]:
         adata_path = os.path.join(hest_dir, 'st', f'{id}.h5ad')
         img_path = os.path.join(hest_dir, 'wsis', f'{id}.tif')
         meta_path = os.path.join(hest_dir, 'metadata', f'{id}.json')
+        
         masks_path_pkl = None
         masks_path_jpg = None
         verify_paths([adata_path, img_path, meta_path])
         
         if os.path.exists(os.path.join(hest_dir, 'tissue_seg')):
-            masks_path_pkl = os.path.join(hest_dir, 'tissue_seg', f'{id}_mask.pkl')
-            masks_path_jpg = os.path.join(hest_dir, 'tissue_seg', f'{id}_mask.jpg')
-            tissue_contours_path = os.path.join(hest_dir, 'tissue_seg', f'{id}_contours.geojson')
+            masks_path_pkl = find_first_file_endswith(os.path.join(hest_dir, 'tissue_seg'), f'{id}_mask.pkl')
+            masks_path_jpg = find_first_file_endswith(os.path.join(hest_dir, 'tissue_seg'), f'{id}_mask.jpg')
+            tissue_contours_path = find_first_file_endswith(os.path.join(hest_dir, 'tissue_seg'), f'{id}_contours.geojson')
 
+        cellvit_path = None
+        if os.path.exists(os.path.join(hest_dir, 'cellvit_seg')):
+            cellvit_path = os.path.join(hest_dir, 'cellvit_seg', f'{id}_cellvit_seg.geojson')
             
         st = read_HESTData(
             adata_path, 
