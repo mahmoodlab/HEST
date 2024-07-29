@@ -252,13 +252,31 @@ def generate_colors(names):
         rgb = [int(255 * c) for c in rgb]
         color_dict[names[i]] = rgb
     return color_dict
+
+
+def read_parquet_schema_df(path: str) -> pd.DataFrame:
+    """Return a Pandas dataframe corresponding to the schema of a local URI of a parquet file.
+
+    The returned dataframe has the columns: column, pa_dtype
+    """
+    import pyarrow.parquet
+    
+    # Ref: https://stackoverflow.com/a/64288036/
+    schema = pyarrow.parquet.read_schema(path, memory_map=True)
+    schema = pd.DataFrame(({"column": name, "pa_dtype": str(pa_dtype)} for name, pa_dtype in zip(schema.names, schema.types)))
+    schema = schema.reindex(columns=["column", "pa_dtype"], fill_value=pd.NA)  # Ensures columns in case the parquet file has an empty dataframe.
+    return schema
     
     
 def cell_reader_factory(path) -> CellReader:
     if path.endswith('.geojson'):
         return GeojsonCellReader()
     elif path.endswith('.parquet'):
-        return XeniumParquetCellReader()
+        schema = read_parquet_schema_df(path)
+        if 'geometry' in schema['column'].values:
+            return GDFParquetCellReader()
+        else:
+            return XeniumParquetCellReader()
     else:
         ext = path.split('.')[-1]
         raise ValueError(f'Unknown file extension {ext} for a cell segmentation file, needs to be .geojson or .parquet')

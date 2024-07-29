@@ -26,17 +26,11 @@ try:
     import openslide
 except Exception:
     print("Couldn't import openslide, verify that openslide is installed on your system, https://openslide.org/download/")
-import pandas as pd
-
-try:
-    import pyvips
-except Exception:
-    print("Couldn't import pyvips, verify that libvips is installed on your system")
 import dask.array as da
+import pandas as pd
 import scanpy as sc
 from dask import delayed
 from dask.array import from_delayed
-from matplotlib import rcParams
 from matplotlib.collections import PatchCollection
 from PIL import Image
 from shapely import Point
@@ -44,11 +38,12 @@ from spatialdata import SpatialData
 from spatialdata.models import Image2DModel, ShapesModel
 from tqdm import tqdm
 
-from .segmentation.segmentation import (apply_otsu_thresholding, contours_to_img,
-                                        get_tissue_vis, keep_largest_area,
+from .segmentation.segmentation import (apply_otsu_thresholding,
+                                        contours_to_img, get_tissue_vis,
                                         mask_to_contours, save_pkl,
                                         segment_tissue_deep)
-from .utils import (ALIGNED_HE_FILENAME, check_arg, deprecated, find_first_file_endswith, get_path_from_meta_row,
+from .utils import (ALIGNED_HE_FILENAME, check_arg, deprecated,
+                    find_first_file_endswith, get_path_from_meta_row,
                     plot_verify_pixel_size, tiff_save, verify_paths)
 from .vst_save_utils import initsave_hdf5
 
@@ -60,9 +55,6 @@ class HESTData:
     
     tissue_mask: np.ndarray = None
     """tissue mask for that sample, will be None until segment_tissue() is called"""
-    
-    contours_tissue: list = None
-    """tissue contours for that sample, will be None until segment_tissue() is called"""
     
     shapes: List[LazyShapes] = []
     
@@ -314,8 +306,11 @@ class HESTData:
         dump_visualization=True,
         use_mask=True
     ):
-        """ Dump H&E patches centered around ST spots to a .h5 file. Rescale each patch to `target_pixel_size` um/px and then take a 
-            `target_patch_size`x`target_patch_size` crop centered on each ST spot (which coordinates are derived from adata.obsm['spatial'])
+        """ Dump H&E patches centered around ST spots to a .h5 file. 
+        
+            Patches are computed such that:
+             - each patch is rescaled to `target_pixel_size` um/px
+             - a crop of `target_patch_size`x`target_patch_size` pixels around each ST (pseudo) spot is derived (which coordinates are derived from adata.obsm['spatial'])
 
         Args:
             patch_save_dir (str): directory where the .h5 patch file will be saved
@@ -878,7 +873,7 @@ def load_hest(hest_dir: str, id_list: List[str] = None) -> List[HESTData]:
         List[HESTData]: list of HESTData objects
     """
     
-    if not(isinstance(id_list, list) or isinstance(id_list, np.ndarray)):
+    if id_list is not None and (not(isinstance(id_list, list) or isinstance(id_list, np.ndarray))):
         raise ValueError('id_list must a list or a numpy array')
     
     hestdata_list = []
@@ -897,7 +892,8 @@ def load_hest(hest_dir: str, id_list: List[str] = None) -> List[HESTData]:
         
         masks_path_pkl = None
         masks_path_jpg = None
-        verify_paths([adata_path, img_path, meta_path])
+        verify_paths([adata_path, img_path, meta_path], suffix='\nHave you downloaded the dataset? (https://huggingface.co/datasets/MahmoodLab/hest)')
+        
         
         if os.path.exists(os.path.join(hest_dir, 'tissue_seg')):
             masks_path_pkl = find_first_file_endswith(os.path.join(hest_dir, 'tissue_seg'), f'{id}_mask.pkl')

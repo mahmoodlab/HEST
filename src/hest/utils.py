@@ -16,10 +16,6 @@ import pandas as pd
 
 from hest.wsi import WSI, NumpyWSI, WSIPatcher, wsi_factory
 
-try:
-    import pyvips
-except Exception:
-    print("Couldn't import pyvips, verify that libvips is installed on your system")
 import scanpy as sc
 import tifffile
 from kwimage.im_cv2 import imresize
@@ -48,10 +44,10 @@ def deprecated(func):
     return new_func
 
 
-def verify_paths(paths):
+def verify_paths(paths, suffix=""):
     for path in paths:
         if not os.path.exists(path):
-            raise FileNotFoundError(f"No such file or directory: {path}\nHave you downloaded the dataset? (https://huggingface.co/datasets/MahmoodLab/hest)")
+            raise FileNotFoundError(f"No such file or directory: {path}" + suffix)
 
 
 def geojson_to_map(geojson: dict, width, height, color=None):
@@ -781,6 +777,10 @@ def tiff_save(img: np.ndarray, save_path: str, pixel_size: float, pyramidal=True
     
     
     if pyramidal:
+        try:
+            import pyvips
+        except Exception:
+            print("Couldn't import pyvips, verify that libvips is installed on your system")
         print('saving to pyramidal tiff... can be slow')
         pyvips_img = pyvips.Image.new_from_array(img)
 

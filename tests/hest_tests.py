@@ -1,12 +1,6 @@
 import os
 import unittest
 from os.path import join as _j
-from typing import List
-
-import anndata as ad
-import openslide
-import pyvips
-import scanpy as sc
 
 import hest
 from hest.autoalign import autoalign_visium
