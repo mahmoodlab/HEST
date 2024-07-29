@@ -97,7 +97,7 @@ def segment_tissue_deep(
     
     if auto_download:
         model_dir = get_path_relative(__file__, f'../../../models')
-        snapshot_download(repo_id="pauldoucet/tissue-detector", repo_type='model', local_dir=model_dir, allow_patterns=model_name)
+        snapshot_download(repo_id="MahmoodLab/hest-tissue-seg", repo_type='model', local_dir=model_dir, allow_patterns=model_name)
     
     if torch.cuda.is_available():
         checkpoint = torch.load(weights_path)

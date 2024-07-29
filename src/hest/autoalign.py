@@ -8,7 +8,6 @@ import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import numpy as np
 from kwimage.im_cv2 import imresize
-from ultralytics import YOLO
 
 from hest.utils import get_path_relative
 
@@ -198,6 +197,8 @@ def autoalign_visium(fullres_img: np.ndarray, save_dir: str=None, name='') -> Di
     Returns:
         Dict: spot alignment as a dictionary
     """ 
+    from ultralytics import YOLO
+    
     path_model = get_path_relative(__file__, '../../models/visium_yolov8_v1.pt')
     model = YOLO(path_model)
 
