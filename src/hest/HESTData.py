@@ -287,7 +287,8 @@ class HESTData:
             self.tissue_contours, 
             os.path.join(save_dir, name + '_contours.geojson'),
             'tissue_id',
-            extra_prop=True
+            extra_prop=True,
+            index_key='hole'
         )
             
 
@@ -313,7 +314,8 @@ class HESTData:
         dump_visualization=True,
         use_mask=True
     ):
-        """ Dump H&E patches centered around ST spots to a .h5 file
+        """ Dump H&E patches centered around ST spots to a .h5 file. Rescale each patch to `target_pixel_size` um/px and then take a 
+            `target_patch_size`x`target_patch_size` crop centered on each ST spot (which coordinates are derived from adata.obsm['spatial'])
 
         Args:
             patch_save_dir (str): directory where the .h5 patch file will be saved
@@ -764,12 +766,12 @@ def read_HESTData(
             width, height = img.dimensions
             
     tissue_contours = None
+    tissue_seg = None
     if tissue_contours_path is not None:
-        tissue_contours = GeojsonCellReader().read_gdf(tissue_contours_path)
+        tissue_contours = GeojsonCellReader().read_gdf(tissue_contours_path, index_key='hole', class_name='tissue_id')
+        tissue_contours['tissue_id'] = tissue_contours['tissue_id'].astype(int)
     elif mask_path_pkl is not None and mask_path_jpg is not None:
         tissue_seg = load_tissue_mask(mask_path_pkl, mask_path_jpg, width, height)
-    else:
-        tissue_seg = None
     
     shapes = []
     if cellvit_path is not None:

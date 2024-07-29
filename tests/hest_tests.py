@@ -103,7 +103,7 @@ class TestHESTData(unittest.TestCase):
         self.output_dir = _j(cur_dir, 'output_tests/hestdata_tests')
         os.makedirs(self.output_dir, exist_ok=True)
         
-        id_list = ['SPA154', 'TENX96', 'TENX131']
+        id_list = ['INT18', 'SPA154', 'TENX96', 'TENX131']
         
         self.sts = hest.load_hest('hest_data', id_list)
 
@@ -132,12 +132,12 @@ class TestHESTData(unittest.TestCase):
                 print(spd)
 
 
-    #def test_patching(self):
-    #    for idx, st in enumerate(self.sts):
-    #        with self.subTest(st_object=idx):
-    #            name = ''
-    #            name += st.meta['id']
-    #            st.dump_patches(self.output_dir, name=name)
+    def test_patching(self):
+       for idx, st in enumerate(self.sts):
+           with self.subTest(st_object=idx):
+               name = ''
+               name += st.meta['id']
+               st.dump_patches(self.output_dir, name=name)
 
     #def test_wsi(self):
     #    for idx, st in enumerate(self.sts):
