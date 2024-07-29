@@ -41,7 +41,7 @@ from matplotlib.collections import PatchCollection
 from PIL import Image
 from shapely import Point
 from spatialdata import SpatialData
-from spatialdata.models import Image2DModel
+from spatialdata.models import Image2DModel, ShapesModel
 from tqdm import tqdm
 
 from .segmentation.segmentation import (apply_otsu_thresholding, contours_to_img,
@@ -104,7 +104,7 @@ class HESTData:
                 If a str is passed, the image is opened with cucim if available and OpenSlide otherwise
             pixel_size (float): pixel_size of WSI im um/px, this pixel size will be used to perform operations on the slide, such as patching and segmenting
             meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
-            shapes (List[LazyShapes]): dictionary of shapes, note that these shapes will be lazily loaded. Default: None
+            shapes (List[LazyShapes]): dictionary of shapes, note that these shapes will be lazily loaded. Default: []
             tissue_seg (TissueMask): *Deprecated* tissue mask for that sample
         """
         self.adata = adata
@@ -582,16 +582,17 @@ class HESTData:
                 if 'radius' not in shapes.columns:
                     shapes['radius'] = 1
             
-            shape_validated.append(shapes)
+            shape_validated.append(ShapesModel.parse(shapes))
             shape_names.append(it.name)
+            
+        if self._tissue_contours is not None:
+            shape_validated.append(ShapesModel.parse(self.tissue_contours))
+            shape_names.append('tissue_contours')
         
         my_images = {"he": parsed_image}
         my_tables = {"anndata": self.adata}
         
-        st = SpatialData(images=my_images, tables=my_tables, shapes=dict(shape_names, shape_validated))
-        
-        #TODO add CellViT
-        #TODO add tissue segmentation
+        st = SpatialData(images=my_images, tables=my_tables, shapes=dict(zip(shape_names, shape_validated)))
 
         return st
         
@@ -625,7 +626,7 @@ class VisiumHDHESTData(HESTData):
             pixel_size (float): pixel_size of WSI im um/px, this pixel size will be used to perform operations on the slide, such as patching and segmenting
             img (Union[np.ndarray, str]): Full resolution image corresponding to the ST data, if passed as a path (str) the image is lazily loaded
             meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
-            shapes (List[LazyShapes]): dictionary of shapes, note that these shapes will be lazily loaded. Default: None
+            shapes (List[LazyShapes]): dictionary of shapes, note that these shapes will be lazily loaded. Default: []
             tissue_seg (TissueMask): tissue mask for that sample
         """
         super().__init__(adata, img, pixel_size, meta, tissue_seg, tissue_contours, shapes)        
@@ -676,7 +677,7 @@ class XeniumHESTData(HESTData):
             img (Union[np.ndarray, openslide.OpenSlide, CuImage]): Full resolution image corresponding to the ST data, Openslide/CuImage are lazily loaded, use CuImage for GPU accelerated computation
             pixel_size (float): pixel_size of WSI im um/px, this pixel size will be used to perform operations on the slide, such as patching and segmenting
             meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
-            shapes (List[LazyShapes]): dictionary of shapes, note that these shapes will be lazily loaded. Default: None
+            shapes (List[LazyShapes]): dictionary of shapes, note that these shapes will be lazily loaded. Default: []
             tissue_seg (TissueMask): tissue mask for that sample
             xenium_nuc_seg (pd.DataFrame): content of a xenium nuclei contour file as a dataframe (nucleus_boundaries.parquet)
             xenium_cell_seg (pd.DataFrame): content of a xenium cell contour file as a dataframe (cell_boundaries.parquet)
@@ -949,6 +950,7 @@ def unify_gene_names(adata: sc.AnnData, species="hsapiens", cache_dir='.genes', 
     """
     adata = adata.copy()
     import mygene
+        
     mg = mygene.MyGeneInfo()
 
     gene_df = get_gene_db(species, cache_dir=cache_dir)

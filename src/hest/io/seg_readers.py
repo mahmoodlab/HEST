@@ -66,7 +66,7 @@ class GeojsonCellReader(CellReader):
             
         return df
     
-    def _process(self, x):
+    def _process(self, x, extra_props):
         from shapely.geometry.polygon import Polygon, Point
         
         geom_type = x['geometry']['type']
@@ -90,14 +90,13 @@ class GeojsonCellReader(CellReader):
         return gdf
     
     
-    def read_gdf(self, path, class_name=None) -> gpd.GeoDataFrame:
+    def read_gdf(self, path, class_name=None, extra_props=False) -> gpd.GeoDataFrame:
         with open(path) as f:
-            logger.info("Load geojson file...")
             ls = json.load(f)
             
             sub_gdfs = []
             for x in tqdm(ls):
-                sub_gdfs.append(self._process(x))
+                sub_gdfs.append(self._process(x, extra_props))
     
             gdf = gpd.GeoDataFrame(pd.concat(sub_gdfs, ignore_index=True))
             gdf['cell_id'] = np.arange(len(gdf))
