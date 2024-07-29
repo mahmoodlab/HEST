@@ -626,6 +626,39 @@ def _get_nan(cell, col_name):
         return ''
     else:
         return val
+    
+    
+def get_col_selection():
+    cols = [
+        'dataset_title',
+        'id',
+        'image_filename',
+        'organ',
+        'disease_state',
+        'oncotree_code',
+        'species',
+        'patient',
+        'st_technology',
+        'data_publication_date',
+        'license',
+        'study_link',
+        'download_page_link1',
+        'inter_spot_dist',
+        'spot_diameter',
+        'spots_under_tissue',
+        'preservation_method',
+        'nb_genes',
+        'treatment_comment',
+        'pixel_size_um_embedded', 
+        'pixel_size_um_estimated', 
+        'magnification',
+        'fullres_px_width',
+        'fullres_px_height',
+        'tissue',
+        'disease_comment',
+        'subseries'
+    ]
+    return cols
         
 
 def create_meta_release(meta_df: pd.DataFrame, version: version.Version) -> None:
@@ -704,35 +737,7 @@ def create_meta_release(meta_df: pd.DataFrame, version: version.Version) -> None
     if os.path.exists(release_path):
         raise Exception(f'meta already exists at path {release_path}')
     
-    release_col_selection = [
-        'dataset_title',
-        'id',
-        'image_filename',
-        'organ',
-        'disease_state',
-        'oncotree_code',
-        'species',
-        'patient',
-        'st_technology',
-        'data_publication_date',
-        'license',
-        'study_link',
-        'download_page_link1',
-        'inter_spot_dist',
-        'spot_diameter',
-        'spots_under_tissue',
-        'preservation_method',
-        'nb_genes',
-        'treatment_comment',
-        'pixel_size_um_embedded', 
-        'pixel_size_um_estimated', 
-        'magnification',
-        'fullres_px_width',
-        'fullres_px_height',
-        'tissue',
-        'disease_comment',
-        'subseries'
-    ]
+    release_col_selection = get_col_selection()
     #release_col_selection += metric_subset
     meta_df = meta_df[release_col_selection]
     meta_df = meta_df[meta_df['pixel_size_um_estimated'].isna() | meta_df['pixel_size_um_estimated'] < 1.15]
@@ -787,7 +792,7 @@ def tiff_save(img: np.ndarray, save_path: str, pixel_size: float, pyramidal=True
             tile=True, 
             tile_width=256, 
             tile_height=256, 
-            compression='deflate', 
+            compression='lzw', 
             resunit=pyvips.enums.ForeignTiffResunit.CM,
             xres=1. / (pixel_size * 1e-4),
             yres=1. / (pixel_size * 1e-4))
@@ -931,7 +936,7 @@ def _sample_id_to_filename(id):
     return id + '.tif'            
 
             
-def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal: bool, cp_pixel_vis: bool, cp_adata: bool, cp_meta: bool):
+def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal: bool, cp_pixel_vis: bool, cp_adata: bool, cp_meta: bool, cp_cellvit, cp_patches, cp_contours):
     """ Internal use method, to transfer images to a `release` folder (`dest`)"""
     try:
         path = get_path_from_meta_row(row)
@@ -958,11 +963,12 @@ def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal:
         #vips_pyr_cmd = f'vips tiffsave "{path_fullres}" "{dst}" --pyramid --tile --tile-width=256 --tile-height=256 --compression=deflate {bigtiff_option}'
         #subprocess.call(vips_pyr_cmd, shell=True)
         
-    if cp_meta:
-        path_metrics = os.path.join(path, 'metrics.json')
-        os.makedirs(os.path.join(dest, 'metrics'), exist_ok=True)
-        path_dest_metrics = os.path.join(dest, 'metrics', row['id'] + '.json')
-        shutil.copy(path_metrics, path_dest_metrics)
+    id = row['id']
+    if cp_meta:    
+        path_meta = os.path.join(path, 'meta.json')
+        os.makedirs(os.path.join(dest, 'metadata'), exist_ok=True)
+        path_dest_meta = os.path.join(dest, 'metadata', row['id'] + '.json')
+        shutil.copy(path_meta, path_dest_meta)
     if cp_downscaled:
         path_downscaled = os.path.join(path, 'downscaled_fullres.jpeg')
         os.makedirs(os.path.join(dest, 'thumbnails'), exist_ok=True)
@@ -985,14 +991,43 @@ def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal:
         path_adata = os.path.join(path, 'aligned_adata.h5ad')
         os.makedirs(os.path.join(dest, 'st'), exist_ok=True)
         path_dest_adata = os.path.join(dest, 'st', row['id'] + '.h5ad')
-        shutil.copy(path_adata, path_dest_adata)        
+        shutil.copy(path_adata, path_dest_adata) 
+    if cp_patches:
+        os.makedirs(os.path.join(dest, 'patches'), exist_ok=True)
+        path_patches = os.path.join(path, f'patches.h5')
+        path_dest_patches = os.path.join(dest, 'patches', f'{id}.h5')
+        shutil.copy(path_patches, path_dest_patches)
+        
+        os.makedirs(os.path.join(dest, 'patches_vis'), exist_ok=True)
+        path_patches_vis = os.path.join(path, f'patches_patch_vis.png')
+        path_dest_patches_vis = os.path.join(dest, 'patches_vis', f'{id}.png')
+        shutil.copy(path_patches_vis, path_dest_patches_vis)
+    if cp_contours:
+        os.makedirs(os.path.join(dest, 'tissue_seg'), exist_ok=True)
+        path_cont = os.path.join(path, f'tissue_contours.geojson')
+        path_dest_cont = os.path.join(dest, 'tissue_seg', f'{id}_contours.geojson')
+        shutil.copy(path_cont, path_dest_cont)
+        
         
             
-def copy_processed_images(dest: str, meta_df: pd.DataFrame, cp_spatial=True, cp_downscaled=True, cp_pyramidal=True, cp_pixel_vis=True, cp_adata=True, cp_meta=True, n_job=6):
+def copy_processed(
+    dest: str, 
+    meta_df: pd.DataFrame, 
+    cp_spatial=True,
+    cp_downscaled=True, 
+    cp_pyramidal=True, 
+    cp_pixel_vis=True,
+    cp_adata=True, 
+    cp_meta=True, 
+    n_job=6, 
+    cp_cellvit=True, 
+    cp_patches=True, 
+    cp_contours=True
+):
     """ Internal use method, to transfer images to a `release` folder (`dest`)"""
     with concurrent.futures.ThreadPoolExecutor(max_workers=n_job) as executor:
         # Submit tasks to the executor
-        future_results = [executor.submit(_process_row, dest, row, cp_downscaled, cp_spatial, cp_pyramidal, cp_pixel_vis, cp_adata, cp_meta) for _, row in meta_df.iterrows()]
+        future_results = [executor.submit(_process_row, dest, row, cp_downscaled, cp_spatial, cp_pyramidal, cp_pixel_vis, cp_adata, cp_meta, cp_cellvit, cp_patches, cp_contours) for _, row in meta_df.iterrows()]
 
         # Retrieve results as they complete
         for future in tqdm(concurrent.futures.as_completed(future_results), total=len(meta_df)):
@@ -1058,9 +1093,9 @@ def check_arg(arg, arg_name, values):
 def helper_mex(path: str, filename: str) -> None:
     """If filename doesn't exist in directory `path`, find similar filename in same directory and zip it to patch filename"""
     # zip if needed
-    file = os.path.join(path, filename.strip('.gz'))
-    dst = os.path.join(path, filename)
-    src = os.path.join(path, filename)
+    file = find_first_file_endswith(path, filename.strip('.gz'))
+    #dst = os.path.join(path, filename)
+    src = find_first_file_endswith(path, filename)
     if file is not None and src is None:
         f_in = open(file, 'rb')
         f_out = gzip.open(os.path.join(os.path.join(path), filename), 'wb')
@@ -1068,9 +1103,9 @@ def helper_mex(path: str, filename: str) -> None:
         f_out.close()
         f_in.close()
     
-    if not os.path.exists(dst) and \
-            src is not None:
-        shutil.copy(src, dst)
+    #if not os.path.exists(dst) and \
+    #        src is not None:
+    #    shutil.copy(src, dst)
 
 
 def load_wsi(img_path: str) -> Tuple[WSI, float]:
@@ -1095,8 +1130,7 @@ def load_wsi(img_path: str) -> Tuple[WSI, float]:
     pixel_size_embedded = None
     
     img = tifffile.imread(img_path)
-    
-    wsi = NumpyWSI(img)
+
     if img_path.endswith('tiff') or img_path.endswith('tif') or img_path.endswith('btf') or img_path.endswith('TIF'):
             
         my_img = tifffile.TiffFile(img_path)
@@ -1105,6 +1139,18 @@ def load_wsi(img_path: str) -> Tuple[WSI, float]:
             # result in micrometers per pixel
             factor = unit_to_micrometers[my_img.pages[0].tags['ResolutionUnit'].value]
             pixel_size_embedded = (my_img.pages[0].tags['XResolution'].value[1] / my_img.pages[0].tags['XResolution'].value[0]) * factor
+    
+    # sometimes the RGB axis are inverted
+    if img.shape[0] == 3:
+        img = np.transpose(img, axes=(1, 2, 0))
+    elif img.shape[2] == 4: # RGBA to RGB
+        img = img[:,:,:3]
+    if np.max(img) > 1000:
+        img = img.astype(np.float32)
+        img /= 2**8
+        img = img.astype(np.uint8)
+        
+    wsi = NumpyWSI(img)
     
     return wsi, pixel_size_embedded
 
