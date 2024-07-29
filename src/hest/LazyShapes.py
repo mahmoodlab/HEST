@@ -17,7 +17,7 @@ class LazyShapes:
         
     def compute(self) -> None:
         if self._shapes is None:
-            self.shapes = read_gdf(self.path)
+            self._shapes = read_gdf(self.path)
             
     @property
     def shapes(self) -> gpd.GeoDataFrame:
