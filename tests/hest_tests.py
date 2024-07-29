@@ -122,6 +122,16 @@ class TestHESTData(unittest.TestCase):
                 st.save_tissue_seg_pkl(self.output_dir, name=f'otsu_{idx}')
                 st.save_tissue_vis(self.output_dir, name=f'otsu_{idx}')
 
+
+    def test_spatialdata(self):
+        for idx, st in enumerate(self.sts):
+            with self.subTest(st_object=idx):
+                name = ''
+                name += st.meta['id']
+                spd = st.to_spatial_data()
+                print(spd)
+
+
     #def test_patching(self):
     #    for idx, st in enumerate(self.sts):
     #        with self.subTest(st_object=idx):
