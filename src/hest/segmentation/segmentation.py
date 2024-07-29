@@ -218,10 +218,10 @@ def contours_to_img(
         for _, row in group.iterrows():
             cont = np.array([[round(x * downsample), round(y * downsample)] for x, y in row.geometry.exterior.coords])
         
-            if row['type'] == 'tissue':
-                draw_cont_fill(image=img, contours=[cont], color=line_color)
-            else:
+            if row['hole']:
                 draw_cont_fill(image=img, contours=[cont], color=(0, 0, 0))
+            else:
+                draw_cont_fill(image=img, contours=[cont], color=line_color)
             if draw_contours:
                 draw_cont(image=img, contours=[cont], color=line_color)
     return img
@@ -487,7 +487,8 @@ def mask_to_contours(mask: np.ndarray, keep_ids = [], exclude_ids=[], max_nb_hol
     tissue_types = ['tissue' for _ in contour_ids] + ['hole' for i in contour_ids if len(contours_holes[i]) > 0]
     
     gdf_contours = gpd.GeoDataFrame(pd.DataFrame(tissue_ids, columns=['tissue_id']), geometry=geometry)
-    gdf_contours['type'] = tissue_types
+    gdf_contours['hole'] = tissue_types
+    gdf_contours['hole'] = gdf_contours['hole'] == 'hole'
     
     return gdf_contours
     

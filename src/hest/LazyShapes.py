@@ -54,7 +54,8 @@ def convert_old_to_gpd(contours_holes, contours_tissue) -> gpd.GeoDataFrame:
                 types.append('hole')
                 
     df = pd.DataFrame(tissue_ids, columns=['tissue_id'])
-    df['type'] = types
+    df['hole'] = types
+    df['hole'] = df['hole'] == 'hole'
             
     return gpd.GeoDataFrame(df, geometry=shapes)
         
