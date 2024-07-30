@@ -97,7 +97,7 @@ class TestHESTData(unittest.TestCase):
         self.output_dir = _j(cur_dir, 'output_tests/hestdata_tests')
         os.makedirs(self.output_dir, exist_ok=True)
         
-        id_list = ['INT18', 'SPA154', 'TENX96', 'TENX131']
+        id_list = ['TENX24', 'SPA154', 'TENX96', 'TENX131']
         
         self.sts = hest.load_hest('hest_data', id_list)
 
@@ -105,10 +105,11 @@ class TestHESTData(unittest.TestCase):
     def test_tissue_seg(self):
         for idx, st in enumerate(self.sts):
             with self.subTest(st_object=idx):
-                #st.segment_tissue(method='deep')
-                #st.save_tissue_seg_jpg(self.output_dir, name=f'deep_{idx}')
-                #st.save_tissue_seg_pkl(self.output_dir, name=f'deep_{idx}')
-                #st.save_tissue_vis(self.output_dir, name=f'deep_{idx}')
+                st.segment_tissue(method='deep')
+                st.save_tissue_contours(self.output_dir, name=f'deep_{idx}')
+                st.save_tissue_seg_jpg(self.output_dir, name=f'deep_{idx}')
+                st.save_tissue_seg_pkl(self.output_dir, name=f'deep_{idx}')
+                st.save_tissue_vis(self.output_dir, name=f'deep_{idx}')
                 
                 st.segment_tissue(method='otsu')
                 st.save_tissue_contours(self.output_dir, name=f'otsu_{idx}')
@@ -132,6 +133,14 @@ class TestHESTData(unittest.TestCase):
                name = ''
                name += st.meta['id']
                st.dump_patches(self.output_dir, name=name)
+               
+               
+    def test_saving(self):
+       for idx, st in enumerate(self.sts):
+           with self.subTest(st_object=idx):
+               name = ''
+               name += st.meta['id']
+               st.save(os.path.join(self.output_dir, f'test_save_{name}'), save_img=False)
 
     #def test_wsi(self):
     #    for idx, st in enumerate(self.sts):

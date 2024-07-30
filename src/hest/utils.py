@@ -1,29 +1,25 @@
+from __future__ import annotations
+
 import concurrent.futures
 import functools
 import gzip
 import json
 import os
 import shutil
+import warnings
 from enum import Enum
 from typing import List, Tuple, Union
-import warnings
 
-import h5py
-import matplotlib.pyplot as plt
 import cv2
 import numpy as np
 import pandas as pd
-
-from hest.wsi import WSI, NumpyWSI, WSIPatcher, wsi_factory
-
-import scanpy as sc
 import tifffile
-from kwimage.im_cv2 import imresize
 from packaging import version
 from PIL import Image
 from scipy import sparse
-from sklearn.neighbors import KDTree
 from tqdm import tqdm
+
+from hest.wsi import WSI, NumpyWSI, WSIPatcher, wsi_factory
 
 Image.MAX_IMAGE_PIXELS = 93312000000
 ALIGNED_HE_FILENAME = 'aligned_fullres_HE.tif'
@@ -309,10 +305,13 @@ def compare_meta_df(meta_df1, meta_df2):
     return list(diff1), list(diff2)
 
 
-def normalize_adata(adata: sc.AnnData, scale=1e6, smooth=False) -> sc.AnnData:
+def normalize_adata(adata: AnnData, scale=1e6, smooth=False) -> AnnData: # type: ignore
     """
     Normalize each spot by total gene counts + Logarithmize each spot
     """
+    
+    import scanpy as sc
+    
     filtered_adata = adata.copy()
     
     if smooth:
@@ -373,6 +372,8 @@ def get_k_genes_from_df(meta_df: pd.DataFrame, k: int, criteria: str, save_dir: 
     Returns:
         List[str]: k genes according to the criteria
     """
+    import scanpy as sc
+    
     adata_list = []
     for _, row in meta_df.iterrows():
         id = row['id']
@@ -381,7 +382,7 @@ def get_k_genes_from_df(meta_df: pd.DataFrame, k: int, criteria: str, save_dir: 
     return get_k_genes(adata_list, k, criteria, save_dir=save_dir)
 
 
-def get_k_genes(adata_list: List[sc.AnnData], k: int, criteria: str, save_dir: str=None, min_cells_pct=0.10) -> List[str]:
+def get_k_genes(adata_list: List[sc.AnnData], k: int, criteria: str, save_dir: str=None, min_cells_pct=0.10) -> List[str]: # type: ignore
     """Get the k genes according to some criteria across common genes in all the samples in the adata list
 
     Args:
@@ -396,6 +397,7 @@ def get_k_genes(adata_list: List[sc.AnnData], k: int, criteria: str, save_dir: s
     Returns:
         List[str]: k genes according to the criteria
     """
+    import scanpy as sc
     
     check_arg(criteria, 'criteria', ['mean', 'var'])
     
@@ -483,6 +485,8 @@ def get_path_from_meta_row(row):
 
     
 def create_joined_gene_plots(meta, gene_plot=False):
+    import matplotlib.pyplot as plt
+
     # determine common genes
     if gene_plot:
         plot_dir = 'gene_plots'
@@ -526,6 +530,8 @@ def create_joined_gene_plots(meta, gene_plot=False):
 
 
 def split_join_adata_by_col(path, adata_path, col):
+    import scanpy as sc
+    
     adata = sc.read_h5ad(os.path.join(path, adata_path))
     samples = np.unique(adata.obs[col])
     for sample in samples:
@@ -541,6 +547,7 @@ def split_join_adata_by_col(path, adata_path, col):
             
             
 def pool_xenium_by_cell(dir_path: str, cellvit_geojson: pd.DataFrame, pixel_size) -> sc.AnnData:
+    from sklearn.neighbors import KDTree
     
     with open(cellvit_geojson) as f:
         arr = json.load(f)    
@@ -785,6 +792,8 @@ def tiff_save(img: np.ndarray, save_path: str, pixel_size: float, pyramidal=True
         pyvips_img = pyvips.Image.new_from_array(img)
 
         # save in the generic tiff format readable by both openslide and QuPath
+        # Note: had to change the compression from 'deflate' to 'lzw' because of a reading incompatibility with CuImage/OpenSlide
+        # when upgrading to vips 8.13 (necessary for Valis)
         pyvips_img.tiffsave(
             save_path, 
             bigtiff=bigtiff, 
@@ -903,7 +912,7 @@ def find_pixel_size_from_spot_coords(my_df: pd.DataFrame, inter_spot_dist: float
     return best_approx, max_dist_col
       
 
-def register_downscale_img(adata: sc.AnnData, wsi: WSI, pixel_size: float, spot_size=55., target_size=1000) -> Tuple[np.ndarray, float]:
+def register_downscale_img(adata: sc.AnnData, wsi: WSI, pixel_size: float, spot_size=55., target_size=1000) -> Tuple[np.ndarray, float]: # type: ignore
     """ registers a downscale version of `img` and it's corresponding scalefactors to `adata` in adata.uns['spatial']['ST']
 
     Args:
@@ -1052,6 +1061,7 @@ def write_10X_h5(adata, file):
     Returns:
         None
     """
+    import h5py
     
     if '.h5' not in file: file = f'{file}.h5'
     #if os.path.exists(file):
@@ -1204,6 +1214,9 @@ def load_image(img_path: str) -> Tuple[np.ndarray, float]:
 
 def _plot_center_square(width, height, length, color, text, offset=0):
     """Plot square centered in plot"""
+    
+    import matplotlib.pyplot as plt
+    
     if length > width * 4 and length > height * 4:
         return
     margin_x = (width - length) / 2
@@ -1217,6 +1230,9 @@ def _plot_center_square(width, height, length, color, text, offset=0):
 
 def plot_verify_pixel_size(downscaled_img: np.ndarray, down_fact: float, pixel_size_embedded: float, pixel_size_estimated: float, path: float) -> None:
     """Plot squares on a downscaled image for scale comparison"""
+    
+    import matplotlib.pyplot as plt
+    
     plt.imshow(downscaled_img)
 
     width = downscaled_img.shape[1]
@@ -1235,7 +1251,7 @@ def plot_verify_pixel_size(downscaled_img: np.ndarray, down_fact: float, pixel_s
 
 
 
-def save_scalefactors(adata: sc.AnnData, path) -> None:
+def save_scalefactors(adata: sc.AnnData, path) -> None: # type: ignore
     """Save scale factors to path from adata.uns"""
     dict = {}
     dict['tissue_downscaled_fullres_scalef'] = adata.uns['spatial']['ST']['scalefactors']['tissue_downscaled_fullres_scalef']

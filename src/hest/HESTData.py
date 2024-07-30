@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import os
 import shutil
@@ -7,17 +9,10 @@ from typing import Dict, List, Union
 import cv2
 import geopandas as gpd
 import matplotlib
-import matplotlib.pyplot as plt
 import numpy as np
 
-from hest.io.seg_readers import GeojsonCellReader, TissueContourReader, write_geojson
-
-try:
-    from cucim import CuImage
-except ImportError:
-    CuImage = None
-    print("CuImage is not available. Ensure you have a GPU and cucim installed to use GPU acceleration.")
-
+from hest.io.seg_readers import (GeojsonCellReader, TissueContourReader,
+                                 write_geojson)
 from hest.LazyShapes import LazyShapes, convert_old_to_gpd
 from hest.segmentation.TissueMask import TissueMask, load_tissue_mask
 from hest.wsi import WSI, NumpyWSI, wsi_factory
@@ -26,16 +21,10 @@ try:
     import openslide
 except Exception:
     print("Couldn't import openslide, verify that openslide is installed on your system, https://openslide.org/download/")
-import dask.array as da
 import pandas as pd
-import scanpy as sc
-from dask import delayed
-from dask.array import from_delayed
 from matplotlib.collections import PatchCollection
 from PIL import Image
 from shapely import Point
-from spatialdata import SpatialData
-from spatialdata.models import Image2DModel, ShapesModel
 from tqdm import tqdm
 
 from .segmentation.segmentation import (apply_otsu_thresholding,
@@ -78,8 +67,8 @@ class HESTData:
     
     def __init__(
         self, 
-        adata: sc.AnnData,
-        img: Union[np.ndarray, openslide.OpenSlide, 'CuImage', str],
+        adata: sc.AnnData, # type: ignore
+        img: Union[np.ndarray, openslide.OpenSlide, CuImage, str], # type: ignore
         pixel_size: float,
         meta: Dict = {},
         tissue_seg: TissueMask=None,
@@ -99,6 +88,8 @@ class HESTData:
             shapes (List[LazyShapes]): dictionary of shapes, note that these shapes will be lazily loaded. Default: []
             tissue_seg (TissueMask): *Deprecated* tissue mask for that sample
         """
+        import scanpy as sc
+        
         self.adata = adata
         
         self.wsi = wsi_factory(img)
@@ -138,6 +129,8 @@ class HESTData:
             pl_kwargs(Dict): arguments for sc.pl.spatial
         """
         print("Plotting spatial plots...")
+        
+        import scanpy as sc
              
         fig = sc.pl.spatial(self.adata, show=None, img_key="downscaled_fullres", color=[key], title=f"in_tissue spots", return_fig=True, **pl_kwargs)
         
@@ -322,6 +315,7 @@ class HESTData:
             use_mask (bool, optional): whenever to take into account the tissue mask. Defaults to True.
         """
         
+        import matplotlib.pyplot as plt
         
         adata = self.adata.copy()
         
@@ -343,7 +337,7 @@ class HESTData:
 
         assert len(adata.obs) == len(adata.obsm['spatial'])
 
-        fig, ax = plt.subplots()
+        _, ax = plt.subplots()
         
         mode_HE = 'w'
         i = 0
@@ -549,7 +543,7 @@ class HESTData:
         vis.save(os.path.join(save_dir, f'{name}_vis.jpg'))
 
 
-    def to_spatial_data(self, lazy_img=True) -> SpatialData:
+    def to_spatial_data(self, lazy_img=True) -> SpatialData: # type: ignore
         """Convert a HESTData sample to a scverse SpatialData object
         
         Args:
@@ -558,6 +552,12 @@ class HESTData:
         Returns:
             SpatialData: scverse SpatialData object
         """
+        
+        import dask.array as da
+        from dask import delayed
+        from dask.array import from_delayed
+        from spatialdata import SpatialData
+        from spatialdata.models import Image2DModel, ShapesModel
 
         def read_hest_wsi(wsi: WSI):
             return wsi.numpy()
@@ -596,7 +596,7 @@ class HESTData:
     
 class VisiumHESTData(HESTData): 
     def __init__(self, 
-        adata: sc.AnnData,
+        adata: sc.AnnData, # type: ignore
         img: Union[np.ndarray, str],
         pixel_size: float,
         meta: Dict = {},
@@ -608,7 +608,7 @@ class VisiumHESTData(HESTData):
 
 class VisiumHDHESTData(HESTData): 
     def __init__(self, 
-        adata: sc.AnnData,
+        adata: sc.AnnData, # type: ignore
         img: Union[np.ndarray, str],
         pixel_size: float,
         meta: Dict = {},
@@ -630,7 +630,7 @@ class VisiumHDHESTData(HESTData):
         
 class STHESTData(HESTData):
     def __init__(self, 
-        adata: sc.AnnData,
+        adata: sc.AnnData, # type: ignore
         img: Union[np.ndarray, str],
         pixel_size: float,
         meta: Dict = {},
@@ -653,8 +653,8 @@ class XeniumHESTData(HESTData):
 
     def __init__(
         self, 
-        adata: sc.AnnData,
-        img: Union[np.ndarray, openslide.OpenSlide, 'CuImage'],
+        adata: sc.AnnData, # type: ignore
+        img: Union[np.ndarray, openslide.OpenSlide, CuImage], # type: ignore
         pixel_size: float,
         meta: Dict = {},
         tissue_seg: TissueMask=None,
@@ -662,7 +662,7 @@ class XeniumHESTData(HESTData):
         shapes: List[LazyShapes]=[],
         xenium_nuc_seg: pd.DataFrame=None,
         xenium_cell_seg: pd.DataFrame=None,
-        cell_adata: sc.AnnData=None,
+        cell_adata: sc.AnnData=None, # type: ignore
         transcript_df: pd.DataFrame=None
     ):
         """
@@ -729,7 +729,7 @@ class XeniumHESTData(HESTData):
 
 def read_HESTData(
     adata_path: str, 
-    img: Union[str, np.ndarray, openslide.OpenSlide, 'CuImage'], 
+    img: Union[str, np.ndarray, openslide.OpenSlide, CuImage],  # type: ignore
     metrics_path: str,
     mask_path_pkl: str = None, # Deprecated
     mask_path_jpg: str = None, # Deprecated
@@ -753,7 +753,14 @@ def read_HESTData(
     Returns:
         HESTData: HESTData object
     """
-    
+
+    try:
+        from cucim import CuImage
+    except ImportError:
+        CuImage = None
+        print("CuImage is not available. Ensure you have a GPU and cucim installed to use GPU acceleration.")
+
+    import scanpy as sc
 
     if isinstance(img, str):
         if CuImage is not None:
@@ -929,6 +936,8 @@ def load_hest(hest_dir: str, id_list: List[str] = None) -> List[HESTData]:
 
 
 def get_gene_db(species, cache_dir='.genes') -> pd.DataFrame:
+    import scanpy as sc
+    
     os.makedirs(cache_dir, exist_ok=True)
     path = os.path.join(cache_dir, f'{species}.parquet')
     if not os.path.exists(path):
@@ -944,7 +953,7 @@ def get_gene_db(species, cache_dir='.genes') -> pd.DataFrame:
     return annots
 
 
-def unify_gene_names(adata: sc.AnnData, species="hsapiens", cache_dir='.genes', drop=False) -> sc.AnnData:
+def unify_gene_names(adata: sc.AnnData, species="hsapiens", cache_dir='.genes', drop=False) -> sc.AnnData: # type: ignore
     """ unify gene names by resolving aliases
 
     Args:

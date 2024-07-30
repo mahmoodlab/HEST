@@ -1,35 +1,39 @@
-from concurrent.futures import ThreadPoolExecutor
+from __future__ import annotations
+
 import json
 import math
 import os
 import shutil
-from abc import abstractmethod
 import threading
 import zipfile
+from abc import abstractmethod
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pandas as pd
-import scanpy as sc
 from tqdm import tqdm
 
-from hest.io.seg_readers import write_geojson
 from hest.segmentation.cell_segmenters import segment_cellvit
 
 from .autoalign import autoalign_visium
-from .custom_readers import (GSE167096_to_adata, GSE180128_to_adata,
-                             GSE203165_to_adata, GSE217828_to_adata,
-                             GSE234047_to_adata, GSE238145_to_adata,
-                             align_dev_human_heart, align_eval_qual_dataset,
-                             align_her2, align_ST_counts_with_transform,
-                             raw_count_to_adata, raw_counts_to_pixel)
 from .HESTData import (HESTData, STHESTData, VisiumHDHESTData, VisiumHESTData,
                        XeniumHESTData)
 from .utils import (SpotPacking, align_xenium_df, check_arg,
                     df_morph_um_to_pxl, find_biggest_img,
-                    find_first_file_endswith, find_pixel_size_from_spot_coords, get_col_selection,
-                    get_path_from_meta_row, get_path_relative, helper_mex,
-                    load_image, load_wsi, metric_file_do_dict, read_10x_seg,
-                    register_downscale_img)
+                    find_first_file_endswith, find_pixel_size_from_spot_coords,
+                    get_col_selection, get_path_from_meta_row,
+                    get_path_relative, helper_mex, load_image, load_wsi,
+                    metric_file_do_dict, read_10x_seg, register_downscale_img)
+
+LOCAL = False
+if LOCAL:
+    from .custom_readers import (GSE167096_to_adata, GSE180128_to_adata,
+                                 GSE203165_to_adata, GSE217828_to_adata,
+                                 GSE234047_to_adata, GSE238145_to_adata,
+                                 align_dev_human_heart,
+                                 align_eval_qual_dataset, align_her2,
+                                 align_ST_counts_with_transform,
+                                 raw_count_to_adata, raw_counts_to_pixel)
 
 
 class Reader:
@@ -45,6 +49,7 @@ class Reader:
         Returns:
             HESTData: STObject that was read
         """
+        import scanpy as sc
         
         hest_object = self._auto_read(path)
         
@@ -93,7 +98,7 @@ class VisiumHDReader(Reader):
         return super().auto_read(path)
         
     
-    def __bin_to_128um(self, adata: sc.AnnData, pixel_size: float) -> sc.AnnData:
+    def __bin_to_128um(self, adata: sc.AnnData, pixel_size: float) -> sc.AnnData: # type: ignore
         y_max = adata.obs['pxl_row_in_fullres'].max()
         y_min = adata.obs['pxl_row_in_fullres'].min()
         x_max = adata.obs['pxl_col_in_fullres'].max()
@@ -152,7 +157,7 @@ class VisiumHDReader(Reader):
         
         #spot_grid.index = [str(i) for i in expression_df.index]
         
-        adata = sc.AnnData(expression_df)
+        adata = sc.AnnData(expression_df) # type: ignore
         adata.obsm['spatial'] = np.column_stack((pos_x, pos_y))
         adata.obs['in_tissue'] = [True for _ in range(len(adata.obs))]
         adata.obs['pxl_col_in_fullres'] = pos_x
@@ -187,6 +192,8 @@ class VisiumHDReader(Reader):
         square_16um_path: str, 
         metrics_path: str = None
     ) -> VisiumHDHESTData:
+        import scanpy as sc
+        
         img, pixel_size_embedded = load_image(img_path)
         
         spatial_path = find_first_file_endswith(square_16um_path, 'spatial')
@@ -242,6 +249,8 @@ class VisiumReader(Reader):
         
     
     def _auto_read(self, path) -> VisiumHESTData:
+        import scanpy as sc
+        
         custom_adata = None
         img_filename = find_biggest_img(path)
         
@@ -366,7 +375,7 @@ class VisiumReader(Reader):
         mex_path: str = None,
         scanpy_h5_path: str = None,
         metric_file_path: str = None,
-        custom_adata: sc.AnnData = None,
+        custom_adata: sc.AnnData = None, # type: ignore
         autoalign: bool = 'auto',
         save_autoalign: bool = False
     ) -> VisiumHESTData:
@@ -406,6 +415,7 @@ class VisiumReader(Reader):
         Returns:
             VisiumHESTData: visium spatial data with spots aligned based on the provided arguments
         """
+        import scanpy as sc
         
         print('alignment file is ', alignment_file_path)
         
@@ -571,7 +581,7 @@ class VisiumReader(Reader):
         return spatial_aligned    
     
 
-    def _find_visium_slide_version(self, alignment_df: str, adata: sc.AnnData) -> str:
+    def _find_visium_slide_version(self, alignment_df: str, adata: sc.AnnData) -> str: # type: ignore
         highest_nb_match = -1
         barcode_dir = get_path_relative(__file__, '../../barcode_coords/')
         for barcode_path in os.listdir(barcode_dir):
@@ -746,6 +756,8 @@ class STReader(Reader):
     
     
     def _GSE144239_to_adata(self, raw_counts_path, spot_coord_path):
+        import scanpy as sc
+        
         raw_counts = pd.read_csv(raw_counts_path, sep='\t', index_col=0)
         spot_coord = pd.read_csv(spot_coord_path, sep='\t')
         spot_coord.index = spot_coord['x'].astype(str) + ['x' for _ in range(len(spot_coord))] + spot_coord['y'].astype(str)
@@ -760,6 +772,8 @@ class STReader(Reader):
     
     
     def _ADT_to_adata(self, img_path, raw_counts_path):
+        import scanpy as sc
+        
         basedir = os.path.dirname(img_path)
         # combine spot coordinates into a single dataframe
         pre_adt_path= find_first_file_endswith(basedir, 'pre-ADT.tsv')
@@ -810,6 +824,7 @@ class STReader(Reader):
                 raw_counts.index = raw_counts['Unnamed: 0']
                 raw_counts = raw_counts.drop(['Unnamed: 0'], axis=1)
             if meta_table_path is not None:
+                import scanpy as sc
                 meta = pd.read_csv(meta_table_path, sep='\t', index_col=0)
                 merged = pd.merge(meta, raw_counts, left_index=True, right_index=True, how='inner')
                 raw_counts = raw_counts.reindex(merged.index)
@@ -931,6 +946,8 @@ class XeniumReader(Reader):
     
 
     def __read_cache(self, cur_dir, dict):
+        import scanpy as sc
+        
         adata = sc.read_h5ad(os.path.join(cur_dir, 'cached_pseudo_visium.h5ad'))
         cached_metrics = json.load(open(os.path.join(cur_dir, 'cached_metrics.json')))
         dict['pixel_size_um_embedded'] = cached_metrics['pixel_size_um_embedded']
@@ -978,6 +995,8 @@ class XeniumReader(Reader):
     
     
     def __load_cells(self, feature_matrix_path, cells_path, alignment_file_path, pixel_size_morph, dict):
+        import scanpy as sc
+        
         cell_adata = sc.read_10x_h5(feature_matrix_path)
         df = pd.read_parquet(cells_path)
         df.set_index(cell_adata.obs_names, inplace=True)
@@ -1101,7 +1120,7 @@ def read_and_save(path: str, save_plots=True, pyramidal=True, bigtiff=False, plo
         st_object.save_spatial_plot(save_path)
     return st_object
         
-def xenium_to_pseudo_visium(df: pd.DataFrame, pixel_size_he: float, pixel_size_morph: float) -> sc.AnnData:
+def xenium_to_pseudo_visium(df: pd.DataFrame, pixel_size_he: float, pixel_size_morph: float) -> sc.AnnData: # type: ignore
     """Convert a xenium transcripts dataframe to a 10x Visium type spot grid with
     55um diameter spots 100um apart
 
@@ -1115,6 +1134,8 @@ def xenium_to_pseudo_visium(df: pd.DataFrame, pixel_size_he: float, pixel_size_m
     Returns:
         sc.AnnData: _description_
     """
+    import scanpy as sc
+
     # convert transcripts position from um to pixel
     df["x_location_pxl"] = df["x_location"] / pixel_size_morph
     df["y_location_pxl"] = df["y_location"] / pixel_size_morph

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import sys
 import traceback
@@ -11,7 +13,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import openslide
 import pandas as pd
-import scanpy as sc
 from loguru import logger
 from shapely import Polygon
 from shapely.affinity import translate
@@ -215,7 +216,9 @@ def read_seg(cells) -> gpd.GeoDataFrame:
     else:
         ValueError("cells must be either a path (str) or a GeoDataFrame, not ", type(cells))
         
-def read_adata(adata) -> sc.AnnData:
+def read_adata(adata) -> sc.AnnData: # type: ignore
+    import scanpy as sc
+    
     if isinstance(adata, sc.AnnData):
         return adata
     elif isinstance(adata, str):
@@ -583,7 +586,7 @@ def refine_with_anchor(
     gdf: gpd.GeoDataFrame, 
     anchor_gdf: gpd.GeoDataFrame, 
     pixel_size: float, 
-    img: Union[str, np.ndarray, openslide.OpenSlide, 'CuImage'], 
+    img: Union[str, np.ndarray, openslide.OpenSlide, CuImage],  # type: ignore
     patch_size_um=200,
     max_offset=5, 
     lower_cut=0.4, 

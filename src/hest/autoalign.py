@@ -5,9 +5,7 @@ from typing import Dict
 import cv2
 import matplotlib.collections as mc
 import matplotlib.patches as patches
-import matplotlib.pyplot as plt
 import numpy as np
-from kwimage.im_cv2 import imresize
 
 from hest.utils import get_path_relative
 
@@ -88,7 +86,7 @@ def _spots_to_file(path, dict):
 def _resize_to_target(img):
     TARGET_PIXEL_EDGE = 1000
     downscale_factor = TARGET_PIXEL_EDGE / np.max(img.shape)
-    downscaled_fullres = imresize(img, downscale_factor)
+    downscaled_fullres = cv2.resize(img, (round(img.shape[1] * downscale_factor), round(img.shape[0] * downscale_factor)))
     return downscaled_fullres, downscale_factor
 
 
@@ -100,6 +98,9 @@ def _alignment_plot_to_file(boxes_to_match,
                             aligned_fiducials,
                             img,
                             save_path):
+
+    import matplotlib.pyplot as plt
+
     fig, ax = plt.subplots()
 
     i = 0

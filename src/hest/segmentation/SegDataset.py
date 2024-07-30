@@ -5,7 +5,7 @@ from PIL import Image
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
-from hest.wsi import WSI, WSIPatcher
+from hest.wsi import WSIPatcher
 
 
 class SegFileDataset(Dataset):
