@@ -11,7 +11,7 @@ import geopandas as gpd
 import matplotlib
 import numpy as np
 
-from hest.io.seg_readers import (GeojsonCellReader, TissueContourReader,
+from hest.io.seg_readers import (TissueContourReader,
                                  write_geojson)
 from hest.LazyShapes import LazyShapes, convert_old_to_gpd
 from hest.segmentation.TissueMask import TissueMask, load_tissue_mask
