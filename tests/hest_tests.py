@@ -7,13 +7,13 @@ from hest import HESTData, read_HESTData
 from hest.autoalign import autoalign_visium
 from hest.readers import VisiumReader
 from hest.utils import get_path_relative, load_image
-from hest.wsi import WSI, warn_cucim, wsi_factory
+from hest.wsi import WSI, CucimWarningSingleton, wsi_factory
 
 try:
     from cucim import CuImage
 except ImportError:
     CuImage = None
-    warn_cucim()
+    CucimWarningSingleton.warn()
 
 
 class TestHESTReader(unittest.TestCase):

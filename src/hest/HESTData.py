@@ -15,7 +15,7 @@ from hest.io.seg_readers import (TissueContourReader,
                                  write_geojson)
 from hest.LazyShapes import LazyShapes, convert_old_to_gpd
 from hest.segmentation.TissueMask import TissueMask, load_tissue_mask
-from hest.wsi import WSI, NumpyWSI, warn_cucim, wsi_factory
+from hest.wsi import WSI, CucimWarningSingleton, NumpyWSI, wsi_factory
 
 try:
     import openslide
@@ -758,7 +758,7 @@ def read_HESTData(
         from cucim import CuImage
     except ImportError:
         CuImage = None
-        warn_cucim()
+        CucimWarningSingleton.warn()
 
     import scanpy as sc
 
