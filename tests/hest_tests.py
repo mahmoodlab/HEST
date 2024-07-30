@@ -5,13 +5,13 @@ from os.path import join as _j
 import hest
 from hest.autoalign import autoalign_visium
 from hest.readers import VisiumReader
-from hest.utils import get_path_relative, load_image
+from hest.utils import get_path_relative, load_image, warn_cucim
 
 try:
     from cucim import CuImage
 except ImportError:
     CuImage = None
-    print("CuImage is not available. Ensure you have a GPU and cucim installed to use GPU acceleration.")
+    warn_cucim()
 
 from hest import HESTData, read_HESTData
 from hest.utils import get_path_relative

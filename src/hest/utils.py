@@ -25,6 +25,13 @@ Image.MAX_IMAGE_PIXELS = 93312000000
 ALIGNED_HE_FILENAME = 'aligned_fullres_HE.tif'
 
 
+warned_cucim = False
+
+def warn_cucim():
+    if not warned_cucim:
+        warnings.warn("CuImage is not available. Ensure you have a GPU and cucim installed to use GPU acceleration.")
+        warned_cucim = True
+
 def deprecated(func):
     """This is a decorator which can be used to mark functions
     as deprecated. It will result in a warning being emitted
