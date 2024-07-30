@@ -7,7 +7,12 @@ import numpy as np
 import openslide
 from openslide.deepzoom import DeepZoomGenerator
 
-from hest.utils import warn_cucim
+warned_cucim = False
+
+def warn_cucim():
+    if not warned_cucim:
+        warnings.warn("CuImage is not available. Ensure you have a GPU and cucim installed to use GPU acceleration.")
+        warned_cucim = True
 
 
 def is_cuimage(img):

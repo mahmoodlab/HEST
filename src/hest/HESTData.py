@@ -15,7 +15,7 @@ from hest.io.seg_readers import (GeojsonCellReader, TissueContourReader,
                                  write_geojson)
 from hest.LazyShapes import LazyShapes, convert_old_to_gpd
 from hest.segmentation.TissueMask import TissueMask, load_tissue_mask
-from hest.wsi import WSI, NumpyWSI, wsi_factory
+from hest.wsi import WSI, NumpyWSI, warn_cucim, wsi_factory
 
 try:
     import openslide
@@ -33,7 +33,7 @@ from .segmentation.segmentation import (apply_otsu_thresholding,
                                         segment_tissue_deep)
 from .utils import (ALIGNED_HE_FILENAME, check_arg, deprecated,
                     find_first_file_endswith, get_path_from_meta_row,
-                    plot_verify_pixel_size, tiff_save, verify_paths, warn_cucim)
+                    plot_verify_pixel_size, tiff_save, verify_paths)
 from .vst_save_utils import initsave_hdf5
 
 

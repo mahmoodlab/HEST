@@ -5,7 +5,7 @@ from os.path import join as _j
 import hest
 from hest.autoalign import autoalign_visium
 from hest.readers import VisiumReader
-from hest.utils import get_path_relative, load_image, warn_cucim
+from hest.utils import get_path_relative, load_image
 
 try:
     from cucim import CuImage
@@ -15,7 +15,7 @@ except ImportError:
 
 from hest import HESTData, read_HESTData
 from hest.utils import get_path_relative
-from hest.wsi import WSI, wsi_factory
+from hest.wsi import WSI, warn_cucim, wsi_factory
 
 
 class TestHESTReader(unittest.TestCase):
