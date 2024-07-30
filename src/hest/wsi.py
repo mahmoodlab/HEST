@@ -7,6 +7,8 @@ import numpy as np
 import openslide
 from openslide.deepzoom import DeepZoomGenerator
 
+from hest.utils import warn_cucim
+
 
 def is_cuimage(img):
     return CuImage is not None and isinstance(img, CuImage) # type: ignore
@@ -48,7 +50,7 @@ def wsi_factory(img) -> WSI:
         from cucim import CuImage
     except ImportError:
         CuImage = None
-        print("CuImage is not available. Ensure you have a GPU and cucim installed to use GPU acceleration.")
+        warn_cucim()
     
     if isinstance(img, WSI):
         return img

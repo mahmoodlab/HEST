@@ -33,7 +33,7 @@ from .segmentation.segmentation import (apply_otsu_thresholding,
                                         segment_tissue_deep)
 from .utils import (ALIGNED_HE_FILENAME, check_arg, deprecated,
                     find_first_file_endswith, get_path_from_meta_row,
-                    plot_verify_pixel_size, tiff_save, verify_paths)
+                    plot_verify_pixel_size, tiff_save, verify_paths, warn_cucim)
 from .vst_save_utils import initsave_hdf5
 
 
@@ -758,7 +758,7 @@ def read_HESTData(
         from cucim import CuImage
     except ImportError:
         CuImage = None
-        print("CuImage is not available. Ensure you have a GPU and cucim installed to use GPU acceleration.")
+        warn_cucim()
 
     import scanpy as sc
 

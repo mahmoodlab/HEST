@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
+from hest.io.seg_readers import read_gdf
 from hest.segmentation.cell_segmenters import segment_cellvit
 
 from .autoalign import autoalign_visium
@@ -1193,7 +1194,7 @@ def xenium_to_pseudo_visium(df: pd.DataFrame, pixel_size_he: float, pixel_size_m
     return adata
 
 
-def process_meta_df(meta_df, save_spatial_plots=True, pyramidal=True, save_img=True, cellvit=False, depr_seg=False):
+def process_meta_df(meta_df, save_spatial_plots=True, pyramidal=True, save_img=True, cellvit=False, depr_seg=True):
     """Internal use method, process all the raw ST data in the meta_df"""
     for _, row in tqdm(meta_df.iterrows(), total=len(meta_df)):
         path = get_path_from_meta_row(row)
@@ -1229,6 +1230,10 @@ def _process_cellvit(available_gpus, available_gpus_lock, row, dest):
     src_cell_path = segment_cellvit(wsi_path, row['id'], meta['pixel_size_um_estimated'], gpu=gpu_id)
     dst_cell_path = os.path.join(path, 'processed', 'cellvit_seg.geojson')
     shutil.copy(src_cell_path, dst_cell_path)
+    
+    gdf = read_gdf(dst_cell_path)
+    dst_parquet_path = os.path.join(path, 'processed', row['id'] + '_cellvit_seg.parquet')
+    gdf.to_parquet(dst_parquet_path)
     
     archive_path = os.path.join(path, 'processed', f'cellvit_seg.zip')
     
