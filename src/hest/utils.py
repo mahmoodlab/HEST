@@ -24,6 +24,16 @@ from hest.wsi import WSI, NumpyWSI, WSIPatcher, wsi_factory
 Image.MAX_IMAGE_PIXELS = 93312000000
 ALIGNED_HE_FILENAME = 'aligned_fullres_HE.tif'
 
+def value_error_str(obj, name):
+    return f'Unrecognized type for argument `{name}` got {obj}'
+
+
+def get_name_datetime() -> str:
+    current_date = datetime.now()
+
+    name = current_date.strftime("%Y_%m_%d_%H_%M_%S")
+    
+    return name
 
 def deprecated(func):
     """This is a decorator which can be used to mark functions

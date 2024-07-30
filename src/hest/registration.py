@@ -8,7 +8,7 @@ from shapely import Polygon
 from tqdm import tqdm
 
 from hest.io.seg_readers import read_gdf
-from hest.utils import get_name_datetime, value_error_str, verify_paths_exist
+from hest.utils import get_name_datetime, value_error_str
 
 
 def register_dapi_he(
