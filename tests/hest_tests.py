@@ -1,26 +1,19 @@
 import os
 import unittest
 from os.path import join as _j
-from typing import List
 
-import anndata as ad
-import openslide
-import pyvips
-import scanpy as sc
-
+import hest
+from hest import HESTData, read_HESTData
 from hest.autoalign import autoalign_visium
 from hest.readers import VisiumReader
 from hest.utils import get_path_relative, load_image
+from hest.wsi import WSI, CucimWarningSingleton, wsi_factory
 
 try:
     from cucim import CuImage
 except ImportError:
     CuImage = None
-    print("CuImage is not available. Ensure you have a GPU and cucim installed to use GPU acceleration.")
-
-from hest import HESTData, read_HESTData
-from hest.utils import get_path_relative
-from hest.wsi import WSI, wsi_factory
+    CucimWarningSingleton.warn()
 
 
 class TestHESTReader(unittest.TestCase):
@@ -100,81 +93,65 @@ class TestHESTData(unittest.TestCase):
         self.cur_dir = get_path_relative(__file__, '')
         cur_dir = self.cur_dir
         self.output_dir = _j(cur_dir, 'output_tests/hestdata_tests')
+        os.makedirs(self.output_dir, exist_ok=True)
         
-        # Create an instance of HESTData
-        adata = sc.read_h5ad(_j(cur_dir, './assets/SPA154.h5ad'))
-        pixel_size = 0.9206
+        id_list = ['TENX24', 'SPA154', 'TENX96', 'TENX131']
         
-        self.st_objects: List[HESTData] = []
-                    
-        
-        if CuImage is not None:
-            img = CuImage(_j(cur_dir, './assets/SPA154.tif'))
-        else:
-            img = openslide.OpenSlide(_j(cur_dir, './assets/SPA154.tif'))
-        self.st_objects.append({'name': 'numpy', 'st': HESTData(adata, img, pixel_size)})
-        
-        if CuImage is not None:
-            img = wsi_factory(CuImage(_j(cur_dir, './assets/SPA154.tif'))).numpy()
-            self.st_objects.append({'name': 'cuimage', 'st': HESTData(adata, img, pixel_size)})
-        else:
-            img = wsi_factory(openslide.OpenSlide(_j(cur_dir, './assets/SPA154.tif'))).numpy()
-            self.st_objects.append({'name': 'openslide', 'st': HESTData(adata, img, pixel_size)})    
-        
-    
-    def read_hestdata(self):
-        cur_dir = self.cur_dir
-        
-        st = read_HESTData(
-            adata_path=_j(cur_dir, './assets/SPA154.h5ad'),
-            img=_j(cur_dir, './assets/SPA154.tif'), 
-            metrics_path=_j(cur_dir, './assets/SPA154.json'),
-            mask_path_pkl=_j(cur_dir, './assets/SPA154_mask.pkl'),
-            mask_path_jpg=_j(cur_dir, './assets/SPA154_mask.jpg')
-        )
-        
-        os.makedirs(_j(self.output_dir, 'read_hestdata'), exist_ok=True)
-        st.dump_patches(_j(self.output_dir, 'read_hestdata'))
-        
-    
-        
-    def load_wsi(self):
-        for idx, st in enumerate(self.st_objects):
-            st = st['st']
-            with self.subTest(st_object=idx):
-                st.load_wsi()
+        self.sts = hest.load_hest('hest_data', id_list)
+
         
     def test_tissue_seg(self):
-        for idx, st in enumerate(self.st_objects):
-            st = st['st']
+        for idx, st in enumerate(self.sts):
             with self.subTest(st_object=idx):
                 st.segment_tissue(method='deep')
+                st.save_tissue_contours(self.output_dir, name=f'deep_{idx}')
                 st.save_tissue_seg_jpg(self.output_dir, name=f'deep_{idx}')
                 st.save_tissue_seg_pkl(self.output_dir, name=f'deep_{idx}')
-                st.save_vis(self.output_dir, name=f'deep_{idx}')
+                st.save_tissue_vis(self.output_dir, name=f'deep_{idx}')
                 
                 st.segment_tissue(method='otsu')
+                st.save_tissue_contours(self.output_dir, name=f'otsu_{idx}')
                 st.save_tissue_seg_jpg(self.output_dir, name=f'otsu_{idx}')
                 st.save_tissue_seg_pkl(self.output_dir, name=f'otsu_{idx}')
-                st.save_vis(self.output_dir, name=f'otsu_{idx}')
+                st.save_tissue_vis(self.output_dir, name=f'otsu_{idx}')
 
-    def test_patching(self):
-        for idx, conf in enumerate(self.st_objects):
-            st = conf['st']
+
+    def test_spatialdata(self):
+        for idx, st in enumerate(self.sts):
             with self.subTest(st_object=idx):
                 name = ''
-                name += conf['name']
-                st.dump_patches(self.output_dir, name=name)
+                name += st.meta['id']
+                spd = st.to_spatial_data()
+                print(spd)
 
-    def test_wsi(self):
-        for idx, st in enumerate(self.st_objects):
-            st = st['st']
-            with self.subTest(st_object=idx):
-                os.makedirs(_j(self.output_dir, f'test_save_{idx}'), exist_ok=True)
-                st.meta['pixel_size_um_embedded'] = st.pixel_size / 1.5
-                st.meta['pixel_size_um_estimated'] = st.pixel_size
-                st.save(_j(self.output_dir, f'test_save_{idx}'), save_img=True, plot_pxl_size=True)
+
+    def test_patching(self):
+       for idx, st in enumerate(self.sts):
+           with self.subTest(st_object=idx):
+               name = ''
+               name += st.meta['id']
+               st.dump_patches(self.output_dir, name=name)
+               
+               
+    def test_saving(self):
+       for idx, st in enumerate(self.sts):
+           with self.subTest(st_object=idx):
+               name = ''
+               name += st.meta['id']
+               st.save(os.path.join(self.output_dir, f'test_save_{name}'), save_img=False)
+
+    #def test_wsi(self):
+    #    for idx, st in enumerate(self.sts):
+    #        with self.subTest(st_object=idx):
+    #            os.makedirs(_j(self.output_dir, f'test_save_{idx}'), exist_ok=True)
+    #            st.meta['pixel_size_um_embedded'] = st.pixel_size / 1.5
+    #            st.meta['pixel_size_um_estimated'] = st.pixel_size
+    #            st.save(_j(self.output_dir, f'test_save_{idx}'), save_img=True, plot_pxl_size=True)
 
 
 if __name__ == '__main__':
-    unittest.main()
+    #TestHESTReader()
+    
+    loader = unittest.TestLoader()
+    suite = loader.loadTestsFromTestCase(TestHESTData)
+    unittest.TextTestRunner(verbosity=2).run(suite)

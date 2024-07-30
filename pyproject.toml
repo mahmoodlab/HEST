@@ -13,7 +13,6 @@ dependencies = [
     "ultralytics >= 8.2.4",
     "pyvips >= 2.2.3",
     "scanpy >= 1.10.1",
-    "kwimage >= 0.9.25",
     "imagecodecs >= 2024.1.1",
     "loguru >= 0.7.2",
     "timm >= 0.9.16",
@@ -27,7 +26,8 @@ dependencies = [
     "spatialdata >= 0.1.2",
     "dask >= 2024.2.1",
     "spatial_image >= 0.3.0",
-    "datasets"
+    "datasets",
+    "mygene"
 ]
 
 requires-python = ">=3.9"
