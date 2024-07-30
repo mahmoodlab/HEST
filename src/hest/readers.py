@@ -100,6 +100,8 @@ class VisiumHDReader(Reader):
         
     
     def __bin_to_128um(self, adata: sc.AnnData, pixel_size: float) -> sc.AnnData: # type: ignore
+        import scanpy as sc
+        
         y_max = adata.obs['pxl_row_in_fullres'].max()
         y_min = adata.obs['pxl_row_in_fullres'].min()
         x_max = adata.obs['pxl_col_in_fullres'].max()
@@ -175,6 +177,8 @@ class VisiumHDReader(Reader):
         img_filename = find_biggest_img(path)
         
         square_16um_path = find_first_file_endswith(path, 'square_016um')
+        if square_16um_path is None:
+            square_16um_path = find_first_file_endswith(os.path.join(path, 'binned_outputs'), 'square_016um')
         
         metrics_path = find_first_file_endswith(path, 'metrics_summary.csv')
         
@@ -195,7 +199,7 @@ class VisiumHDReader(Reader):
     ) -> VisiumHDHESTData:
         import scanpy as sc
         
-        img, pixel_size_embedded = load_image(img_path)
+        img, pixel_size_embedded = load_wsi(img_path)
         
         spatial_path = find_first_file_endswith(square_16um_path, 'spatial')
         tissue_positions_path = find_first_file_endswith(spatial_path, 'tissue_positions.parquet')
@@ -809,7 +813,7 @@ class STReader(Reader):
         custom_adata=None
     ) -> STHESTData:
         #raw_counts = pd.read_csv(raw_counts_path, sep='\t')
-        img, pixel_size_embedded = load_image(img_path)
+        img, pixel_size_embedded = load_wsi(img_path)
         
         if custom_adata is not None:
             adata = custom_adata
