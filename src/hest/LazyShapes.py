@@ -8,6 +8,8 @@ from hest.utils import verify_paths
 
 class LazyShapes:
     
+    path: str = None
+    
     def __init__(self, path: str, name: str, coordinate_system: str):
         verify_paths([path])
         self.path = path
