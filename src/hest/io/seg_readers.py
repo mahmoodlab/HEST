@@ -1,20 +1,17 @@
 import json
-from abc import abstractmethod
 import warnings
+from abc import abstractmethod
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-from loguru import logger
 from matplotlib import pyplot as plt
-from shapely.geometry.polygon import Polygon, Point
+from shapely.geometry.polygon import Point, Polygon
 from tqdm import tqdm
-
-from hest.utils import align_xenium_df, df_morph_um_to_pxl
 
 
 def _process(x, extra_props, index_key, class_name):
-    from shapely.geometry.polygon import Polygon, Point
+    from shapely.geometry.polygon import Point, Polygon
     
     geom_type = x['geometry']['type']
     if geom_type == 'MultiPoint':
@@ -46,7 +43,7 @@ def _process(x, extra_props, index_key, class_name):
     return gdf
 
 
-def read_geojson(path, class_name=None, extra_props=False, index_key=None) -> gpd.GeoDataFrame:
+def _read_geojson(path, class_name=None, extra_props=False, index_key=None) -> gpd.GeoDataFrame:
     with open(path) as f:
         ls = json.load(f)
         
@@ -59,13 +56,13 @@ def read_geojson(path, class_name=None, extra_props=False, index_key=None) -> gp
     return gdf
 
 
-class CellReader:
+class GDFReader:
     @abstractmethod
     def read_gdf(self, path) -> gpd.GeoDataFrame:
         pass
     
 
-class XeniumParquetCellReader(CellReader):
+class XeniumParquetCellReader(GDFReader):
     
     def read_gdf(self, path) -> gpd.GeoDataFrame:    
         
@@ -83,101 +80,30 @@ class XeniumParquetCellReader(CellReader):
         return gdf
 
 
-class GDFParquetCellReader(CellReader):
+class GDFParquetCellReader(GDFReader):
     
     def read_gdf(self, path) -> gpd.GeoDataFrame:
         return gpd.read_parquet(path)
 
-class GeojsonCellReader(CellReader):
 
-    def read(self, path) -> pd.DataFrame:
-        j = 0
-        with open(path) as f:
-            ls = json.load(f)
-            sub_dfs = []
-            for x in ls:
-                acc = []
-                coords_ls = []
-                for i in tqdm(range(len(x['geometry']['coordinates']))):
-                    coords = np.array(x['geometry']['coordinates'][i][0])
-                    ids = np.array([j for _ in range(coords.shape[0])])
-                    acc.append(ids)
-                    coords_ls.append(coords)
-                    j += 1
-                acc = np.array([item for sublist in acc for item in sublist])
-                coords = np.vstack(coords_ls)
-                name = x['properties']['classification']['name']
-                sub_dfs.append(pd.DataFrame(np.column_stack((acc, coords, [name for _ in range(coords.shape[0])])), columns=['cell_id', 'x', 'y', 'class']))
-            df = pd.concat(sub_dfs, ignore_index=True)
-            
-        return df
+class GeojsonCellReader(GDFReader):
     
-    def read_gdf(self, path, class_name=None, extra_props=False, index_key=None) -> gpd.GeoDataFrame:
-        gdf = read_geojson(path, class_name, extra_props, index_key)
+    def read_gdf(self, path) -> gpd.GeoDataFrame:
+        gdf = _read_geojson(path)
         gdf['cell_id'] = np.arange(len(gdf))
             
         return gdf
     
-    
-class XeniumPolygonCellReader(CellReader):
 
-    def read_gdf(self, path, pixel_size_morph, alignment_path=None) -> gpd.GeoDataFrame:
-        df = pd.read_parquet(path)
+class TissueContourReader(GDFReader):
+
+    def read_gdf(self, path) -> gpd.GeoDataFrame:
         
-        x_key = 'vertex_x'
-        y_key = 'vertex_y'
-        
-        if alignment_path is not None:  
-            df, _, _ = align_xenium_df(alignment_path, pixel_size_morph, df, x_key=x_key, y_key=y_key)
-        aligned_nuclei_df = df_morph_um_to_pxl(df, x_key, y_key, pixel_size_morph)
-        
-        
-        df = aligned_nuclei_df
+        gdf = _read_geojson(path, class_name='tissue_id', index_key='hole')
             
-        
-        df['vertex_x'] = df['vertex_x'].astype(float).round(decimals=2)
-        df['vertex_y'] = df['vertex_y'].astype(float).round(decimals=2)
-        
-        df['combined'] = df[['vertex_x', 'vertex_y']].values.tolist()
-        df = df[['cell_id', 'combined']]
-        
-        #df['cell_id'], _ = pd.factorize(df['cell_id'])
-        aggr_df = df.groupby('cell_id').agg({
-            'combined': Polygon
-            }
-        )
-        
-        gdf = gpd.GeoDataFrame(aggr_df, geometry='combined')
-
         return gdf
     
-    
-class XeniumPointCellReader(CellReader):
 
-    def read_gdf(self, path, pixel_size_morph, alignment_path=None) -> gpd.GeoDataFrame:
-        df = pd.read_parquet(path)
-        
-        x_key = 'x_centroid'
-        y_key = 'y_centroid'
-        
-        if alignment_path is not None:  
-            df, _, _ = align_xenium_df(alignment_path, pixel_size_morph, df, x_key=x_key, y_key=y_key)
-        aligned_nuclei_df = df_morph_um_to_pxl(df, x_key, y_key, pixel_size_morph)
-        
-        coords = aligned_nuclei_df.copy()
-        coords.index = df['cell_id']
-        points = gpd.points_from_xy(coords['x_centroid'], coords['y_centroid'])
-        
-        gdf = gpd.GeoDataFrame(df, geometry=points)
-        return gdf
-    
-    
-class CellWriter:
-    
-    @abstractmethod
-    def write(gdf: gpd.GeoDataFrame, path: str) -> None:
-        pass
-    
 def write_geojson(gdf: gpd.GeoDataFrame, path: str, category_key: str, extra_prop=False, uniform_prop=True, index_key: str=None) -> None:
         
     if isinstance(gdf.geometry.iloc[0], Point):
@@ -260,7 +186,7 @@ def read_parquet_schema_df(path: str) -> pd.DataFrame:
     The returned dataframe has the columns: column, pa_dtype
     """
     import pyarrow.parquet
-    
+
     # Ref: https://stackoverflow.com/a/64288036/
     schema = pyarrow.parquet.read_schema(path, memory_map=True)
     schema = pd.DataFrame(({"column": name, "pa_dtype": str(pa_dtype)} for name, pa_dtype in zip(schema.names, schema.types)))
@@ -268,7 +194,7 @@ def read_parquet_schema_df(path: str) -> pd.DataFrame:
     return schema
     
     
-def cell_reader_factory(path) -> CellReader:
+def cell_reader_factory(path) -> GDFReader:
     if path.endswith('.geojson'):
         return GeojsonCellReader()
     elif path.endswith('.parquet'):

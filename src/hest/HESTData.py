@@ -10,7 +10,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 
-from hest.io.seg_readers import GeojsonCellReader, write_geojson
+from hest.io.seg_readers import GeojsonCellReader, TissueContourReader, write_geojson
 
 try:
     from cucim import CuImage
@@ -746,6 +746,9 @@ def read_HESTData(
         metrics_path (str): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
         mask_path_pkl (str): *Deprecated* path to a .pkl file containing the tissue segmentation contours. Defaults to None.
         mask_path_jpg (str): *Deprecated* path to a .jog file containing the greyscale tissue segmentation mask. Defaults to None.
+        cellvit_path (str): path to a cell segmentation file in .geojson or .parquet. Defaults to None,
+        tissue_contours_path (str): path to a .geojson tissue contours file. Defaults to None
+
 
     Returns:
         HESTData: HESTData object
@@ -763,7 +766,7 @@ def read_HESTData(
     tissue_contours = None
     tissue_seg = None
     if tissue_contours_path is not None:
-        tissue_contours = GeojsonCellReader().read_gdf(tissue_contours_path, index_key='hole', class_name='tissue_id')
+        tissue_contours = TissueContourReader().read_gdf(tissue_contours_path)
         tissue_contours['tissue_id'] = tissue_contours['tissue_id'].astype(int)
     elif mask_path_pkl is not None and mask_path_jpg is not None:
         tissue_seg = load_tissue_mask(mask_path_pkl, mask_path_jpg, width, height)
@@ -876,6 +879,8 @@ def load_hest(hest_dir: str, id_list: List[str] = None) -> List[HESTData]:
     if id_list is not None and (not(isinstance(id_list, list) or isinstance(id_list, np.ndarray))):
         raise ValueError('id_list must a list or a numpy array')
     
+    warned = False
+    
     hestdata_list = []
     warnings.filterwarnings("ignore", message="invalid value encountered in divide")
     
@@ -902,8 +907,13 @@ def load_hest(hest_dir: str, id_list: List[str] = None) -> List[HESTData]:
 
         cellvit_path = None
         if os.path.exists(os.path.join(hest_dir, 'cellvit_seg')):
-            cellvit_path = os.path.join(hest_dir, 'cellvit_seg', f'{id}_cellvit_seg.geojson')
-            
+            cellvit_path = find_first_file_endswith(os.path.join(hest_dir, 'cellvit_seg'), f'{id}_cellvit_seg.parquet')
+            if cellvit_path is None:
+                cellvit_path = find_first_file_endswith(os.path.join(hest_dir, 'cellvit_seg'), f'{id}_cellvit_seg.geojson')
+                if cellvit_path is not None and not warned:
+                    warnings.warn(f'reading the cell segmentation as .geojson can be slow, download the .parquet cells for faster loading https://huggingface.co/datasets/MahmoodLab/hest')
+                    warned = True
+                        
         st = read_HESTData(
             adata_path, 
             img_path, 
