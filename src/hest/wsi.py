@@ -1,19 +1,15 @@
+import warnings
 from abc import abstractmethod
 from typing import Tuple
+
 import cv2
 import numpy as np
 import openslide
-import warnings
-try:
-    from cucim import CuImage
-except ImportError:
-    CuImage = None
-    print("CuImage is not available. Ensure you have a GPU and cucim installed to use GPU acceleration.")
-
 from openslide.deepzoom import DeepZoomGenerator
 
+
 def is_cuimage(img):
-    return CuImage is not None and isinstance(img, CuImage)
+    return CuImage is not None and isinstance(img, CuImage) # type: ignore
 
 
 class WSI:
@@ -48,6 +44,12 @@ class WSI:
     
 
 def wsi_factory(img) -> WSI:
+    try:
+        from cucim import CuImage
+    except ImportError:
+        CuImage = None
+        print("CuImage is not available. Ensure you have a GPU and cucim installed to use GPU acceleration.")
+    
     if isinstance(img, WSI):
         return img
     elif isinstance(img, openslide.OpenSlide):

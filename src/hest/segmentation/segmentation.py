@@ -1,21 +1,17 @@
+from __future__ import annotations
+
 import pickle
 from functools import partial
 from typing import Union
 
 import cv2
-import pandas as pd
-from shapely import Polygon
-import torch.nn.functional as F
 import numpy as np
-import torch
+import pandas as pd
 from geopandas import gpd
 from huggingface_hub import snapshot_download
 from PIL import Image
-from torch import nn
-from torch.utils.data import DataLoader
-from torchvision import transforms
+from shapely import Polygon
 
-from hest.segmentation.SegDataset import SegWSIDataset
 from hest.utils import deprecated, get_path_relative
 from hest.wsi import WSI, WSIPatcher, wsi_factory
 
@@ -23,23 +19,11 @@ try:
     import openslide
 except Exception:
     print("Couldn't import openslide, verify that openslide is installed on your system, https://openslide.org/download/")
-import scanpy as sc
-import skimage.color as sk_color
-import skimage.filters as sk_filters
-import skimage.measure as sk_measure
-import skimage.morphology as sk_morphology
-
-try:
-    from cucim import CuImage
-except ImportError:
-    CuImage = None
-    print("CuImage is not available. Ensure you have a GPU and cucim installed to use GPU acceleration.")
-
 from tqdm import tqdm
 
 
 def segment_tissue_deep(
-    wsi: Union[np.ndarray, openslide.OpenSlide, 'CuImage', WSI],
+    wsi: Union[np.ndarray, openslide.OpenSlide, CuImage, WSI], # type: ignore
     pixel_size: float,
     fast_mode=False,
     target_pxl_size=1,
@@ -66,6 +50,12 @@ def segment_tissue_deep(
     Returns:
         gpd.GeoDataFrame: a geodataframe of the tissue contours, contains a column `tissue_id` indicating to which tissue the contour belongs to
     """
+    import torch
+    from torch import nn
+    from torch.utils.data import DataLoader
+    from torchvision import transforms
+    from hest.segmentation.SegDataset import SegWSIDataset
+    
     pixel_size_src = pixel_size
     
     if fast_mode and target_pxl_size == 1:
@@ -228,7 +218,7 @@ def contours_to_img(
 
 
 def get_tissue_vis(
-            img: Union[np.ndarray, openslide.OpenSlide, 'CuImage', WSI],
+            img: Union[np.ndarray, openslide.OpenSlide, CuImage, WSI],
             tissue_contours: gpd.GeoDataFrame,
             line_color=(0, 255, 0),
             line_thickness=5,
@@ -336,6 +326,10 @@ def apply_otsu_thresholding(tile: np.ndarray) -> np.ndarray:
     Returns:
         np.ndarray: Binary mask with shape (height, width)
     """
+    import skimage.color as sk_color
+    import skimage.filters as sk_filters
+    import skimage.measure as sk_measure
+    import skimage.morphology as sk_morphology
 
     # this is to remove the black border padding in some images
     black_pixels = np.all(tile == [0, 0, 0], axis=-1)
