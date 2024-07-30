@@ -9,7 +9,7 @@ from hest.readers import XeniumReader
 from hest.registration import register_dapi_he, warp
 from hest.subtyping.atlas import get_atlas_from_name
 from hest.subtyping.subtyping import assign_cell_types
-from hest.utils import get_name_datetime
+from hest.utils import get_name_datetime, verify_paths
 
 
 def process_xenium(
@@ -32,10 +32,16 @@ def process_xenium(
     
     gdf = None
     
-    data_dir = config_dict['data_dir']
-    st = load_hest('hest_data', id_list=['TENX95'])[0]
-    gdf = st.shapes
+    if 'data_dir' in config_dict:
+        data_dir = config_dict['data_dir']
+        raise NotImplementedError()
+    elif 'hest_id' in config_dict:
+        hest_dir = config_dict.get('hest_dir', 'hest_data')
+        verify_paths([hest_dir])
+        
+        st = load_hest(hest_dir, id_list=[config_dict['hest_id']])[0]
     
+    gdf = st.shapes[0].shapes
     
     if 'registration' in config_dict:
         reg_dict = config_dict['registration']
@@ -53,7 +59,7 @@ def process_xenium(
         
         path_registrar = 'results/process_xenium/test_2024_07_23_13_14_17/data/_registrar.pickle'
         
-        gdf = warp(
+        gdf = warp( # TODO need some optimization
             gdf,
             path_registrar=path_registrar
         )
@@ -68,7 +74,7 @@ def process_xenium(
         
         subtyping_dict = config_dict['cell_subtyping']
         
-        cell_adata = sc.read_10x_h5ad(subtyping_dict['cell_counts'])
+        cell_adata = sc.read_10x_h5(subtyping_dict['cell_counts'])
         atlas_name = subtyping_dict['atlas_name']
         method = subtyping_dict['method']
         

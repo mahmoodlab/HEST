@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
+from hest.LazyShapes import LazyShapes
 from hest.io.seg_readers import read_gdf
 from hest.segmentation.cell_segmenters import segment_cellvit
 
@@ -1048,8 +1049,11 @@ class XeniumReader(Reader):
             pixel_size_morph = dict_exp['pixel_size']
         dict = {**dict, **dict_exp}
         
-        #if cell_bound_path is not None:
-        #    xenium_cell_seg = self.__load_seg(cell_bound_path, 'Cell', alignment_file_path, pixel_size_morph)
+        shapes = []
+        if cell_bound_path is not None:
+            xenium_cell_seg = LazyShapes('cell_bound_path', 'xenium_cell', 'LazyShapes')
+            #self.__load_seg(cell_bound_path, 'Cell', alignment_file_path, pixel_size_morph)
+        
         #if nucleus_bound_path is not None:
         #    xenium_nuc_seg =  self.__load_seg(nucleus_bound_path, 'Nucleus', alignment_file_path, pixel_size_morph)
         
@@ -1070,7 +1074,7 @@ class XeniumReader(Reader):
             cell_adata, dict = self.__load_cells(feature_matrix_path, cells_path, alignment_file_path, pixel_size_morph, dict)
 
         register_downscale_img(adata, img, dict['pixel_size_um_estimated'])
-            
+        
             
         st_object = XeniumHESTData(
             adata, 
@@ -1078,9 +1082,7 @@ class XeniumReader(Reader):
             dict['pixel_size_um_estimated'], 
             dict, 
             transcript_df=df_transcripts,
-            cell_adata=cell_adata,
-            #xenium_nuc_seg=xenium_nuc_seg,
-            #xenium_cell_seg=xenium_cell_seg
+            cell_adata=cell_adata
         )
         return st_object
     
