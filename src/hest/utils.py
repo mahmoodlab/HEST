@@ -1,34 +1,49 @@
+from __future__ import annotations
+
 import concurrent.futures
+import functools
 import gzip
 import json
 import os
 import shutil
+import warnings
 from enum import Enum
 from typing import List, Tuple, Union
 
-import h5py
-import matplotlib.pyplot as plt
 import cv2
 import numpy as np
 import pandas as pd
-
-from hest.wsi import WSIPatcher, wsi_factory
-
-try:
-    import pyvips
-except Exception:
-    print("Couldn't import pyvips, verify that libvips is installed on your system")
-import scanpy as sc
 import tifffile
-from kwimage.im_cv2 import imresize
 from packaging import version
 from PIL import Image
 from scipy import sparse
-from sklearn.neighbors import KDTree
 from tqdm import tqdm
+
+from hest.wsi import WSI, NumpyWSI, WSIPatcher, wsi_factory
 
 Image.MAX_IMAGE_PIXELS = 93312000000
 ALIGNED_HE_FILENAME = 'aligned_fullres_HE.tif'
+
+
+def deprecated(func):
+    """This is a decorator which can be used to mark functions
+    as deprecated. It will result in a warning being emitted
+    when the function is used."""
+    @functools.wraps(func)
+    def new_func(*args, **kwargs):
+        warnings.simplefilter('always', DeprecationWarning)  # turn off filter
+        warnings.warn("Call to deprecated function {}.".format(func.__name__),
+                      category=DeprecationWarning,
+                      stacklevel=2)
+        warnings.simplefilter('default', DeprecationWarning)  # reset filter
+        return func(*args, **kwargs)
+    return new_func
+
+
+def verify_paths(paths, suffix=""):
+    for path in paths:
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"No such file or directory: {path}" + suffix)
 
 
 def geojson_to_map(geojson: dict, width, height, color=None):
@@ -75,7 +90,7 @@ def to_instance_map(img, cells_mask, save_dir, target_pixel_size, src_pixel_size
     for row in tqdm(range(rows)):
         for col in range(cols):
             tile, pxl_x, pxl_y = patcher.get_tile(col, row)
-            mask = cells_mask.read_region((pxl_x, pxl_y), (patch_size_pxl, patch_size_pxl))
+            mask = cells_mask.read_region((pxl_x, pxl_y), 0, (patch_size_pxl, patch_size_pxl))
             mask = mask[:, :, 0]
             mask = cv2.resize(mask, (target_patch_size, target_patch_size), interpolation=cv2.INTER_NEAREST)
             
@@ -290,10 +305,13 @@ def compare_meta_df(meta_df1, meta_df2):
     return list(diff1), list(diff2)
 
 
-def normalize_adata(adata: sc.AnnData, scale=1e6, smooth=False) -> sc.AnnData:
+def normalize_adata(adata: AnnData, scale=1e6, smooth=False) -> AnnData: # type: ignore
     """
     Normalize each spot by total gene counts + Logarithmize each spot
     """
+    
+    import scanpy as sc
+    
     filtered_adata = adata.copy()
     
     if smooth:
@@ -354,6 +372,8 @@ def get_k_genes_from_df(meta_df: pd.DataFrame, k: int, criteria: str, save_dir: 
     Returns:
         List[str]: k genes according to the criteria
     """
+    import scanpy as sc
+    
     adata_list = []
     for _, row in meta_df.iterrows():
         id = row['id']
@@ -362,7 +382,7 @@ def get_k_genes_from_df(meta_df: pd.DataFrame, k: int, criteria: str, save_dir: 
     return get_k_genes(adata_list, k, criteria, save_dir=save_dir)
 
 
-def get_k_genes(adata_list: List[sc.AnnData], k: int, criteria: str, save_dir: str=None, min_cells_pct=0.10) -> List[str]:
+def get_k_genes(adata_list: List[sc.AnnData], k: int, criteria: str, save_dir: str=None, min_cells_pct=0.10) -> List[str]: # type: ignore
     """Get the k genes according to some criteria across common genes in all the samples in the adata list
 
     Args:
@@ -377,6 +397,7 @@ def get_k_genes(adata_list: List[sc.AnnData], k: int, criteria: str, save_dir: s
     Returns:
         List[str]: k genes according to the criteria
     """
+    import scanpy as sc
     
     check_arg(criteria, 'criteria', ['mean', 'var'])
     
@@ -464,6 +485,8 @@ def get_path_from_meta_row(row):
 
     
 def create_joined_gene_plots(meta, gene_plot=False):
+    import matplotlib.pyplot as plt
+
     # determine common genes
     if gene_plot:
         plot_dir = 'gene_plots'
@@ -507,6 +530,8 @@ def create_joined_gene_plots(meta, gene_plot=False):
 
 
 def split_join_adata_by_col(path, adata_path, col):
+    import scanpy as sc
+    
     adata = sc.read_h5ad(os.path.join(path, adata_path))
     samples = np.unique(adata.obs[col])
     for sample in samples:
@@ -522,6 +547,7 @@ def split_join_adata_by_col(path, adata_path, col):
             
             
 def pool_xenium_by_cell(dir_path: str, cellvit_geojson: pd.DataFrame, pixel_size) -> sc.AnnData:
+    from sklearn.neighbors import KDTree
     
     with open(cellvit_geojson) as f:
         arr = json.load(f)    
@@ -603,6 +629,39 @@ def _get_nan(cell, col_name):
         return ''
     else:
         return val
+    
+    
+def get_col_selection():
+    cols = [
+        'dataset_title',
+        'id',
+        'image_filename',
+        'organ',
+        'disease_state',
+        'oncotree_code',
+        'species',
+        'patient',
+        'st_technology',
+        'data_publication_date',
+        'license',
+        'study_link',
+        'download_page_link1',
+        'inter_spot_dist',
+        'spot_diameter',
+        'spots_under_tissue',
+        'preservation_method',
+        'nb_genes',
+        'treatment_comment',
+        'pixel_size_um_embedded', 
+        'pixel_size_um_estimated', 
+        'magnification',
+        'fullres_px_width',
+        'fullres_px_height',
+        'tissue',
+        'disease_comment',
+        'subseries'
+    ]
+    return cols
         
 
 def create_meta_release(meta_df: pd.DataFrame, version: version.Version) -> None:
@@ -681,35 +740,7 @@ def create_meta_release(meta_df: pd.DataFrame, version: version.Version) -> None
     if os.path.exists(release_path):
         raise Exception(f'meta already exists at path {release_path}')
     
-    release_col_selection = [
-        'dataset_title',
-        'id',
-        'image_filename',
-        'organ',
-        'disease_state',
-        'oncotree_code',
-        'species',
-        'patient',
-        'st_technology',
-        'data_publication_date',
-        'license',
-        'study_link',
-        'download_page_link1',
-        'inter_spot_dist',
-        'spot_diameter',
-        'spots_under_tissue',
-        'preservation_method',
-        'nb_genes',
-        'treatment_comment',
-        'pixel_size_um_embedded', 
-        'pixel_size_um_estimated', 
-        'magnification',
-        'fullres_px_width',
-        'fullres_px_height',
-        'tissue',
-        'disease_comment',
-        'subseries'
-    ]
+    release_col_selection = get_col_selection()
     #release_col_selection += metric_subset
     meta_df = meta_df[release_col_selection]
     meta_df = meta_df[meta_df['pixel_size_um_estimated'].isna() | meta_df['pixel_size_um_estimated'] < 1.15]
@@ -753,10 +784,16 @@ def tiff_save(img: np.ndarray, save_path: str, pixel_size: float, pyramidal=True
     
     
     if pyramidal:
+        try:
+            import pyvips
+        except Exception:
+            print("Couldn't import pyvips, verify that libvips is installed on your system")
         print('saving to pyramidal tiff... can be slow')
         pyvips_img = pyvips.Image.new_from_array(img)
 
         # save in the generic tiff format readable by both openslide and QuPath
+        # Note: had to change the compression from 'deflate' to 'lzw' because of a reading incompatibility with CuImage/OpenSlide
+        # when upgrading to vips 8.13 (necessary for Valis)
         pyvips_img.tiffsave(
             save_path, 
             bigtiff=bigtiff, 
@@ -764,7 +801,7 @@ def tiff_save(img: np.ndarray, save_path: str, pixel_size: float, pyramidal=True
             tile=True, 
             tile_width=256, 
             tile_height=256, 
-            compression='deflate', 
+            compression='lzw', 
             resunit=pyvips.enums.ForeignTiffResunit.CM,
             xres=1. / (pixel_size * 1e-4),
             yres=1. / (pixel_size * 1e-4))
@@ -875,12 +912,12 @@ def find_pixel_size_from_spot_coords(my_df: pd.DataFrame, inter_spot_dist: float
     return best_approx, max_dist_col
       
 
-def register_downscale_img(adata: sc.AnnData, img: np.ndarray, pixel_size: float, spot_size=55., target_size=1000) -> Tuple[np.ndarray, float]:
+def register_downscale_img(adata: sc.AnnData, wsi: WSI, pixel_size: float, spot_size=55., target_size=1000) -> Tuple[np.ndarray, float]: # type: ignore
     """ registers a downscale version of `img` and it's corresponding scalefactors to `adata` in adata.uns['spatial']['ST']
 
     Args:
         adata (sc.AnnData): anndata to which the downscaled image is registered
-        img (np.ndarray): full resolution image to downscale
+        wsi (np.ndarray): full resolution image to downscale
         pixel_size (float): pixel size in um/px of the full resolution image
         spot_size (_type_, optional): spot diameter in um. Defaults to 55..
         target_size (int, optional): downscaled image biggest edge size. Defaults to 1000.
@@ -888,8 +925,9 @@ def register_downscale_img(adata: sc.AnnData, img: np.ndarray, pixel_size: float
     Returns:
         Tuple[np.ndarray, float]: downscaled image and it's downscale factor from full resolution
     """
-    downscale_factor = target_size / np.max(img.shape)
-    downscaled_fullres = imresize(img, downscale_factor)
+    width, height = wsi.get_dimensions()
+    downscale_factor = target_size / np.max((width, height))
+    downscaled_fullres = wsi.get_thumbnail(round(width * downscale_factor), round(height * downscale_factor))
     
     # register the image
     adata.uns['spatial'] = {}
@@ -907,7 +945,7 @@ def _sample_id_to_filename(id):
     return id + '.tif'            
 
             
-def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal: bool, cp_pixel_vis: bool, cp_adata: bool, cp_meta: bool):
+def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal: bool, cp_pixel_vis: bool, cp_adata: bool, cp_meta: bool, cp_cellvit, cp_patches, cp_contours):
     """ Internal use method, to transfer images to a `release` folder (`dest`)"""
     try:
         path = get_path_from_meta_row(row)
@@ -926,23 +964,24 @@ def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal:
     if cp_pyramidal:
         print(f"create pyramidal tiff for {row['id']}")
         src_pyramidal = os.path.join(path, 'aligned_fullres_HE.tif')
-        dst_pyramidal = os.path.join(dest, 'pyramidal', _sample_id_to_filename(row['id']))
-        os.makedirs(os.path.join(dest, 'pyramidal'), exist_ok=True)
+        dst_pyramidal = os.path.join(dest, 'wsis', _sample_id_to_filename(row['id']))
+        os.makedirs(os.path.join(dest, 'wsis'), exist_ok=True)
         shutil.copy(src_pyramidal, dst_pyramidal)
         #dst = os.path.join(dest, 'pyramidal', _sample_id_to_filename(row['id']))
         #bigtiff_option = '' if isinstance(row['bigtiff'], float) or not row['bigtiff']  else '--bigtiff'
         #vips_pyr_cmd = f'vips tiffsave "{path_fullres}" "{dst}" --pyramid --tile --tile-width=256 --tile-height=256 --compression=deflate {bigtiff_option}'
         #subprocess.call(vips_pyr_cmd, shell=True)
         
-    if cp_meta:
-        path_metrics = os.path.join(path, 'metrics.json')
-        os.makedirs(os.path.join(dest, 'metrics'), exist_ok=True)
-        path_dest_metrics = os.path.join(dest, 'metrics', row['id'] + '.json')
-        shutil.copy(path_metrics, path_dest_metrics)
+    id = row['id']
+    if cp_meta:    
+        path_meta = os.path.join(path, 'meta.json')
+        os.makedirs(os.path.join(dest, 'metadata'), exist_ok=True)
+        path_dest_meta = os.path.join(dest, 'metadata', row['id'] + '.json')
+        shutil.copy(path_meta, path_dest_meta)
     if cp_downscaled:
         path_downscaled = os.path.join(path, 'downscaled_fullres.jpeg')
-        os.makedirs(os.path.join(dest, 'downscaled'), exist_ok=True)
-        path_dest_downscaled = os.path.join(dest, 'downscaled', row['id'] + '_downscaled_fullres.jpeg')
+        os.makedirs(os.path.join(dest, 'thumbnails'), exist_ok=True)
+        path_dest_downscaled = os.path.join(dest, 'thumbnails', row['id'] + '_downscaled_fullres.jpeg')
         shutil.copy(path_downscaled, path_dest_downscaled)
     if cp_spatial:
         path_spatial = os.path.join(path, 'spatial_plots.png')
@@ -951,24 +990,53 @@ def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal:
         shutil.copy(path_spatial, path_dest_spatial)
     if cp_pixel_vis:
         path_pixel_vis = os.path.join(path, 'pixel_size_vis.png')
-        os.makedirs(os.path.join(dest, 'pixel_vis'), exist_ok=True)
-        path_dest_pixel_vis = os.path.join(dest, 'pixel_vis', row['id'] + '_pixel_size_vis.png')
+        os.makedirs(os.path.join(dest, 'pixel_size_vis'), exist_ok=True)
+        path_dest_pixel_vis = os.path.join(dest, 'pixel_size_vis', row['id'] + '_pixel_size_vis.png')
         if not os.path.exists(path_pixel_vis):
             print(f"couldn't find {path_pixel_vis}")
         else:
             shutil.copy(path_pixel_vis, path_dest_pixel_vis)
     if cp_adata:
         path_adata = os.path.join(path, 'aligned_adata.h5ad')
-        os.makedirs(os.path.join(dest, 'adata'), exist_ok=True)
-        path_dest_adata = os.path.join(dest, 'adata', row['id'] + '.h5ad')
-        shutil.copy(path_adata, path_dest_adata)        
+        os.makedirs(os.path.join(dest, 'st'), exist_ok=True)
+        path_dest_adata = os.path.join(dest, 'st', row['id'] + '.h5ad')
+        shutil.copy(path_adata, path_dest_adata) 
+    if cp_patches:
+        os.makedirs(os.path.join(dest, 'patches'), exist_ok=True)
+        path_patches = os.path.join(path, f'patches.h5')
+        path_dest_patches = os.path.join(dest, 'patches', f'{id}.h5')
+        shutil.copy(path_patches, path_dest_patches)
+        
+        os.makedirs(os.path.join(dest, 'patches_vis'), exist_ok=True)
+        path_patches_vis = os.path.join(path, f'patches_patch_vis.png')
+        path_dest_patches_vis = os.path.join(dest, 'patches_vis', f'{id}.png')
+        shutil.copy(path_patches_vis, path_dest_patches_vis)
+    if cp_contours:
+        os.makedirs(os.path.join(dest, 'tissue_seg'), exist_ok=True)
+        path_cont = os.path.join(path, f'tissue_contours.geojson')
+        path_dest_cont = os.path.join(dest, 'tissue_seg', f'{id}_contours.geojson')
+        shutil.copy(path_cont, path_dest_cont)
+        
         
             
-def copy_processed_images(dest: str, meta_df: pd.DataFrame, cp_spatial=True, cp_downscaled=True, cp_pyramidal=True, cp_pixel_vis=True, cp_adata=True, cp_meta=True, n_job=6):
+def copy_processed(
+    dest: str, 
+    meta_df: pd.DataFrame, 
+    cp_spatial=True,
+    cp_downscaled=True, 
+    cp_pyramidal=True, 
+    cp_pixel_vis=True,
+    cp_adata=True, 
+    cp_meta=True, 
+    n_job=6, 
+    cp_cellvit=True, 
+    cp_patches=True, 
+    cp_contours=True
+):
     """ Internal use method, to transfer images to a `release` folder (`dest`)"""
     with concurrent.futures.ThreadPoolExecutor(max_workers=n_job) as executor:
         # Submit tasks to the executor
-        future_results = [executor.submit(_process_row, dest, row, cp_downscaled, cp_spatial, cp_pyramidal, cp_pixel_vis, cp_adata, cp_meta) for _, row in meta_df.iterrows()]
+        future_results = [executor.submit(_process_row, dest, row, cp_downscaled, cp_spatial, cp_pyramidal, cp_pixel_vis, cp_adata, cp_meta, cp_cellvit, cp_patches, cp_contours) for _, row in meta_df.iterrows()]
 
         # Retrieve results as they complete
         for future in tqdm(concurrent.futures.as_completed(future_results), total=len(meta_df)):
@@ -993,6 +1061,7 @@ def write_10X_h5(adata, file):
     Returns:
         None
     """
+    import h5py
     
     if '.h5' not in file: file = f'{file}.h5'
     #if os.path.exists(file):
@@ -1034,9 +1103,9 @@ def check_arg(arg, arg_name, values):
 def helper_mex(path: str, filename: str) -> None:
     """If filename doesn't exist in directory `path`, find similar filename in same directory and zip it to patch filename"""
     # zip if needed
-    file = os.path.join(path, filename.strip('.gz'))
-    dst = os.path.join(path, filename)
-    src = os.path.join(path, filename)
+    file = find_first_file_endswith(path, filename.strip('.gz'))
+    #dst = os.path.join(path, filename)
+    src = find_first_file_endswith(path, filename)
     if file is not None and src is None:
         f_in = open(file, 'rb')
         f_out = gzip.open(os.path.join(os.path.join(path), filename), 'wb')
@@ -1044,11 +1113,59 @@ def helper_mex(path: str, filename: str) -> None:
         f_out.close()
         f_in.close()
     
-    if not os.path.exists(dst) and \
-            src is not None:
-        shutil.copy(src, dst)
+    #if not os.path.exists(dst) and \
+    #        src is not None:
+    #    shutil.copy(src, dst)
 
 
+def load_wsi(img_path: str) -> Tuple[WSI, float]:
+    """Load WSI from path and its corresponding embedded pixel size in um/px
+    
+    the embedded pixel size is only determined in tiff/tif/btf/TIF images and
+    only if the tags 'XResolution' and 'YResolution' are set
+
+    Args:
+        img_path (str): path to image
+
+    Returns:
+        Tuple[WSI, float]: WSI and its embedded pixel size in um/px
+    """
+    unit_to_micrometers = {
+        tifffile.RESUNIT.INCH: 25.4,
+        tifffile.RESUNIT.CENTIMETER: 1.e4,
+        tifffile.RESUNIT.MILLIMETER: 1.e3,
+        tifffile.RESUNIT.MICROMETER: 1.,
+        tifffile.RESUNIT.NONE: 1.
+    }
+    pixel_size_embedded = None
+    
+    img = tifffile.imread(img_path)
+
+    if img_path.endswith('tiff') or img_path.endswith('tif') or img_path.endswith('btf') or img_path.endswith('TIF'):
+            
+        my_img = tifffile.TiffFile(img_path)
+        
+        if 'XResolution' in my_img.pages[0].tags and my_img.pages[0].tags['XResolution'].value[0] != 0 and 'ResolutionUnit' in my_img.pages[0].tags:
+            # result in micrometers per pixel
+            factor = unit_to_micrometers[my_img.pages[0].tags['ResolutionUnit'].value]
+            pixel_size_embedded = (my_img.pages[0].tags['XResolution'].value[1] / my_img.pages[0].tags['XResolution'].value[0]) * factor
+    
+    # sometimes the RGB axis are inverted
+    if img.shape[0] == 3:
+        img = np.transpose(img, axes=(1, 2, 0))
+    elif img.shape[2] == 4: # RGBA to RGB
+        img = img[:,:,:3]
+    if np.max(img) > 1000:
+        img = img.astype(np.float32)
+        img /= 2**8
+        img = img.astype(np.uint8)
+        
+    wsi = NumpyWSI(img)
+    
+    return wsi, pixel_size_embedded
+
+
+@deprecated
 def load_image(img_path: str) -> Tuple[np.ndarray, float]:
     """Load image from path and it's corresponding embedded pixel size in um/px
     
@@ -1059,7 +1176,7 @@ def load_image(img_path: str) -> Tuple[np.ndarray, float]:
         img_path (str): path to image
 
     Returns:
-        Tuple[np.ndarray, float]: image and it's embedded pixel size in um/px
+        Tuple[np.ndarray, float]: image and its embedded pixel size in um/px
     """
     unit_to_micrometers = {
         tifffile.RESUNIT.INCH: 25.4,
@@ -1097,6 +1214,9 @@ def load_image(img_path: str) -> Tuple[np.ndarray, float]:
 
 def _plot_center_square(width, height, length, color, text, offset=0):
     """Plot square centered in plot"""
+    
+    import matplotlib.pyplot as plt
+    
     if length > width * 4 and length > height * 4:
         return
     margin_x = (width - length) / 2
@@ -1110,6 +1230,9 @@ def _plot_center_square(width, height, length, color, text, offset=0):
 
 def plot_verify_pixel_size(downscaled_img: np.ndarray, down_fact: float, pixel_size_embedded: float, pixel_size_estimated: float, path: float) -> None:
     """Plot squares on a downscaled image for scale comparison"""
+    
+    import matplotlib.pyplot as plt
+    
     plt.imshow(downscaled_img)
 
     width = downscaled_img.shape[1]
@@ -1128,7 +1251,7 @@ def plot_verify_pixel_size(downscaled_img: np.ndarray, down_fact: float, pixel_s
 
 
 
-def save_scalefactors(adata: sc.AnnData, path) -> None:
+def save_scalefactors(adata: sc.AnnData, path) -> None: # type: ignore
     """Save scale factors to path from adata.uns"""
     dict = {}
     dict['tissue_downscaled_fullres_scalef'] = adata.uns['spatial']['ST']['scalefactors']['tissue_downscaled_fullres_scalef']

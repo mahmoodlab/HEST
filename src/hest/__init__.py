@@ -4,6 +4,7 @@ from .utils import tiff_save, find_pixel_size_from_spot_coords, write_10X_h5, ge
 from .autoalign import autoalign_visium
 from .readers import *
 from .HESTData import HESTData, read_HESTData, load_hest
+from .segmentation.cell_segmenters import segment_cellvit
 
 __all__ = [
     'tiff_save',
@@ -18,5 +19,6 @@ __all__ = [
     'STReader', 
     'autoalign_visium',
     'write_10X_h5',
-    'HESTData'
+    'HESTData',
+    'segment_cellvit'
 ]

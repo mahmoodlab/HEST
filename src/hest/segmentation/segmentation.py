@@ -1,159 +1,149 @@
-import os
+from __future__ import annotations
+
 import pickle
-import tempfile
 from functools import partial
 from typing import Union
 
 import cv2
 import numpy as np
-import torch
+import pandas as pd
+from geopandas import gpd
 from huggingface_hub import snapshot_download
 from PIL import Image
-from torch import nn
-from torch.utils.data import DataLoader
-from torchvision import models, transforms
+from shapely import Polygon
 
-from hest.segmentation.SegDataset import SegDataset
-from hest.utils import get_path_relative
+from hest.utils import deprecated, get_path_relative
 from hest.wsi import WSI, WSIPatcher, wsi_factory
 
 try:
     import openslide
 except Exception:
     print("Couldn't import openslide, verify that openslide is installed on your system, https://openslide.org/download/")
-import scanpy as sc
-import skimage.color as sk_color
-import skimage.filters as sk_filters
-import skimage.measure as sk_measure
-import skimage.morphology as sk_morphology
-
-try:
-    from cucim import CuImage
-except ImportError:
-    CuImage = None
-    print("CuImage is not available. Ensure you have a GPU and cucim installed to use GPU acceleration.")
-
 from tqdm import tqdm
 
 
 def segment_tissue_deep(
-    img: Union[np.ndarray, openslide.OpenSlide, 'CuImage', WSI],
-    pixel_size_src,
+    wsi: Union[np.ndarray, openslide.OpenSlide, CuImage, WSI], # type: ignore
+    pixel_size: float,
+    fast_mode=False,
     target_pxl_size=1,
-    patch_size=512,
+    patch_size_um=512,
     model_name='deeplabv3_seg_v4.ckpt',
     batch_size=8,
-    auto_download=True
-):    
+    auto_download=True,
+    num_workers=8
+) -> gpd.GeoDataFrame:
+    """ Segment the tissue using a DeepLabV3 model
+
+    Args:
+        wsi (Union[np.ndarray, openslide.OpenSlide, CuImage, WSI]): wsi
+        pixel_size (float): pixel size in um/px for the wsi
+        fast_mode (bool, optional): in fast mode the inference is done at 2 um/px instead of 1 um/px, 
+            note that the inference pixel size is overwritten by the `target_pxl_size` argument if != 1. Defaults to False.
+        target_pxl_size (int, optional): patches are scaled to this pixel size in um/px for inference. Defaults to 1.
+        patch_size_um (int, optional): patch size in um. Defaults to 512.
+        model_name (str, optional): model name in `HEST/models` dir. Defaults to 'deeplabv3_seg_v4.ckpt'.
+        batch_size (int, optional): batch size for inference. Defaults to 8.
+        auto_download (bool, optional): whenever to download the model weights automatically if not found. Defaults to True.
+        num_workers (int, optional): number of workers for the dataloader during inference. Defaults to 8.
+
+    Returns:
+        gpd.GeoDataFrame: a geodataframe of the tissue contours, contains a column `tissue_id` indicating to which tissue the contour belongs to
+    """
+    import torch
+    from torch import nn
+    from torch.utils.data import DataLoader
+    from torchvision import transforms
+    from hest.segmentation.SegDataset import SegWSIDataset
     
+    pixel_size_src = pixel_size
+    
+    if fast_mode and target_pxl_size == 1:
+        target_pxl_size = 2
+    
+    patch_size_deeplab = 512
     
     # TODO fix overlap
     overlap=0
     
-    #TODO allow np.ndarray
-    
     scale = pixel_size_src / target_pxl_size
-    patch_size_src = round(patch_size / scale)
-    if isinstance(img, WSI):
-        wsi = img
-    else:
-        wsi = wsi_factory(img)
-    
-    
-    width, height = wsi.get_dimensions()
+    patch_size_src = round(patch_size_um / scale)
+    wsi = wsi_factory(wsi)
     
     weights_path = get_path_relative(__file__, f'../../../models/{model_name}')
     
-    patcher = WSIPatcher(wsi, patch_size_src)
-
+    patcher = WSIPatcher(wsi, patch_size_src, patch_size_deeplab)
+        
+    eval_transforms = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
+    dataset = SegWSIDataset(patcher, eval_transforms)
+    dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers)
+    model = torch.hub.load('pytorch/vision:v0.10.0', 'deeplabv3_resnet50')
+    model.classifier[4] = nn.Conv2d(
+        in_channels=256,
+        out_channels=2,
+        kernel_size=1,
+        stride=1
+    )
+    
+    if auto_download:
+        model_dir = get_path_relative(__file__, f'../../../models')
+        snapshot_download(repo_id="MahmoodLab/hest-tissue-seg", repo_type='model', local_dir=model_dir, allow_patterns=model_name)
+    
+    if torch.cuda.is_available():
+        checkpoint = torch.load(weights_path)
+    else:
+        checkpoint = torch.load(weights_path, map_location=torch.device('cpu'))
+        
+    new_state_dict = {}
+    for key in checkpoint['state_dict']:
+        if 'aux' in key:
+            continue
+        new_key = key.replace('model.', '')
+        new_state_dict[new_key] = checkpoint['state_dict'][key]
+    model.load_state_dict(new_state_dict)
+    
+    if torch.cuda.is_available():        
+        model.cuda()
+    
+    model.eval()
+    
     cols, rows = patcher.get_cols_rows()
+    width, height = patch_size_deeplab * cols, patch_size_deeplab * rows
+    stitched_img = np.zeros((height, width), dtype=np.uint8)
+    src_to_deeplab_scale = patch_size_deeplab / patch_size_src
     
-    with tempfile.TemporaryDirectory() as tmpdirname:
-        print('created temporary directory', tmpdirname)
-    
-        print('save temp patches...')
-        # saves patches to temp dir
-        for row in tqdm(range(rows)):
-            for col in range(cols):
-                tile, pxl_x, pxl_y = patcher.get_tile(col, row)
-                
-                tile = cv2.resize(tile, (patch_size, patch_size), interpolation=cv2.INTER_CUBIC)
+    with torch.inference_mode(), torch.autocast(device_type="cuda", dtype=torch.float16):
+        
+        for batch in tqdm(dataloader, total=len(dataloader)):
+            
+            # coords are top left coords of patch
+            imgs, coords = batch
+            if torch.cuda.is_available(): 
+                imgs = imgs.cuda()
+            masks = model(imgs)['out']
+            preds = masks.argmax(1).to(torch.uint8).detach()
+            
+            torch.cuda.synchronize()
 
-
-                Image.fromarray(tile).save(os.path.join(tmpdirname, f'{pxl_x}_{pxl_y}.jpg'))
-                
-        
-        eval_transforms = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
-        dataset = SegDataset(tmpdirname, eval_transforms)
-        dataloader = DataLoader(dataset, batch_size=batch_size)
-        model = torch.hub.load('pytorch/vision:v0.10.0', 'deeplabv3_resnet50', pretrained=False)
-        model.classifier[4] = nn.Conv2d(
-            in_channels=256,
-            out_channels=2,
-            kernel_size=1,
-            stride=1
-        )
-        
-        if auto_download:
-            model_dir = get_path_relative(__file__, f'../../../models')
-            snapshot_download(repo_id="pauldoucet/tissue-detector", repo_type='model', local_dir=model_dir, allow_patterns=model_name)
-        
-        if torch.cuda.is_available():
-            checkpoint = torch.load(weights_path)
-        else:
-            checkpoint = torch.load(weights_path, map_location=torch.device('cpu'))
+            preds = preds.cpu().numpy()
+            coords = np.column_stack((coords[0], coords[1]))
             
-        new_state_dict = {}
-        for key in checkpoint['state_dict']:
-            if 'aux' in key:
-                continue
-            new_key = key.replace('model.', '')
-            new_state_dict[new_key] = checkpoint['state_dict'][key]
-        model.load_state_dict(new_state_dict)
-        
-        if torch.cuda.is_available():        
-            model.cuda()
-        
-        model.eval()
-        
-        
-        stitched_img = np.zeros((height, width))
-        with torch.no_grad():
-            print('start inference...')
-            for batch in tqdm(dataloader, total=len(dataloader)):
-                
-                # coords are top left coords of patch
-                imgs, coords = batch
-                if torch.cuda.is_available(): 
-                    imgs = imgs.cuda()
-                masks = model(imgs)['out']
-                preds = masks.argmax(1)
-                
-                preds = np.array(preds.cpu())
-                
-                coords = np.column_stack((coords[0], coords[1]))
-                
-                # stitch the patches
-                for i in range(preds.shape[0]):
-                    pred = preds[i]
-                    coord = coords[i]
-                    x, y = coord[0], coord[1]
-                    
-                    pred = pred.astype(np.uint8)
-                    
-                    pred = cv2.resize(pred, (patch_size_src + overlap, patch_size_src + overlap), interpolation=cv2.INTER_CUBIC)
-                    
-                    y_end = min(y+patch_size_src + overlap, height)
-                    x_end = min(x+patch_size_src + overlap, width)
-                    stitched_img[y:y_end, x:x_end] += pred[:y_end-y, :x_end-x]
-                    
-
+            # stitch the patches
+            for i in range(preds.shape[0]):
+                pred = preds[i]
+                coord = coords[i]
+                x, y = round(coord[0] * src_to_deeplab_scale), round(coord[1] * src_to_deeplab_scale)
+                 
+                y_end = min(y+patch_size_deeplab + overlap, height)
+                x_end = min(x+patch_size_deeplab + overlap, width)
+                stitched_img[y:y_end, x:x_end] += pred[:y_end-y, :x_end-x]
             
-        mask = (stitched_img > 0).astype(np.uint8)
-            
-        contours_tissue, contours_holes = mask_to_contours(mask, max_nb_holes=5, pixel_size=pixel_size_src)
-            
-        return mask, contours_tissue, contours_holes
+        
+    mask = (stitched_img > 0).astype(np.uint8)
+        
+    gdf_contours = mask_to_contours(mask, max_nb_holes=5, pixel_size=pixel_size_src, contour_scale=1 / src_to_deeplab_scale)
+        
+    return gdf_contours
 
 
 def save_pkl(filename, save_object):
@@ -201,6 +191,76 @@ def keep_largest_area(mask: np.ndarray) -> np.ndarray:
     return mask
 
 
+def contours_to_img(
+    contours: gpd.GeoDataFrame, 
+    img: np.ndarray, 
+    draw_contours=False, 
+    thickness=1, 
+    downsample=1.,
+    line_color=(0, 255, 0)
+) -> np.ndarray:
+    draw_cont = partial(cv2.drawContours, contourIdx=-1, thickness=thickness, lineType=cv2.LINE_8)
+    draw_cont_fill = partial(cv2.drawContours, contourIdx=-1, thickness=cv2.FILLED)
+    
+    groups = contours.groupby('tissue_id')
+    for _, group in groups:
+        
+        for _, row in group.iterrows():
+            cont = np.array([[round(x * downsample), round(y * downsample)] for x, y in row.geometry.exterior.coords])
+        
+            if row['hole']:
+                draw_cont_fill(image=img, contours=[cont], color=(0, 0, 0))
+            else:
+                draw_cont_fill(image=img, contours=[cont], color=line_color)
+            if draw_contours:
+                draw_cont(image=img, contours=[cont], color=line_color)
+    return img
+
+
+def get_tissue_vis(
+            img: Union[np.ndarray, openslide.OpenSlide, CuImage, WSI],
+            tissue_contours: gpd.GeoDataFrame,
+            line_color=(0, 255, 0),
+            line_thickness=5,
+            target_width=1000,
+            seg_display=True,
+    ) -> Image:
+        tissue_contours = tissue_contours.copy()
+    
+        wsi = wsi_factory(img)
+    
+        width, height = wsi.get_dimensions()
+        downsample = target_width / width
+
+        top_left = (0,0)
+        
+        img = wsi.get_thumbnail(round(width * downsample), round(height * downsample))
+
+        if tissue_contours is None:
+            return Image.fromarray(img)
+
+        downscaled_mask = np.zeros(img.shape[:2], dtype=np.uint8)
+        downscaled_mask = np.expand_dims(downscaled_mask, axis=-1)
+        downscaled_mask = downscaled_mask * np.array([0, 0, 0]).astype(np.uint8)
+
+        if tissue_contours is not None and seg_display:
+            downscaled_mask = contours_to_img(
+                tissue_contours, 
+                downscaled_mask, 
+                draw_contours=True, 
+                thickness=line_thickness, 
+                downsample=downsample,
+                line_color=line_color
+            )
+
+        alpha = 0.4
+        img = cv2.addWeighted(img, 1 - alpha, downscaled_mask, alpha, 0)
+        img = img.astype(np.uint8)
+
+        return Image.fromarray(img)
+    
+
+@deprecated
 def visualize_tissue_seg(
             img,
             tissue_mask,
@@ -233,9 +293,8 @@ def visualize_tissue_seg(
         downscaled_mask = downscaled_mask * np.array([0, 0, 0]).astype(np.uint8)
 
 
-        offset = tuple(-(np.array(top_left) * scale).astype(int))
-        draw_cont = partial(cv2.drawContours, contourIdx=-1, thickness=line_thickness, lineType=cv2.LINE_8, offset=offset)
-        draw_cont_fill = partial(cv2.drawContours, contourIdx=-1, thickness=cv2.FILLED, offset=offset)
+        draw_cont = partial(cv2.drawContours, contourIdx=-1, thickness=line_thickness, lineType=cv2.LINE_8)
+        draw_cont_fill = partial(cv2.drawContours, contourIdx=-1, thickness=cv2.FILLED)
 
         if contours_tissue is not None and seg_display:
             for _, cont in enumerate(contours_tissue):
@@ -267,6 +326,10 @@ def apply_otsu_thresholding(tile: np.ndarray) -> np.ndarray:
     Returns:
         np.ndarray: Binary mask with shape (height, width)
     """
+    import skimage.color as sk_color
+    import skimage.filters as sk_filters
+    import skimage.measure as sk_measure
+    import skimage.morphology as sk_morphology
 
     # this is to remove the black border padding in some images
     black_pixels = np.all(tile == [0, 0, 0], axis=-1)
@@ -372,7 +435,7 @@ def filter_contours(contours, hierarchy, filter_params, scale, pixel_size):
     return foreground_contours, hole_contours
         
         
-def mask_to_contours(mask: np.ndarray, keep_ids = [], exclude_ids=[], max_nb_holes=0, min_contour_area=1000, pixel_size=1):
+def mask_to_contours(mask: np.ndarray, keep_ids = [], exclude_ids=[], max_nb_holes=0, min_contour_area=1000, pixel_size=1, contour_scale=1.):
     TARGET_EDGE_SIZE = 2000
     scale = TARGET_EDGE_SIZE / mask.shape[0]
 
@@ -403,21 +466,25 @@ def mask_to_contours(mask: np.ndarray, keep_ids = [], exclude_ids=[], max_nb_hol
     if len(foreground_contours) == 0:
         raise Exception('no contour detected')
     else:
-        contours_tissue = scale_contour_dim(foreground_contours, 1 / scale)
-        contours_holes = scale_holes_dim(hole_contours, 1 / scale)
+        contours_tissue = scale_contour_dim(foreground_contours, contour_scale / scale)
+        contours_holes = scale_holes_dim(hole_contours, contour_scale / scale)
 
     if len(keep_ids) > 0:
         contour_ids = set(keep_ids) - set(exclude_ids)
     else:
         contour_ids = set(np.arange(len(contours_tissue))) - set(exclude_ids)
 
-    contours_tissue = [contours_tissue[i] for i in contour_ids]
-    contours_holes = [contours_holes[i] for i in contour_ids]
-
-    #print('Num Contours After Filtering:', len(wsi.contours_tissue))
-
-
-    return contours_tissue, contours_holes
+    tissue_poly = [Polygon(contours_tissue[i].squeeze(1)) for i in contour_ids]
+    hole_poly = [Polygon(contours_holes[i][0].squeeze(1)) for i in contour_ids if len(contours_holes[i]) > 0]
+    geometry = tissue_poly + hole_poly
+    tissue_ids = [i for i in contour_ids] + [i for i in contour_ids if len(contours_holes[i]) > 0]
+    tissue_types = ['tissue' for _ in contour_ids] + ['hole' for i in contour_ids if len(contours_holes[i]) > 0]
+    
+    gdf_contours = gpd.GeoDataFrame(pd.DataFrame(tissue_ids, columns=['tissue_id']), geometry=geometry)
+    gdf_contours['hole'] = tissue_types
+    gdf_contours['hole'] = gdf_contours['hole'] == 'hole'
+    
+    return gdf_contours
     
 
 def scale_holes_dim(contours, scale):
