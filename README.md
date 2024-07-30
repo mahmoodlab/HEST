@@ -29,7 +29,7 @@ To download/query HEST-1k, follow the tutorial [1-Downloading-HEST-1k.ipynb](htt
 ## HEST-Library installation
 
 ```
-git clone [https://github.com/mahmoodlab/hest.git](https://github.com/mahmoodlab/HEST.git)
+git clone https://github.com/mahmoodlab/HEST.git
 cd HEST
 conda create -n "hest" python=3.9
 conda activate hest
