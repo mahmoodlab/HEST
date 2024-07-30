@@ -1,15 +1,17 @@
+from __future__ import annotations
+
 import os
 from abc import abstractmethod
 
 import numpy as np
 import pandas as pd
-import scanpy as sc
 from loguru import logger
 from tqdm import tqdm
 
 ATLAS_PATH = 'atlas'
 
 def downsample_and_save(X, cell_types, var_names, filename, level='cell_types'):
+    import scanpy as sc
     sub_adata, sub_cell_types = downsample_atlas(X, cell_types)    
     new_adata = sc.AnnData(sub_adata, obs=pd.DataFrame(sub_cell_types.values, columns=[level]))
     new_adata.var_names = var_names
@@ -76,6 +78,7 @@ class SCAtlas:
         return adata
         
     def _get_or_process(self, path) -> sc.AnnData:
+        import scanpy as sc
         if not os.path.exists(path):
             logger.info(f"{path} doesn't exist, processing atlas...")
             self.process()
@@ -88,6 +91,7 @@ class HeartAtlas(SCAtlas):
         self.name = 'heart'
     
     def process_imp(self):
+        import scanpy as sc
         adata = sc.read_h5ad('/mnt/ssd/paul/ST-histology-loader/atlas/heart/Global_lognormalised.h5ad')
         adata.obs = adata.obs[['cell_type']]
         adata.obs = adata.obs.rename(columns={
@@ -134,6 +138,8 @@ class MEL2Atlas(SCAtlas):
         
         
     def process_imp(self):
+        import scanpy as sc
+
         #path_exp = 'atlas/MEL2/expression'
         #dfs = []
         #for exp in tqdm(os.listdir(path_exp)):
@@ -220,6 +226,7 @@ class TonsilAtlas(SCAtlas):
         }
     
     def process_imp(self):
+        import scanpy as sc
         adata = sc.read_h5ad('atlas/tonsil/tonsil.h5ad')
         adata.obsm = None
         adata.obs = adata.obs[['annotation_figure_1']]
@@ -236,7 +243,7 @@ class IDCAtlas(SCAtlas):
         
     
     def process_imp(self):
-
+        import scanpy as sc
         
         ids = ['NCBI783', 'NCBI784', 'NCBI785']
         sub_adatas = []
@@ -299,6 +306,7 @@ class BoneAtlas(SCAtlas):
 
         
     def process_imp(self):
+        import scanpy as sc
         meta = pd.read_csv('atlas/bone/metadata.csv')
         #counts = pd.read_csv('atlas/bone/counts.normalized.csv', index_col=0).transpose()
         counts = pd.read_parquet('atlas/bone/counts.normalized.parquet').transpose()
@@ -320,6 +328,7 @@ class GBMAtlas(SCAtlas):
         self.name = 'GBM2'
     
     def process_imp(self):
+        import scanpy as sc
         self.type_map = {
             'BCells': 'B-cell',
             'Endo': 'Endothelial',
@@ -393,6 +402,7 @@ class HCC2Atlas(SCAtlas):
         }
     
     def process_imp(self):
+        import scanpy as sc
         df = pd.read_parquet('atlas/HCC2/counts.parquet')
         meta = pd.read_csv('atlas/HCC2/GSE229772_cell_subtypes.txt', sep='\t')
         
@@ -425,6 +435,7 @@ class HCCAtlas(SCAtlas):
         self.name = 'AML'
     
     def process_imp(self):
+        import scanpy as sc
         meta = pd.read_csv('atlas/HCC/GSE149614_HCC.metadata.updated.txt', index_col=0, sep='\t')
         adata = sc.read_h5ad('atlas/HCC/adata.h5ad')
         merged = meta.merge(adata.obs, left_index=True, right_index=True, how='inner')
@@ -469,6 +480,7 @@ class MELAtlas(SCAtlas):
         }
     
     def process_imp(self):
+        import scanpy as sc
         meta = pd.read_csv('atlas/MEL/GSE115978_tpm.csv', index_col=0).transpose()
         #meta2 = pd.read_csv('atlas/skin/GSE115978_counts.csv')
         meta3 = pd.read_csv('atlas/MEL/GSE115978_cell.annotations.csv', index_col=0)
@@ -486,6 +498,7 @@ class BreastCancerAtlas(SCAtlas):
         self.name = 'BRAC'
     
     def process_imp(self):
+        import scanpy as sc
         adata = sc.read_10x_mtx('/mnt/ssd/paul/tissue-seg/atlas/BRAC/mex')
         meta = pd.read_csv("/mnt/ssd/paul/tissue-seg/atlas/BRAC/Whole_miniatlas_meta.csv", index_col=0)
         meta = meta.iloc[1:]
@@ -503,6 +516,7 @@ class BreastCancer3Atlas(SCAtlas):
         self.name = 'breast3'
     
     def process_imp(self):
+        import scanpy as sc
         adata =  sc.read_h5ad('atlas/breast3/sub.h5ad')
         from scanpy.queries import biomart_annotations
 
@@ -557,6 +571,7 @@ class HGSOCCancerAtlas(SCAtlas):
         }
     
     def process_imp(self):
+        import scanpy as sc
         patient_map = dict(zip(
             ['GSM' + str(i) for i in range(5276933, 5276955)], 
             [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 9, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
@@ -626,6 +641,7 @@ class RCCAtlas(SCAtlas):
 
     
     def process_imp(self):
+        import scanpy as sc
         barcodes = pd.read_csv('atlas/RCC/barcodes.tsv', sep='\t', header=None).values.flatten()
         genes = pd.read_csv('atlas/RCC/genes.tsv', sep='\t', header=None)[0].values.flatten()
         adata = sc.read_mtx('atlas/RCC/matrix.mtx').transpose()
@@ -669,6 +685,8 @@ class ColonCancerAtlas(SCAtlas):
         }
     
     def process_imp(self):
+        import scanpy as sc
+        
         self.type_map = {
             'B': 'B-cell',
             'DC': 'Dentric',
@@ -740,6 +758,8 @@ class PAADAtlas(SCAtlas):
         
     
     def process_imp(self):
+        import scanpy as sc
+
         #raw_concat = pd.read_csv('atlas/PAAD/Biopsy_RawDGE_23042cells.csv', index_col=0).transpose()
         raw_concat = pd.read_parquet('atlas/PAAD/Biopsy_RawDGE_23042cells.parquet')
         
@@ -816,6 +836,7 @@ class NSCLCAtlas(SCAtlas):
 
     
     def process_imp(self):
+        import scanpy as sc
         adata = sc.read_h5ad('atlas/lung/lung_sc.h5ad')
         adata.obs = adata.obs[['predicted.celltypel1', 'predicted.celltypel2']]
         adata.obs = adata.obs.rename(columns={
@@ -830,6 +851,7 @@ class NSCLCAtlas(SCAtlas):
 
 
 def get_cells_with_clusters(bc_matrix_path, cluster_path=None, k=None) -> sc.AnnData:
+    import scanpy as sc
     cells = sc.read_10x_h5(bc_matrix_path)
     
     cells_df = cells.to_df()

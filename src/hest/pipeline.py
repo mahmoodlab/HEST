@@ -3,7 +3,7 @@ import os
 import yaml
 from loguru import logger
 
-from hest.HESTData import XeniumHESTData
+from hest.HESTData import XeniumHESTData, load_hest, read_HESTData
 from hest.io.seg_readers import read_gdf, write_geojson
 from hest.readers import XeniumReader
 from hest.registration import register_dapi_he, warp
@@ -33,8 +33,8 @@ def process_xenium(
     gdf = None
     
     data_dir = config_dict['data_dir']
-    st = XeniumReader().auto_read(data_dir)
-    gdf = st.xenium_nuc_seg
+    st = load_hest('hest_data', id_list=['TENX95'])[0]
+    gdf = st.shapes
     
     
     if 'registration' in config_dict:

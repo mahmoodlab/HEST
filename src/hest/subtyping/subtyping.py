@@ -1,23 +1,14 @@
-import json
-import os
-import pickle
-import shutil
-import warnings
+from __future__ import annotations
 
-import harmonypy as hm
-import matplotlib.pyplot as plt
+import os
+import shutil
+
 import numpy as np
 import pandas as pd
-import scanpy as sc
-import scanpy.external as sce
-import seaborn as sns
-import torch
-from loguru import logger
-from scipy.sparse import csr_matrix
-from sklearn.metrics import balanced_accuracy_score
 from tqdm import tqdm
 
-from hest.subtyping.atlas import get_atlas_from_name, get_cells_with_clusters, sc_atlas_factory
+from hest.subtyping.atlas import (get_atlas_from_name, get_cells_with_clusters,
+                                  sc_atlas_factory)
 from hest.subtyping.atlas_matchers import matcher_factory
 from hest.utils import get_path_from_meta_row
 
@@ -71,6 +62,7 @@ def place_in_right_folder(path, rename=False):
         
         
 def join_MEX(dir):
+    import scanpy as sc
     joined_adata = None
     for f in tqdm(os.listdir(dir)):
         path = os.path.join(dir, f)
@@ -154,7 +146,9 @@ breast3_cell_types_map = {
 }
 
 def eval_cell_type_assignment(pred, path_gt, map_pred, map_gt, name, key='cell_type_pred'):
-    from sklearn.metrics import confusion_matrix
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    from sklearn.metrics import balanced_accuracy_score, confusion_matrix
     
     if isinstance(pred, str):
         df1 = pd.read_csv(pred)

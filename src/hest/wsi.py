@@ -20,6 +20,11 @@ class CucimWarningSingleton:
 
 
 def is_cuimage(img):
+    try:
+        from cucim import CuImage
+    except ImportError:
+        CuImage = None
+        CucimWarningSingleton.warn()
     return CuImage is not None and isinstance(img, CuImage) # type: ignore
 
 
