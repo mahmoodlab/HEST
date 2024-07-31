@@ -144,14 +144,37 @@ def df_morph_um_to_pxl(df, x_key, y_key, pixel_size_morph):
     return df
 
 
-def align_xenium_df(alignment_file_path, pixel_size_morph, df_transcripts, x_key, y_key):
+def align_xenium_df(alignment_file_path: str, pixel_size_morph: float, df_transcripts, x_key, y_key, to_dapi=False):
+    """ Transform Xenium objects coordinates from the DAPI plane to the H&E plane
+
+    Args:
+        alignment_file_path (str): path to a xenium alignment file
+        pixel_size_morph (float): pixel size in the morphology image in um/px
+        df_transcripts (pd.DataFrame): objects to transform (all objects coordinates must be in um in the DAPI system)
+        x_key (str): key for x coordinates of objects in df_transcripts
+        y_key (str): key for y coordinates of objects in df_transcripts
+        to_dapi (bool, optional): whenever to convert from the H&E plane coordinates to DAPI plane coordinates. Defaults to False.
+
+    """
+    
     alignment_file = pd.read_csv(alignment_file_path, header=None)
     alignment_matrix = alignment_file.values
+    
+    # Xenium explorer >= v2.0
+    if isinstance(alignment_matrix[0][0], str) and 'fixedX' in alignment_matrix[0]:
+        points = pd.read_csv(alignment_file_path)
+        points = points.iloc[:3]
+        my_dst_pts = points[['fixedX', 'fixedY']].values.astype(np.float32)
+        my_src_pts = points[['alignmentX', 'alignmentY']].values.astype(np.float32)
+        alignment_matrix = cv2.getAffineTransform(my_src_pts, my_dst_pts)
+        alignment_matrix = np.vstack((alignment_matrix, [0, 0, 1]))
+        
     #convert alignment matrix from pixel to um
     alignment_matrix[0][2] *= pixel_size_morph
     alignment_matrix[1][2] *= pixel_size_morph
     he_to_morph_matrix = alignment_matrix
-    alignment_matrix = np.linalg.inv(alignment_matrix)
+    if not to_dapi:
+        alignment_matrix = np.linalg.inv(alignment_matrix)
     coords = np.column_stack((df_transcripts[x_key].values, df_transcripts[y_key].values, np.ones((len(df_transcripts),))))
     aligned = (alignment_matrix @ coords.T).T
     df_transcripts[y_key] = aligned[:,1]
