@@ -663,7 +663,8 @@ class XeniumHESTData(HESTData):
         xenium_nuc_seg: pd.DataFrame=None,
         xenium_cell_seg: pd.DataFrame=None,
         cell_adata: sc.AnnData=None, # type: ignore
-        transcript_df: pd.DataFrame=None
+        transcript_df: pd.DataFrame=None,
+        dapi_path: str=None
     ):
         """
         class representing a single ST profile + its associated WSI image
@@ -680,6 +681,7 @@ class XeniumHESTData(HESTData):
             xenium_cell_seg (pd.DataFrame): content of a xenium cell contour file as a dataframe (cell_boundaries.parquet)
             cell_adata (sc.AnnData): ST cell data, each row in adata.obs is a cell, each row in obsm is the cell location on the H&E image in pixels
             transcript_df (pd.DataFrame): dataframe of transcripts, each row is a transcript, he_x and he_y is the transcript location on the H&E image in pixels
+            dapi_path (str): path to a dapi focus image
         """
         super().__init__(adata=adata, img=img, pixel_size=pixel_size, meta=meta, tissue_seg=tissue_seg, tissue_contours=tissue_contours, shapes=shapes)
         
@@ -687,6 +689,7 @@ class XeniumHESTData(HESTData):
         self.xenium_cell_seg = xenium_cell_seg
         self.cell_adata = cell_adata
         self.transcript_df = transcript_df
+        self.dapi_path = dapi_path
         
         
     def save(self, path: str, save_img=True, pyramidal=True, bigtiff=False, plot_pxl_size=False):
@@ -713,18 +716,11 @@ class XeniumHESTData(HESTData):
         if self.transcript_df is not None:
             self.transcript_df.to_parquet(os.path.join(path, 'aligned_transcripts.parquet'))
             
-        if self.xenium_nuc_seg is not None:
-            print('Saving Xenium nucleus boundaries... (can be slow)')
-            with open(os.path.join(path, 'nuclei_xenium.geojson'), 'w') as f:
-                json.dump(self.xenium_nuc_seg, f, indent=4)
-                
-        if self.xenium_cell_seg is not None:
-            print('Saving Xenium cells boundaries... (can be slow)')
-            with open(os.path.join(path, 'cells_xenium.geojson'), 'w') as f:
-                json.dump(self.xenium_cell_seg, f, indent=4)
-            
-            
-        # TODO save segmentation    
+        # for shape in self.shapes:
+        #     if shape.name == 'tenx_cell' and shape.coordinate_system == 'dapi':
+        #         shape.shapes.to_parquet(os.path.join(path, f'cell_dapi_seg.parquet'))
+        #     elif shape.name == 'tenx_nucleus' and shape.coordinate_system == 'dapi':
+        #         shape.shapes.to_parquet(os.path.join(path, f'nuc_dapi_seg.parquet'))   
         
 
 def read_HESTData(
@@ -972,6 +968,8 @@ def unify_gene_names(adata: sc.AnnData, species="hsapiens", cache_dir='.genes', 
 
     gene_df = get_gene_db(species, cache_dir=cache_dir)
     
+    duplicated_genes = adata.var_names[adata.var_names.duplicated()]
+    print(f"{len(duplicated_genes)} genes before mapping")
     
     std_genes = np.intersect1d(gene_df.index.dropna().values, adata.var_names.values)
     unknown_genes = np.setdiff1d(adata.var_names.values, std_genes)
@@ -1002,6 +1000,12 @@ def unify_gene_names(adata: sc.AnnData, species="hsapiens", cache_dir='.genes', 
     mask = mapped.isna()['gene_names']
     mapped.loc[mask,'gene_names'] = mapped.index[mask].values
     adata.var_names = mapped['gene_names'].values
+    
+    duplicated_genes = adata.var_names[adata.var_names.duplicated()]
+    print(f"{len(duplicated_genes)} genes after mapping")
+    print('deduplicating...')
+    mask = ~adata.var_names.duplicated(keep='first')
+    adata = adata[:, mask]
     
     if drop:
         adata = adata[:, ~remaining]

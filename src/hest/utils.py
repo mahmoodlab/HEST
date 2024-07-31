@@ -956,7 +956,7 @@ def _sample_id_to_filename(id):
     return id + '.tif'            
 
             
-def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal: bool, cp_pixel_vis: bool, cp_adata: bool, cp_meta: bool, cp_cellvit, cp_patches, cp_contours):
+def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal: bool, cp_pixel_vis: bool, cp_adata: bool, cp_meta: bool, cp_cellvit, cp_patches, cp_contours, cp_dapi_seg):
     """ Internal use method, to transfer images to a `release` folder (`dest`)"""
     try:
         path = get_path_from_meta_row(row)
@@ -1028,6 +1028,17 @@ def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal:
         path_dest_cont = os.path.join(dest, 'tissue_seg', f'{id}_contours.geojson')
         shutil.copy(path_cont, path_dest_cont)
         
+    if cp_dapi_seg:
+        os.makedirs(os.path.join(dest, 'dapi_seg'), exist_ok=True)
+        path_dapi_seg = os.path.join(path, f'cell_dapi_seg.parquet')
+        path_dest_dapi_seg = os.path.join(dest, 'dapi_seg', f'{id}_cell_dapi_seg.parquet')
+        shutil.copy(path_dapi_seg, path_dest_dapi_seg)
+        
+        os.makedirs(os.path.join(dest, 'dapi_seg'), exist_ok=True)
+        path_dapi_seg = os.path.join(path, f'nuc_dapi_seg.parquet')
+        path_dest_dapi_seg = os.path.join(dest, 'dapi_seg', f'{id}_nuc_dapi_seg.parquet')
+        shutil.copy(path_dapi_seg, path_dest_dapi_seg)
+        
         
             
 def copy_processed(
@@ -1042,12 +1053,13 @@ def copy_processed(
     n_job=6, 
     cp_cellvit=True, 
     cp_patches=True, 
-    cp_contours=True
+    cp_contours=True,
+    cp_dapi_seg=True
 ):
     """ Internal use method, to transfer images to a `release` folder (`dest`)"""
     with concurrent.futures.ThreadPoolExecutor(max_workers=n_job) as executor:
         # Submit tasks to the executor
-        future_results = [executor.submit(_process_row, dest, row, cp_downscaled, cp_spatial, cp_pyramidal, cp_pixel_vis, cp_adata, cp_meta, cp_cellvit, cp_patches, cp_contours) for _, row in meta_df.iterrows()]
+        future_results = [executor.submit(_process_row, dest, row, cp_downscaled, cp_spatial, cp_pyramidal, cp_pixel_vis, cp_adata, cp_meta, cp_cellvit, cp_patches, cp_contours, cp_dapi_seg) for _, row in meta_df.iterrows()]
 
         # Retrieve results as they complete
         for future in tqdm(concurrent.futures.as_completed(future_results), total=len(meta_df)):

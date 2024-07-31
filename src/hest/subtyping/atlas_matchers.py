@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 from loguru import logger
 
+from hest.HESTData import unify_gene_names
+
 
 def reduce(X, indices=None, harmony=False):
     import umap
@@ -159,18 +161,27 @@ class SCMatcher:
         
         return cells[:, inter_genes], atlas_cells[:, inter_genes]
     
+    
+    def unify_genes(self, cells, atlas_cells, species):
+        cells = unify_gene_names(cells, species)
+        atlas_cells = unify_gene_names(atlas_cells, species)
+        
+        return cells, atlas_cells
+    
+    
     def match_atlas(
         self, 
         name, 
         cells: sc.AnnData, 
         atlas_cells: sc.AnnData, 
-        sub_atlas=1, 
-        sub_cells=0.00005,  
-        mode='cells',
-        chunk_len=None,
-        device=None,
-        level='cell_types'
+        unify_genes=False,
+        species='hsapiens',
+        level='cell_types',
+        **kwargs
     ) -> sc.AnnData:
+        
+        if unify_genes:
+            cells, atlas_cells = self.unify_genes(cells, atlas_cells, species)
 
         cells, atlas_cells = self.filter_common_genes(cells, atlas_cells)
         
@@ -178,7 +189,7 @@ class SCMatcher:
         
         atlas_cells.obs['cell_types'] = atlas_cells.obs[level]
         
-        preds = self.match_atlas_imp(name, cells, atlas_cells, sub_atlas, sub_cells, mode, chunk_len=chunk_len, device=device, level=level)
+        preds = self.match_atlas_imp(name, cells, atlas_cells, level, **kwargs)
         
         cells.obs['cell_type_pred'] = preds
         
@@ -186,7 +197,13 @@ class SCMatcher:
         
         
     @abstractmethod
-    def match_atlas_imp(self, name, cells: sc.AnnData, atlas_cells: sc.AnnData, sub_atlas=1, sub_cells=0.00005, mode='cells'):
+    def match_atlas_imp(
+        self, 
+        name, 
+        cells,
+        atlas_cells,
+        level
+    ):
         """ Output prediction for each cell """
         pass
 
@@ -288,14 +305,12 @@ class TangramMatcher(SCMatcher):
     def match_atlas_imp(
         self, 
         name, 
-        cells, 
-        atlas_cells, 
-        sub_atlas=1, 
-        sub_cells=0.00005, 
-        mode="cells", 
+        cells,
+        atlas_cells,
+        level, 
+        mode="cells",
         chunk_len=None, 
-        device=None, 
-        level='cell_types'
+        device=None
     ):
         import scanpy as sc
         import tangram as tg

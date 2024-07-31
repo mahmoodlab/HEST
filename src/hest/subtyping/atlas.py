@@ -36,6 +36,7 @@ def downsample_atlas(X, cell_types_arr):
 class SCAtlas:
     
     type_map = None
+    name = None
     
     def process(self) -> None:
         full_adata = self.process_imp()
@@ -494,8 +495,7 @@ class MELAtlas(SCAtlas):
         
 class BreastCancerAtlas(SCAtlas):
     
-    def __init__(self):
-        self.name = 'BRAC'
+    name = 'BRAC'
     
     def process_imp(self):
         import scanpy as sc

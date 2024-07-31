@@ -1,6 +1,6 @@
 import warnings
 from abc import abstractmethod
-from typing import Tuple
+from typing import List, Tuple
 
 import cv2
 import numpy as np
@@ -50,7 +50,12 @@ class WSI:
         pass
     
     @abstractmethod
-    def get_thumbnail(self, width, height):
+    def get_thumbnail(self, width, height) -> np.ndarray:
+        pass
+    
+    @abstractmethod
+    def level_dimensions(self) -> List[Tuple[int, int]]:
+        """ A list of (width, height) tuples, one for each level of the slide. level_dimensions[k] are the dimensions of level k. """
         pass
     
     def __repr__(self) -> str:
@@ -102,13 +107,21 @@ class NumpyWSI(WSI):
     def get_thumbnail(self, width, height) -> np.ndarray:
         return cv2.resize(self.img, (width, height))
     
+    def level_dimensions(self) -> List[Tuple[int, int]]:
+        """ A list of (width, height) tuples, one for each level of the slide. level_dimensions[k] are the dimensions of level k. """
+        return [self.get_dimensions()]
+    
 
 class OpenSlideWSI(WSI):
+    _numpy = None
+    
     def __init__(self, img: openslide.OpenSlide):
         super().__init__(img)
         
     def numpy(self) -> np.ndarray:
-        return self.get_thumbnail(self.width, self.height)
+        if self._numpy is None:
+            self._numpy = self.get_thumbnail(self.width, self.height)
+        return self._numpy
 
     def get_dimensions(self):
         return self.img.dimensions
@@ -116,24 +129,29 @@ class OpenSlideWSI(WSI):
     def read_region(self, location, level, size) -> np.ndarray:
         return np.array(self.img.read_region(location, level, size))
 
-    def get_thumbnail(self, width, height):
+    def get_thumbnail(self, width, height) -> np.ndarray:
         return np.array(self.img.get_thumbnail((width, height)))
     
     def get_best_level_for_downsample(self, downsample):
         return self.img.get_best_level_for_downsample(downsample)
     
-    def level_dimensions(self):
+    def level_dimensions(self) -> List[Tuple[int, int]]:
+        """ A list of (width, height) tuples, one for each level of the slide. level_dimensions[k] are the dimensions of level k. """
         return self.img.level_dimensions
     
     def level_downsamples(self):
         return self.img.level_downsamples
     
 class CuImageWSI(WSI):
+    _numpy = None
+    
     def __init__(self, img: 'CuImage'):
         super().__init__(img)
 
     def numpy(self) -> np.ndarray:
-        return self.get_thumbnail(self.width, self.height)
+        if self._numpy is None:
+            self._numpy = self.get_thumbnail(self.width, self.height)
+        return self._numpy
 
     def get_dimensions(self):
         return self.img.resolutions['level_dimensions'][0]
@@ -141,7 +159,7 @@ class CuImageWSI(WSI):
     def read_region(self, location, level, size) -> np.ndarray:
         return np.array(self.img.read_region(location=location, level=level, size=size))
     
-    def get_thumbnail(self, width, height):
+    def get_thumbnail(self, width, height) -> np.ndarray:
         downsample = self.width / width
         downsamples = self.img.resolutions['level_downsamples']
         closest = 0
@@ -166,7 +184,8 @@ class CuImageWSI(WSI):
             last = i
         return last
     
-    def level_dimensions(self):
+    def level_dimensions(self) -> List[Tuple[int, int]]:
+        """ A list of (width, height) tuples, one for each level of the slide. level_dimensions[k] are the dimensions of level k. """
         return self.img.resolutions['level_dimensions']
     
     def level_downsamples(self):

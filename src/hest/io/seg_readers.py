@@ -64,9 +64,15 @@ class GDFReader:
 
 class XeniumParquetCellReader(GDFReader):
     
+    def __init__(self, scaling=None):
+        self.scaling = scaling
+    
     def read_gdf(self, path) -> gpd.GeoDataFrame:    
         
         df = pd.read_parquet(path)
+        
+        if self.scaling is not None:
+            df['vertex_x'], df['vertex_y'] = df['vertex_x'] * self.scaling, df['vertex_y'] * self.scaling 
         
         df['xy'] = list(zip(df['vertex_x'], df['vertex_y']))
         df = df.drop(['vertex_x', 'vertex_y'], axis=1)
@@ -104,7 +110,7 @@ class TissueContourReader(GDFReader):
         return gdf
     
 
-def write_geojson(gdf: gpd.GeoDataFrame, path: str, category_key: str, extra_prop=False, uniform_prop=True, index_key: str=None) -> None:
+def write_geojson(gdf: gpd.GeoDataFrame, path: str, category_key: str, extra_prop=False, uniform_prop=True, index_key: str=None, chunk=False) -> None:
         
     if isinstance(gdf.geometry.iloc[0], Point):
         geometry = 'MultiPoint'
@@ -112,6 +118,19 @@ def write_geojson(gdf: gpd.GeoDataFrame, path: str, category_key: str, extra_pro
         geometry = 'MultiPolygon'
     else:
         raise ValueError(f"gdf.geometry[0] must be of type Point or Polygon, got {type(gdf.geometry.iloc[0])}")
+    
+    
+    if chunk:
+        n = 10
+        l = (len(gdf) // n) + 1
+        s = []
+        for i in range(n):
+            s.append(np.repeat(i, l))
+        cls = np.concatenate(s)
+        
+        gdf['_chunked'] = cls[:len(gdf)]
+        category_key = '_chunked'
+    
     
     groups = np.unique(gdf[category_key])
     colors = generate_colors(groups)
@@ -194,19 +213,19 @@ def read_parquet_schema_df(path: str) -> pd.DataFrame:
     return schema
     
     
-def cell_reader_factory(path) -> GDFReader:
+def cell_reader_factory(path, reader_kwargs={}) -> GDFReader:
     if path.endswith('.geojson'):
-        return GeojsonCellReader()
+        return GeojsonCellReader(**reader_kwargs)
     elif path.endswith('.parquet'):
         schema = read_parquet_schema_df(path)
         if 'geometry' in schema['column'].values:
-            return GDFParquetCellReader()
+            return GDFParquetCellReader(**reader_kwargs)
         else:
-            return XeniumParquetCellReader()
+            return XeniumParquetCellReader(**reader_kwargs)
     else:
         ext = path.split('.')[-1]
         raise ValueError(f'Unknown file extension {ext} for a cell segmentation file, needs to be .geojson or .parquet')
     
     
-def read_gdf(path) -> gpd.GeoDataFrame:
-    return cell_reader_factory(path).read_gdf(path)
+def read_gdf(path, reader_kwargs={}) -> gpd.GeoDataFrame:
+    return cell_reader_factory(path, reader_kwargs).read_gdf(path)

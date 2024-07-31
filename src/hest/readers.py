@@ -5,6 +5,7 @@ import math
 import os
 import shutil
 import threading
+import traceback
 import zipfile
 from abc import abstractmethod
 from concurrent.futures import ThreadPoolExecutor
@@ -14,13 +15,15 @@ import pandas as pd
 from tqdm import tqdm
 
 from hest.LazyShapes import LazyShapes
-from hest.io.seg_readers import read_gdf
+from hest.io.seg_readers import XeniumParquetCellReader, read_gdf, write_geojson
+from hest.pipeline import preprocess_cells_xenium
+from hest.registration import register_dapi_he, warp
 from hest.segmentation.cell_segmenters import segment_cellvit
 
 from .autoalign import autoalign_visium
 from .HESTData import (HESTData, STHESTData, VisiumHDHESTData, VisiumHESTData,
                        XeniumHESTData)
-from .utils import (SpotPacking, align_xenium_df, check_arg,
+from .utils import (ALIGNED_HE_FILENAME, SpotPacking, align_xenium_df, check_arg,
                     df_morph_um_to_pxl, find_biggest_img,
                     find_first_file_endswith, find_pixel_size_from_spot_coords,
                     get_col_selection, get_path_from_meta_row,
@@ -920,6 +923,17 @@ class XeniumReader(Reader):
         for file in os.listdir(path):
             if file.endswith('imagealignment.csv'):
                 alignment_path = os.path.join(path, file)
+                
+        dapi_path = None
+        dapi_path = find_first_file_endswith(
+            path,
+            'morphology_focus.ome.tif'
+        )
+        if dapi_path is None:
+            dapi_path = find_first_file_endswith(
+                os.path.join(path, 'morphology_focus'),
+                'morphology_focus_0000.ome.tif'
+            )
         
         st_object = self.read(
             img_path=os.path.join(path, img_filename),
@@ -929,7 +943,8 @@ class XeniumReader(Reader):
             transcripts_path=os.path.join(path, 'transcripts.parquet'),
             cells_path=os.path.join(path, 'cells.parquet'),
             nucleus_bound_path=os.path.join(path, 'nucleus_boundaries.parquet'),
-            cell_bound_path=os.path.join(path, 'cell_boundaries.parquet')
+            cell_bound_path=os.path.join(path, 'cell_boundaries.parquet'),
+            dapi_path=dapi_path
         )
         
         return st_object
@@ -1032,7 +1047,8 @@ class XeniumReader(Reader):
         cells_path: str = None,
         nucleus_bound_path: str = None,
         cell_bound_path: str = None,
-        use_cache: bool = False
+        use_cache: bool = False,
+        dapi_path = None
     ) -> XeniumHESTData:
         
         cur_dir = os.path.dirname(transcripts_path)   
@@ -1051,11 +1067,15 @@ class XeniumReader(Reader):
         
         shapes = []
         if cell_bound_path is not None:
-            xenium_cell_seg = LazyShapes('cell_bound_path', 'xenium_cell', 'LazyShapes')
+            xenium_cell_seg = LazyShapes(cell_bound_path, 'tenx_cell', 'dapi', reader=XeniumParquetCellReader, reader_kwargs={'scaling': 1 / pixel_size_morph})
             #self.__load_seg(cell_bound_path, 'Cell', alignment_file_path, pixel_size_morph)
-        
-        #if nucleus_bound_path is not None:
+                
+        if nucleus_bound_path is not None:
+            xenium_nuc_seg = LazyShapes(nucleus_bound_path, 'tenx_nucleus', 'dapi', reader=XeniumParquetCellReader, reader_kwargs={'scaling': 1 / pixel_size_morph})
         #    xenium_nuc_seg =  self.__load_seg(nucleus_bound_path, 'Nucleus', alignment_file_path, pixel_size_morph)
+        
+        shapes.append(xenium_cell_seg)
+        shapes.append(xenium_nuc_seg)
         
         print('Loading transcripts...')
         df_transcripts, dict = self.__load_transcripts(transcripts_path, alignment_file_path, pixel_size_morph, dict)
@@ -1082,7 +1102,9 @@ class XeniumReader(Reader):
             dict['pixel_size_um_estimated'], 
             dict, 
             transcript_df=df_transcripts,
-            cell_adata=cell_adata
+            cell_adata=cell_adata,
+            shapes=shapes,
+            dapi_path=dapi_path
         )
         return st_object
     
@@ -1101,7 +1123,7 @@ def reader_factory(path: str) -> Reader:
     else:
         raise NotImplementedError('')
         
-    
+
 def read_and_save(path: str, save_plots=True, pyramidal=True, bigtiff=False, plot_pxl_size=False, save_img=True, segment_tissue=False):
     """For internal use, determine the appropriate reader based on the raw data path, and
     automatically process the data at that location, then the processed files are dumped
@@ -1200,28 +1222,67 @@ def xenium_to_pseudo_visium(df: pd.DataFrame, pixel_size_he: float, pixel_size_m
     return adata
 
 
-def process_meta_df(meta_df, save_spatial_plots=True, pyramidal=True, save_img=True, cellvit=False, depr_seg=True):
+def process_meta_df(meta_df, save_spatial_plots=True, pyramidal=True, save_img=True, cellvit=False, depr_seg=True, preprocess=False, no_except=False):
     """Internal use method, process all the raw ST data in the meta_df"""
     for _, row in tqdm(meta_df.iterrows(), total=len(meta_df)):
-        path = get_path_from_meta_row(row)
-        bigtiff = not(isinstance(row['bigtiff'], float) or row['bigtiff'] == 'FALSE')
-        st = read_and_save(path, save_plots=save_spatial_plots, pyramidal=pyramidal, bigtiff=bigtiff, plot_pxl_size=True, save_img=save_img, segment_tissue=True)
-        row_dict = row.to_dict()
-
-        if depr_seg:
-            st.save_tissue_seg_pkl('', 'TENX24')
-            st.save_tissue_seg_jpg('', 'TENX24')
-        
-        # remove all whitespace values
-        row_dict = {k: (np.nan if isinstance(v, str) and not v.strip() else v) for k, v in row_dict.items()}
-        combined_meta = {**st.meta, **row_dict}
-        cols = get_col_selection()
-        combined_meta = {k: v for k, v in combined_meta.items() if k in cols}
-        with open(os.path.join(path, 'processed', f'meta.json'), 'w') as f:
-            json.dump(combined_meta, f, indent=3)
+        try:
+            path = get_path_from_meta_row(row)
+            bigtiff = not(isinstance(row['bigtiff'], float) or row['bigtiff'] == 'FALSE')
+            st = read_and_save(path, save_plots=save_spatial_plots, pyramidal=pyramidal, bigtiff=bigtiff, plot_pxl_size=True, save_img=save_img, segment_tissue=True)
             
-        st.dump_patches(os.path.join(path, 'processed'), 'patches')
-        a = 1
+            # TODO register segmentation for xenium and save
+            if preprocess:
+                if isinstance(st, XeniumHESTData):
+                    
+                    for shape in st.shapes:
+                        
+                        if shape.name == 'tenx_cell' and shape.coordinate_system == 'dapi':
+                            dapi_cells = shape.shapes
+                        elif shape.name == 'tenx_nucleus' and shape.coordinate_system == 'dapi':
+                            dapi_nuclei = shape.shapes
+                        
+                    reg_config = {}
+                    
+                    full_exp_dir = 'results/registration'
+                        
+                    warped_cells, warped_nuclei = preprocess_cells_xenium(
+                        os.path.join(path, 'processed', ALIGNED_HE_FILENAME), 
+                        st.dapi_path,
+                        dapi_cells,
+                        dapi_nuclei,
+                        reg_config,
+                        full_exp_dir,
+                        row['id']
+                    )
+                    
+                    
+                    print('Saving warped cells/nuclei...')
+                    warped_cells.to_parquet(os.path.join(path, 'processed', f'he_cell_seg.parquet'))
+                    warped_nuclei.to_parquet(os.path.join(path, 'processed', f'he_nucleus_seg.parquet'))
+                    write_geojson(warped_cells, os.path.join(path, 'processed', f'he_cell_seg.geojson'), '', chunk=True)
+                    write_geojson(warped_nuclei, os.path.join(path, 'processed', f'he_nucleus_seg.geojson'), '', chunk=True)
+                    
+            
+            row_dict = row.to_dict()
+
+            if depr_seg:
+                st.save_tissue_seg_pkl('', 'TENX24')
+                st.save_tissue_seg_jpg('', 'TENX24')
+            
+            # remove all whitespace values
+            row_dict = {k: (np.nan if isinstance(v, str) and not v.strip() else v) for k, v in row_dict.items()}
+            combined_meta = {**st.meta, **row_dict}
+            cols = get_col_selection()
+            combined_meta = {k: v for k, v in combined_meta.items() if k in cols}
+            with open(os.path.join(path, 'processed', f'meta.json'), 'w') as f:
+                json.dump(combined_meta, f, indent=3)
+                
+            st.dump_patches(os.path.join(path, 'processed'), 'patches')
+        except Exception as e:
+            traceback.print_exc()
+            if not no_except:
+                raise e
+        
         
 
 def _process_cellvit(available_gpus, available_gpus_lock, row, dest):

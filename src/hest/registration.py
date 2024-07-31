@@ -1,19 +1,23 @@
+from __future__ import annotations
+
 import os
 import tempfile
 from typing import Union
 
 import geopandas as gpd
 import numpy as np
+from PIL import Image
 from shapely import Polygon
 from tqdm import tqdm
 
 from hest.io.seg_readers import read_gdf
-from hest.utils import get_name_datetime, value_error_str
+from hest.utils import get_name_datetime, value_error_str, verify_paths
+from hest.wsi import WSI, wsi_factory
 
 
 def register_dapi_he(
+    he_path: Union[str, WSI, np.ndarray, openslide.OpenSlide, CuImage],  # type: ignore
     dapi_path: str, 
-    he_path: str, 
     registrar_dir: str = "results/registration",
     name = None,
     max_non_rigid_registration_dim_px=10000
@@ -36,24 +40,23 @@ def register_dapi_he(
     try:
         from valis import preprocessing, registration
         from valis.slide_io import BioFormatsSlideReader
+        from .SlideReaderAdapter import SlideReaderAdapter
     except Exception:
         import traceback
         traceback.print_exc()
         raise Exception("Valis needs to be installed independently. Please install Valis with `pip install valis-wsi` or follow instruction on their website")
         
-    
-    verify_paths_exist(paths=[dapi_path, he_path])
+    verify_paths([dapi_path, he_path])
     
     if name is None:
         date = get_name_datetime()
         registrar_dir = os.path.join(registrar_dir, date)
     else:
         registrar_dir = os.path.join(registrar_dir, name)
-        
 
     img_list = [
-        dapi_path,
-        he_path
+        he_path,
+        dapi_path
     ]
 
     registrar = registration.Valis(
@@ -65,7 +68,10 @@ def register_dapi_he(
 
     registrar.register(
         brightfield_processing_cls=preprocessing.HEDeconvolution,
-        reader_cls=BioFormatsSlideReader
+        reader_dict= {
+            he_path: [SlideReaderAdapter],
+            dapi_path: [BioFormatsSlideReader]
+        }
     )
 
     # Perform micro-registration on higher resolution images, aligning *directly to* the reference image
@@ -81,7 +87,8 @@ def register_dapi_he(
 
 def warp(
     shapes: Union[gpd.GeoDataFrame, str],
-    path_registrar: str
+    path_registrar: str,
+    curr_slide_name: str
 ) -> gpd.GeoDataFrame:
     """ Warp some shapes (points or polygons) from an existing Valis registration
 
@@ -113,7 +120,6 @@ def warp(
 
     registrar = registration.load_registrar(path_registrar)
     slide_obj = registrar.get_slide(registrar.reference_img_f)
-
     if isinstance(shapes.iloc[0].geometry, Polygon):
         gdf['points'] = [list(polygon.exterior.coords) for polygon in gdf.geometry]
         gdf['_cell_id'] = np.arange(len(gdf))
@@ -125,7 +131,9 @@ def warp(
         gdf['_cell_id'] = np.arange(len(point_gdf))
         points = list(zip(gdf.geometry.x, gdf.geometry.y))
         
-    warped = slide_obj.warp_xy(points)
+    morph = registrar.get_slide(curr_slide_name)
+    warped = morph.warp_xy_from_to(points, slide_obj)
+    #warped = slide_obj.warp_xy(points)
     point_gdf['warped'] = warped.tolist()
 
     aggr_df = point_gdf.groupby('_cell_id').agg({
@@ -138,6 +146,6 @@ def warp(
     
     gdf.geometry = polygons
     
-    registration.kill_jvm()
+    #registration.kill_jvm()
     return gdf
     
