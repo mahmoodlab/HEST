@@ -11,7 +11,7 @@ from shapely import Polygon
 from tqdm import tqdm
 
 from hest.io.seg_readers import read_gdf
-from hest.utils import get_name_datetime, value_error_str, verify_paths
+from hest.utils import get_name_datetime, tiff_save, value_error_str, verify_paths
 from hest.wsi import WSI, wsi_factory
 
 
@@ -20,7 +20,9 @@ def register_dapi_he(
     dapi_path: str, 
     registrar_dir: str = "results/registration",
     name = None,
-    max_non_rigid_registration_dim_px=10000
+    max_non_rigid_registration_dim_px=10000,
+    micro_rigid=False,
+    affine=None
 ) -> str:
     """ Register the DAPI WSI to HE with a fine-grained ridig + non-rigid transform with Valis
 
@@ -38,9 +40,10 @@ def register_dapi_he(
     """
     
     try:
-        from valis import preprocessing, registration
+        from valis import preprocessing, registration, feature_detectors, affine_optimizer
         from valis.slide_io import BioFormatsSlideReader
         from .SlideReaderAdapter import SlideReaderAdapter
+        from valis.micro_rigid_registrar import MicroRigidRegistrar
     except Exception:
         import traceback
         traceback.print_exc()
@@ -53,18 +56,51 @@ def register_dapi_he(
         registrar_dir = os.path.join(registrar_dir, date)
     else:
         registrar_dir = os.path.join(registrar_dir, name)
+        
+    if affine is not None:
+        width, height = wsi_factory(dapi_path).get_dimensions()
+        corners = np.array([
+            [0, 0, 1],
+            [width, 0, 1],
+            [width, height, 1],
+            [0, height, 1]
+        ])
+        warped_corners = np.abs((np.linalg.inv(affine) @ corners.T).T)
+        left = round(warped_corners[:, 0].min())
+        right = round(warped_corners[:, 0].max())
+        top = round(warped_corners[:, 1].min())
+        bottom = round(warped_corners[:, 1].max())
+        s_width = right - left
+        s_height = bottom - top
+        
+        cropped_he = wsi_factory(he_path).read_region((left, top), 0, (s_width, s_height))
+        #cropped_he = wsi_factory(he_path).numpy()[top:bottom, left:right, :]
+        tiff_save(cropped_he, 'cropped.tif')
+        he_path = 'cropped.tif'
 
     img_list = [
         he_path,
         dapi_path
     ]
 
+    feature_detector_cls = feature_detectors.KazeFD
+    
+    #affine_optimizer_cls = affine_optimizer.AffineOptimizerMattesMI
+    
+    micro_rigid_registrar_cls = MicroRigidRegistrar if micro_rigid else {}
+
     registrar = registration.Valis(
         '', 
         registrar_dir, 
         reference_img_f=he_path, 
         align_to_reference=True,
-        img_list=img_list)
+        img_list=img_list,
+        check_for_reflections=False,
+        #affine_optimizer_cls=affine_optimizer_cls,
+        #feature_detector_cls=feature_detector_cls,
+       # micro_rigid_registrar_params={'scale': 0.2},
+        #micro_rigid_registrar_cls=micro_rigid_registrar_cls
+    )
 
     registrar.register(
         brightfield_processing_cls=preprocessing.HEDeconvolution,

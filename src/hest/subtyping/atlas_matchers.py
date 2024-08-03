@@ -157,7 +157,8 @@ class SCMatcher:
         inter_genes = np.intersect1d(cells.var_names, atlas_cells.var_names)
         missing = set(cells.var_names) - set(atlas_cells.var_names)
         if len(missing) > 0:
-            logger.warning(f"{len(missing)} out of {len(cells.var_names)} genes are missing in the Atlas: {missing}")
+            missing_str = missing if len(missing) < 100 else str(missing)[:500] + '...'
+            logger.warning(f"{len(missing)} out of {len(cells.var_names)} genes are missing in the Atlas: {missing_str}")
         
         return cells[:, inter_genes], atlas_cells[:, inter_genes]
     

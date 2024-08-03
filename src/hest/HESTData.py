@@ -713,8 +713,8 @@ class XeniumHESTData(HESTData):
         if self.cell_adata is not None:
             self.cell_adata.write_h5ad(os.path.join(path, 'aligned_cells.h5ad'))
         
-        if self.transcript_df is not None:
-            self.transcript_df.to_parquet(os.path.join(path, 'aligned_transcripts.parquet'))
+        #if self.transcript_df is not None:
+        #    self.transcript_df.to_parquet(os.path.join(path, 'aligned_transcripts.parquet'))
             
         # for shape in self.shapes:
         #     if shape.name == 'tenx_cell' and shape.coordinate_system == 'dapi':

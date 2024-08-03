@@ -51,6 +51,10 @@ def deprecated(func):
     return new_func
 
 
+def get_n_workers(n_workers):
+    return os.cpu_count() if n_workers == -1 else n_workers
+
+
 def verify_paths(paths, suffix=""):
     for path in paths:
         if not os.path.exists(path):

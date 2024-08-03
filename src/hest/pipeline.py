@@ -10,8 +10,9 @@ import yaml
 from loguru import logger
 
 from hest.HESTData import XeniumHESTData, load_hest, read_HESTData
-from hest.io.seg_readers import read_gdf, write_geojson
+from hest.io.seg_readers import GeojsonCellReader, read_gdf, write_geojson
 from hest.registration import register_dapi_he, warp
+from hest.segmentation.cell_segmenters import bin_per_cell, cell_segmenter_factory
 from hest.subtyping.atlas import get_atlas_from_name
 from hest.subtyping.subtyping import assign_cell_types
 from hest.utils import get_name_datetime, verify_paths
@@ -149,3 +150,36 @@ def subtyping_pipeline(
     )
     
     return adata
+
+
+def preprocess_cells_visium_hd(
+    he_wsi: Union[str, WSI, np.ndarray, openslide.OpenSlide, CuImage],  # type: ignore
+    full_exp_dir: str,
+    name: str,
+    pixel_size: str,
+    segment_config: dict,
+    binning_config: dict,
+    bc_matrix_path: str,
+    bin_positions_path: str
+) -> Tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
+    
+    method = segment_config.pop('method')
+    segment_config['save_dir'] = full_exp_dir
+    
+    segmenter = cell_segmenter_factory(method)
+    logger.info('Segmenting cells...')
+    #path_geojson = segmenter.segment_cells(he_wsi, name, pixel_size, **segment_config)
+    #nuc_seg = GeojsonCellReader().read_gdf(path_geojson)
+    
+    nuc_seg = gpd.read_parquet('hest_data/cellvit_seg/TENX128_cellvit_seg.parquet')
+    
+    
+    logger.info('Expanding nuclei/binning expression per cell...')
+    adata = bin_per_cell(
+        nuc_seg, 
+        bc_matrix_path,
+        bin_positions_path,
+        pixel_size=pixel_size
+    )
+    
+    adata.write_h5ad(os.path.join(full_exp_dir, f'cell_bin.h5'))

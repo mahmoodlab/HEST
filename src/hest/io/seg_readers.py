@@ -1,4 +1,6 @@
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import json
+import time
 import warnings
 from abc import abstractmethod
 
@@ -45,13 +47,18 @@ def _process(x, extra_props, index_key, class_name):
 
 def _read_geojson(path, class_name=None, extra_props=False, index_key=None) -> gpd.GeoDataFrame:
     with open(path) as f:
+        t1 = time.time()
         ls = json.load(f)
+        t3 = time.time()
+        print(f"load geojson in {t3 - t1}s")
         
         sub_gdfs = []
         for x in tqdm(ls):
             sub_gdfs.append(_process(x, extra_props, index_key, class_name))
 
         gdf = gpd.GeoDataFrame(pd.concat(sub_gdfs, ignore_index=True))
+        t2 = time.time()
+        print(f"Read geojson in {t2 - t1}s")
         
     return gdf
 
@@ -66,23 +73,67 @@ class XeniumParquetCellReader(GDFReader):
     
     def __init__(self, scaling=None):
         self.scaling = scaling
-    
-    def read_gdf(self, path) -> gpd.GeoDataFrame:    
         
+    def _process(self, chunk, i) -> pd.DataFrame:
+        print(f'start {i}')
+        chunk = chunk.groupby('cell_id', sort=False).agg({
+            'xy': Polygon
+        }).reset_index()
+        print(f'end {i}')
+        return chunk
+    
+    def read_gdf(self, path) -> gpd.GeoDataFrame:
+        import dask.array as da
+        from collections import defaultdict
+        
+        t1 = time.time()
         df = pd.read_parquet(path)
         
         if self.scaling is not None:
             df['vertex_x'], df['vertex_y'] = df['vertex_x'] * self.scaling, df['vertex_y'] * self.scaling 
         
-        df['xy'] = list(zip(df['vertex_x'], df['vertex_y']))
-        df = df.drop(['vertex_x', 'vertex_y'], axis=1)
+        def fn(block):
+            groups = defaultdict(lambda: [])
+            [groups[row[0]].append((row[1], row[2])) for row in block]
+            g = np.array([Polygon(value) for _, value in groups.items() if len(value) > 2])
+            names = np.array([key for key, value in groups.items() if len(value) > 2])
+            k = len(block) - len(g)
+            g = np.pad(g, k)
+            names = np.pad(names, k)
+            return np.column_stack((names, names, g))
+
+        df['vertex_x'] = df['vertex_x'].astype(np.float32)
+        df['vertex_y'] = df['vertex_y'].astype(np.float32)
+        arr = df[['cell_id', 'vertex_x', 'vertex_y']].values
         
-        df = df.groupby('cell_id').agg({
-            'xy': Polygon
-        }).reset_index()
+        chunks = 20000
+        n_chunks = 100
+        l = len(df) // n_chunks
+        start = 0
+        chunk_lens = ()
+        while start < len(df):
+            end = min(start + l, len(df))
+            while end < len(df) and df.iloc[end]['cell_id'] == df.iloc[end - 1]['cell_id']:
+                end += 1
+            chunk_lens += (end - start),
+            start = end
+            
+        assert np.array(chunk_lens).sum() == len(df)    
+        a_np = da.from_array(arr, chunks=(chunk_lens, 3))
         
-        gdf = gpd.GeoDataFrame(df, geometry=df['xy'])
-        gdf = gdf.drop(['xy'], axis=1)
+        op = da.map_blocks(fn, a_np, dtype=np.ndarray)
+        res = op.compute(scheduler='processes')
+        
+        res = res[res[:, 2] != 0]
+        
+        # df['xy'] = list(zip(df['vertex_x'], df['vertex_y']))
+        # df = df.drop(['vertex_x', 'vertex_y'], axis=1)    
+        
+        
+        gdf = gpd.GeoDataFrame(res[:, 0], geometry=res[:, 2], columns=['cell_id'])
+        t2 = time.time()
+        print(f"Loaded Xenium cells in {t2 - t1}s")
+        #gdf = gdf.drop(['xy'], axis=1)
         return gdf
 
 

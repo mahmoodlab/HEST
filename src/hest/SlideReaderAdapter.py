@@ -20,7 +20,7 @@ class SlideReaderAdapter(SlideReader):
         slide_meta.is_rgb = True
         slide_meta.channel_names = self._get_channel_names('NO_NAME')
         slide_meta.n_channels = 1
-        slide_meta.pixel_physical_size_xyu = [1, 1, PIXEL_UNIT]
+        slide_meta.pixel_physical_size_xyu = [0.25, 0.25, PIXEL_UNIT]
         level_dim = self.wsi.level_dimensions() #self._get_slide_dimensions()
         slide_meta.slide_dimensions = np.array([list(item) for item in level_dim])
 

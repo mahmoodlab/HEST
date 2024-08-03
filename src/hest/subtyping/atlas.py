@@ -324,6 +324,7 @@ class BoneAtlas(SCAtlas):
 
 
 class GBMAtlas(SCAtlas):
+    name = 'GBM2'
     
     def __init__(self):
         self.name = 'GBM2'

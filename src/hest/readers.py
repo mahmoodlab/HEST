@@ -16,7 +16,7 @@ from tqdm import tqdm
 
 from hest.LazyShapes import LazyShapes
 from hest.io.seg_readers import XeniumParquetCellReader, read_gdf, write_geojson
-from hest.pipeline import preprocess_cells_xenium
+from hest.pipeline import preprocess_cells_visium_hd, preprocess_cells_xenium
 from hest.registration import register_dapi_he, warp
 from hest.segmentation.cell_segmenters import segment_cellvit
 
@@ -965,18 +965,8 @@ class XeniumReader(Reader):
         pixel_size_estimated = pixel_size_morph * cart_dist
         return pixel_size_estimated
     
-
-    def __read_cache(self, cur_dir, dict):
-        import scanpy as sc
-        
-        adata = sc.read_h5ad(os.path.join(cur_dir, 'cached_pseudo_visium.h5ad'))
-        cached_metrics = json.load(open(os.path.join(cur_dir, 'cached_metrics.json')))
-        dict['pixel_size_um_embedded'] = cached_metrics['pixel_size_um_embedded']
-        dict['pixel_size_um_estimated'] = cached_metrics['pixel_size_um_estimated']
-        return adata, dict
     
-    
-    def __align(self, alignment_file_path, pixel_size_morph, df_transcripts, x_key='x_location', y_key='y_location'):
+    def _align_and_estimate_px_size(self, alignment_file_path, pixel_size_morph, df_transcripts, x_key='x_location', y_key='y_location'):
 
         df_transcripts, he_to_morph_matrix, alignment_matrix = align_xenium_df(alignment_file_path, pixel_size_morph, df_transcripts, x_key, y_key)
 
@@ -1004,7 +994,7 @@ class XeniumReader(Reader):
         
         if alignment_file_path is not None:
             print('found an alignment file, aligning transcripts...')
-            df_transcripts, pixel_size_estimated, _ = self.__align(alignment_file_path, pixel_size_morph, df_transcripts)
+            df_transcripts, pixel_size_estimated, _ = self._align_and_estimate_px_size(alignment_file_path, pixel_size_morph, df_transcripts)
             dict['pixel_size_um_estimated'] = pixel_size_estimated
         else:
             dict['pixel_size_um_estimated'] = pixel_size_morph
@@ -1027,7 +1017,7 @@ class XeniumReader(Reader):
         
         if alignment_file_path is not None:
             # convert cell coordinates from um in the morphology image to um in the H&E image
-            df_cells, _, _ = self.__align(alignment_file_path, pixel_size_morph, df_cells, x_key='x_centroid', y_key='y_centroid')
+            df_cells, _, _ = self._align_and_estimate_px_size(alignment_file_path, pixel_size_morph, df_cells, x_key='x_centroid', y_key='y_centroid')
         df_cells['he_x'] = df_cells['x_centroid'] / pixel_size_morph
         df_cells['he_y'] = df_cells['y_centroid'] / pixel_size_morph
         
@@ -1232,6 +1222,7 @@ def process_meta_df(meta_df, save_spatial_plots=True, pyramidal=True, save_img=T
             
             # TODO register segmentation for xenium and save
             if preprocess:
+                full_exp_dir = os.path.join('results/preprocessing', row['id'])
                 if isinstance(st, XeniumHESTData):
                     
                     for shape in st.shapes:
@@ -1242,8 +1233,6 @@ def process_meta_df(meta_df, save_spatial_plots=True, pyramidal=True, save_img=T
                             dapi_nuclei = shape.shapes
                         
                     reg_config = {}
-                    
-                    full_exp_dir = 'results/registration'
                         
                     warped_cells, warped_nuclei = preprocess_cells_xenium(
                         os.path.join(path, 'processed', ALIGNED_HE_FILENAME), 
@@ -1261,7 +1250,24 @@ def process_meta_df(meta_df, save_spatial_plots=True, pyramidal=True, save_img=T
                     warped_nuclei.to_parquet(os.path.join(path, 'processed', f'he_nucleus_seg.parquet'))
                     write_geojson(warped_cells, os.path.join(path, 'processed', f'he_cell_seg.geojson'), '', chunk=True)
                     write_geojson(warped_nuclei, os.path.join(path, 'processed', f'he_nucleus_seg.geojson'), '', chunk=True)
-                    
+            elif isinstance(st, VisiumHDHESTData):
+                segment_config = {'method': 'cellvit'}
+                binning_config = {}
+                
+                bc_matrix_path = find_first_file_endswith(os.path.join(path, 'binned_outputs', 'square_002um'), 'filtered_feature_bc_matrix.h5')
+                bin_positions_path = find_first_file_endswith(os.path.join(path, 'binned_outputs', 'square_002um', 'spatial'), 'tissue_positions.parquet')
+                
+                preprocess_cells_visium_hd(
+                    os.path.join(path, 'processed', ALIGNED_HE_FILENAME),
+                    full_exp_dir,
+                    row['id'],
+                    st.pixel_size,
+                    segment_config,
+                    binning_config,
+                    bc_matrix_path,
+                    bin_positions_path
+                )
+                
             
             row_dict = row.to_dict()
 
