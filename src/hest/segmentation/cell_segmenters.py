@@ -340,6 +340,18 @@ def expand_nuclei(gdf, pixel_size, exp_um=5, plot=False, n_workers=-1):
     
     logger.info('Create Voronoi diagram...')
     
+    points_series = gpd.GeoSeries(points)
+    x = points_series.x
+    y = points_series.y
+    xy = np.column_stack((x, y))
+    vor = Voronoi(xy)
+    
+    logger.info('Convert Voronoi regions to polygons...')
+    
+    voronoi_poly = np.array([Polygon([vor.vertices[i] for i in region]) for region in vor.regions])[:-len(ghost_points)]
+    gdf_vor = gpd.GeoDataFrame(geometry=voronoi_poly)
+    gdf_vor.index = gdf_cell.index
+    
     # Geopandas voronoi_polygons doesnt return polygons in order, use shapely.vornoi_polygons instead
     # TODO ordered will be added in shapely 2.1, uncomment when released
     # voronoi_poly = gpd.GeoSeries(voronoi_polygons(MultiPoint(points), ordered=True))
