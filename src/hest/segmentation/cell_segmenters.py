@@ -299,10 +299,22 @@ def _buffer(block, exp_pixel):
     return block.buffer(exp_pixel)
 
 
-def expand_nuclei(gdf, pixel_size, exp_um=5, plot=False, n_workers=-1):
+def expand_nuclei(gdf: gpd.GeoDataFrame, pixel_size: float, exp_um=5, plot=False, n_workers=-1) -> gpd.GeoDataFrame:
+    """ Expand the nuclei in every direction by `exp_um` um (derived using `pixel_size`)
+
+    Args:
+        gdf (gpd.GeoDataFrame): geodataframe of nuclei as polygons
+        pixel_size (float): pixel size in um/px for the coordinate system of gdf
+        exp_um (int, optional): expansion in um. Defaults to 5.
+        plot (bool, optional): whenever to plot the results (will be slow for >1000 nuclei). Defaults to False.
+        n_workers (int, optional): number of threads (-1 to use all cpu cores). Defaults to -1.
+
+    Returns:
+        gpd.GeoDataFrame: expanded nucleis
+    """
+    
     from scipy.spatial import Voronoi
-    from shapely import voronoi_polygons
-    from shapely.geometry import Point, Polygon, MultiPoint
+    from shapely.geometry import Point, Polygon
     
     exp_pixel = exp_um / pixel_size
     gdf_cell = gdf.copy()
@@ -348,12 +360,13 @@ def expand_nuclei(gdf, pixel_size, exp_um=5, plot=False, n_workers=-1):
     
     logger.info('Convert Voronoi regions to polygons...')
     
-    voronoi_poly = np.array([Polygon([vor.vertices[i] for i in region]) for region in vor.regions])[:-len(ghost_points)]
+    voronoi_poly = np.array([Polygon([vor.vertices[i] for i in region]) for region in vor.regions])[vor.point_region][:-len(ghost_points)]
     gdf_vor = gpd.GeoDataFrame(geometry=voronoi_poly)
     gdf_vor.index = gdf_cell.index
     
     # Geopandas voronoi_polygons doesnt return polygons in order, use shapely.vornoi_polygons instead
     # TODO ordered will be added in shapely 2.1, uncomment when released
+    # Note that the scipy implementation might still offer better results but it will be slower
     # voronoi_poly = gpd.GeoSeries(voronoi_polygons(MultiPoint(points), ordered=True))
     # gdf_vor = gpd.GeoDataFrame(geometry=voronoi_poly).explode().iloc[:-len(ghost_points)]
     # gdf_vor.index = gdf_cell.index
@@ -361,10 +374,10 @@ def expand_nuclei(gdf, pixel_size, exp_um=5, plot=False, n_workers=-1):
     logger.info('Filter invalid polygons...')
     
     invalid_mask = ~gdf_vor.is_valid
-    # gdf.loc[~invalid_mask, 'geometry'] = gdf.loc[~invalid_mask, 'geometry'].buffer(0)
-    # invalid_nb = invalid_mask.sum()
-    # if invalid_nb > 0:
-    #    logger.warning(f'Found {invalid_nb} invalid shapes during nuclei expansion')
+    gdf.loc[~invalid_mask, 'geometry'] = gdf.loc[~invalid_mask, 'geometry'].buffer(0)
+    invalid_nb = invalid_mask.sum()
+    if invalid_nb > 0:
+       logger.warning(f'Found {invalid_nb} invalid shapes during nuclei expansion')
     
     logger.info('Intersect Voronoi regions with buffered nuclei...')
     
@@ -372,16 +385,19 @@ def expand_nuclei(gdf, pixel_size, exp_um=5, plot=False, n_workers=-1):
     
     gdf_cell.geometry = inter
     
+    gdf_cell = gdf_cell.union(gdf.loc[~invalid_mask])
+    
     if plot:
         logger.info('Plotting...')
         _, ax = plt.subplots(figsize=(50, 50))
 
-        gdf_vor.geometry.plot(ax=ax, color='green', alpha=0.5, edgecolor='black', label='Polygons2')
+        #gdf_vor.geometry.plot(ax=ax, color='green', alpha=0.5, edgecolor='black', label='Polygons2')
         gdf_cell.plot(ax=ax, color='red', alpha=0.5, edgecolor='black', label='Polygons1')
+        gdf.plot(ax=ax, color='grey', alpha=0.5, edgecolor='black', label='Polygons1')
 
         plt.legend()
         plt.gca().set_aspect('equal')
-        plt.savefig('poly.jpg')
+        plt.savefig('poly2.jpg')
         
     return gdf_cell
 
