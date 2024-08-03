@@ -341,9 +341,10 @@ def expand_nuclei(gdf, pixel_size, exp_um=5, plot=False, n_workers=-1):
     logger.info('Create Voronoi diagram...')
     
     # Geopandas voronoi_polygons doesnt return polygons in order, use shapely.vornoi_polygons instead
-    voronoi_poly = gpd.GeoSeries(voronoi_polygons(MultiPoint(points), ordered=True))
-    gdf_vor = gpd.GeoDataFrame(geometry=voronoi_poly).explode().iloc[:-len(ghost_points)]
-    gdf_vor.index = gdf_cell.index
+    # TODO ordered will be added in shapely 2.1, uncomment when released
+    # voronoi_poly = gpd.GeoSeries(voronoi_polygons(MultiPoint(points), ordered=True))
+    # gdf_vor = gpd.GeoDataFrame(geometry=voronoi_poly).explode().iloc[:-len(ghost_points)]
+    # gdf_vor.index = gdf_cell.index
     
     logger.info('Filter invalid polygons...')
     
