@@ -15,7 +15,7 @@ from hest.utils import get_path_from_meta_row
 level = 'predicted.celltypel1'
 
 
-def assign_cell_types(cell_adata, atlas_name, name, method='tangram', full_atlas=False, organ=None, matcher_kwargs={}) -> sc.AnnData:
+def assign_cell_types(cell_adata, atlas_name, name, method='tangram', full_atlas=False, organ=None, **matcher_kwargs) -> sc.AnnData:
     matcher = matcher_factory(method)
     
     
@@ -34,8 +34,7 @@ def assign_cell_types(cell_adata, atlas_name, name, method='tangram', full_atlas
         cell_adata, 
         atlas_cells, 
         **matcher_kwargs)
-    cell_adata.obs['cell_types'] = preds
-    return cell_adata
+    return preds
     
 
 def assign_cell_types_hest(meta_df, method='tangram'):

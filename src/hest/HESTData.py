@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sys
 import warnings
 from typing import Dict, List, Union
 
@@ -10,6 +11,7 @@ import cv2
 import geopandas as gpd
 import matplotlib
 import numpy as np
+from loguru import logger
 
 from hest.io.seg_readers import (TissueContourReader,
                                  write_geojson)
@@ -32,7 +34,7 @@ from .segmentation.segmentation import (apply_otsu_thresholding,
                                         mask_to_contours, save_pkl,
                                         segment_tissue_deep)
 from .utils import (ALIGNED_HE_FILENAME, check_arg, deprecated,
-                    find_first_file_endswith, get_path_from_meta_row,
+                    find_first_file_endswith, get_k_genes_from_df, get_path_from_meta_row,
                     plot_verify_pixel_size, tiff_save, verify_paths)
 from .vst_save_utils import initsave_hdf5
 
@@ -104,7 +106,7 @@ class HESTData:
         else:
             self._tissue_contours = tissue_contours
         
-        if 'total_counts' not in self.adata.var_names:
+        if 'total_counts' not in self.adata.var_names and len(self.adata) > 0:
             sc.pp.calculate_qc_metrics(self.adata, inplace=True)
         
         
@@ -434,6 +436,13 @@ class HESTData:
     def __verify_mask(self):
         if self.tissue_contours is None:
             raise Exception("No existing tissue mask for that sample, compute the tissue mask with self.segment_tissue()")        
+    
+    
+    def get_shapes(self, name, coordinate_system):
+        for shape in self.shapes:
+            if shape.name == name and shape.coordinate_system == coordinate_system:
+                return shape
+        return None
     
 
     @deprecated
@@ -805,19 +814,33 @@ def mask_and_patchify_bench(meta_df: pd.DataFrame, save_dir: str, use_mask=True,
         i += 1
         
 
-def create_benchmark_data(meta_df, save_dir:str, K, adata_folder, use_mask, keep_largest=None):
+def create_benchmark_data(meta_df, save_dir:str, K):
     os.makedirs(save_dir, exist_ok=True)
-    if K is not None:
-        splits = meta_df.groupby('patient')['id'].agg(list).to_dict()
-        create_splits(os.path.join(save_dir, 'splits'), splits, K=K)
+    
+    meta_df['patient'] = meta_df['patient'].fillna('Patient 1')
+    
+    get_k_genes_from_df(meta_df, 50, 'var', os.path.join(save_dir, 'var_50genes.json'))
+    
+    splits = meta_df.groupby(['dataset_title', 'patient'])['id'].agg(list).to_dict()
+    create_splits(os.path.join(save_dir, 'splits'), splits, K=K)
     
     os.makedirs(os.path.join(save_dir, 'patches'), exist_ok=True)
-    mask_and_patchify_bench(meta_df, os.path.join(save_dir, 'patches'), use_mask=use_mask, keep_largest=keep_largest)
+    #mask_and_patchify_bench(meta_df, os.path.join(save_dir, 'patches'), use_mask=use_mask, keep_largest=keep_largest)
     
+    os.makedirs(os.path.join(save_dir, 'patches_vis'), exist_ok=True)
     os.makedirs(os.path.join(save_dir, 'adata'), exist_ok=True)
-    for index, row in meta_df.iterrows():
+    for _, row in meta_df.iterrows():
         id = row['id']
-        src_adata = os.path.join(adata_folder, id + '.h5ad')
+        path = os.path.join(get_path_from_meta_row(row), 'processed')
+        src_patch = os.path.join(path, 'patches.h5')
+        dst_patch = os.path.join(save_dir, 'patches', id + '.h5')
+        shutil.copy(src_patch, dst_patch)
+        
+        src_vis = os.path.join(path, 'patches_patch_vis.png')
+        dst_vis = os.path.join(save_dir, 'patches_vis', id + '.png')
+        shutil.copy(src_vis, dst_vis)
+        
+        src_adata = os.path.join(path, 'aligned_adata.h5ad')
         dst_adata = os.path.join(save_dir, 'adata', id + '.h5ad')
         shutil.copy(src_adata, dst_adata)
         
@@ -968,12 +991,12 @@ def unify_gene_names(adata: sc.AnnData, species="hsapiens", cache_dir='.genes', 
 
     gene_df = get_gene_db(species, cache_dir=cache_dir)
     
-    duplicated_genes = adata.var_names[adata.var_names.duplicated()]
-    print(f"{len(duplicated_genes)} genes before mapping")
+    duplicated_genes_before = adata.var_names[adata.var_names.duplicated()]
+    #print(f"{len(duplicated_genes)} duplicated genes before mapping")
     
     std_genes = np.intersect1d(gene_df.index.dropna().values, adata.var_names.values)
     unknown_genes = np.setdiff1d(adata.var_names.values, std_genes)
-    print(f'Found {len(unknown_genes)} unknown genes out of {len(adata.var_names)}')
+    logger.info(f'found {len(unknown_genes)} unknown genes out of {len(adata.var_names)}')
     
     
     mg.set_caching('db')
@@ -994,16 +1017,15 @@ def unify_gene_names(adata: sc.AnnData, species="hsapiens", cache_dir='.genes', 
     
     remaining = np.setdiff1d(unknown_genes, alias_map.index.values)
     
-    print(f"Mapped {len(alias_map)} aliases to their parent name, {len(remaining)} remaining unknown genes")
-    
     mapped = pd.DataFrame(index=adata.var_names).merge(alias_map, left_index=True, right_index=True, how='left')
     mask = mapped.isna()['gene_names']
     mapped.loc[mask,'gene_names'] = mapped.index[mask].values
     adata.var_names = mapped['gene_names'].values
     
-    duplicated_genes = adata.var_names[adata.var_names.duplicated()]
-    print(f"{len(duplicated_genes)} genes after mapping")
-    print('deduplicating...')
+    duplicated_genes_after = adata.var_names[adata.var_names.duplicated()]
+    if len(duplicated_genes_after) > len(duplicated_genes_before):
+        logger.warning(f"duplicated genes increased from {len(duplicated_genes_before)} to {len(duplicated_genes_after)} after resolving aliases")
+    logger.info('deduplicating...')
     mask = ~adata.var_names.duplicated(keep='first')
     adata = adata[:, mask]
     

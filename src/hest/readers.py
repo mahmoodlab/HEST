@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import json
 import math
 import os
@@ -12,23 +13,20 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
 
+from hest.io.seg_readers import (XeniumParquetCellReader, read_gdf)
 from hest.LazyShapes import LazyShapes
-from hest.io.seg_readers import XeniumParquetCellReader, read_gdf, write_geojson
-from hest.pipeline import preprocess_cells_visium_hd, preprocess_cells_xenium
-from hest.registration import register_dapi_he, warp
 from hest.segmentation.cell_segmenters import segment_cellvit
 
 from .autoalign import autoalign_visium
 from .HESTData import (HESTData, STHESTData, VisiumHDHESTData, VisiumHESTData,
                        XeniumHESTData)
-from .utils import (ALIGNED_HE_FILENAME, SpotPacking, align_xenium_df, check_arg,
-                    df_morph_um_to_pxl, find_biggest_img,
+from .utils import (SpotPacking, align_xenium_df,
+                    check_arg, df_morph_um_to_pxl, find_biggest_img,
                     find_first_file_endswith, find_pixel_size_from_spot_coords,
-                    get_col_selection, get_path_from_meta_row,
-                    get_path_relative, helper_mex, load_image, load_wsi,
-                    metric_file_do_dict, read_10x_seg, register_downscale_img)
+                    get_path_from_meta_row,
+                    get_path_relative, helper_mex, load_wsi,
+                    metric_file_do_dict, read_10x_seg, register_downscale_img, verify_paths)
 
 LOCAL = False
 if LOCAL:
@@ -43,7 +41,7 @@ if LOCAL:
 
 class Reader:
     
-    def auto_read(self, path: str) -> HESTData:
+    def auto_read(self, path: str, **read_kwargs) -> HESTData:
         """
         Automatically detect the file names and determine a reading strategy based on the
         detected files. For more control on the reading process, consider using `read()` instead
@@ -56,15 +54,18 @@ class Reader:
         """
         import scanpy as sc
         
-        hest_object = self._auto_read(path)
+        verify_paths([path])
         
-        hest_object.adata.var["mito"] = hest_object.adata.var_names.str.startswith("MT-")
-        sc.pp.calculate_qc_metrics(hest_object.adata, qc_vars=["mito"], inplace=True)
+        hest_object = self._auto_read(path, **read_kwargs)
+        
+        if len(hest_object.adata) > 0:          
+            hest_object.adata.var["mito"] = hest_object.adata.var_names.str.startswith("MT-")
+            sc.pp.calculate_qc_metrics(hest_object.adata, qc_vars=["mito"], inplace=True)
         
         return hest_object
     
     @abstractmethod
-    def _auto_read(self, path) -> HESTData:
+    def _auto_read(self, path, **read_kwargs) -> HESTData:
         pass
   
     @abstractmethod
@@ -86,21 +87,6 @@ def read_visium_positions_old(tissue_position_list_path):
 
 class VisiumHDReader(Reader):
     """10x Genomics Visium-HD reader"""
-
-    def auto_read(self, path) -> VisiumHDHESTData:
-        """
-        Automatically detect the file names and determine a reading strategy based on the
-        detected files. For more control on the reading process, consider using `read()` instead
-        
-        
-
-        Args:
-            path (st): path to the directory containing all the necessary files
-
-        Returns:
-            VisiumHDHESTObject: STObject that was read
-        """
-        return super().auto_read(path)
         
     
     def __bin_to_128um(self, adata: sc.AnnData, pixel_size: float) -> sc.AnnData: # type: ignore
@@ -177,19 +163,23 @@ class VisiumHDReader(Reader):
         
         
     
-    def _auto_read(self, path) -> VisiumHDHESTData:
+    def _auto_read(self, path, **read_kwargs) -> VisiumHDHESTData:
         img_filename = find_biggest_img(path)
         
         square_16um_path = find_first_file_endswith(path, 'square_016um')
         if square_16um_path is None:
             square_16um_path = find_first_file_endswith(os.path.join(path, 'binned_outputs'), 'square_016um')
+            
+        square_2um_path = find_first_file_endswith(path, 'square_002um', anywhere=True)
         
         metrics_path = find_first_file_endswith(path, 'metrics_summary.csv')
         
         st_object = self.read(
             img_path=os.path.join(path, img_filename),
             square_16um_path=square_16um_path,
-            metrics_path=metrics_path
+            metrics_path=metrics_path,
+            square_2um_path=square_2um_path,
+            **read_kwargs
         )
         
         return st_object
@@ -199,9 +189,12 @@ class VisiumHDReader(Reader):
         self, 
         img_path: str, 
         square_16um_path: str, 
-        metrics_path: str = None
+        metrics_path: str = None,
+        square_2um_path: str = None
     ) -> VisiumHDHESTData:
         import scanpy as sc
+        
+        self.square_2um_path = square_2um_path
         
         img, pixel_size_embedded = load_wsi(img_path)
         
@@ -240,24 +233,9 @@ class VisiumHDReader(Reader):
         
 class VisiumReader(Reader):
     """10x Genomics Visium reader"""
-    
-    def auto_read(self, path) -> VisiumHESTData:
-        """
-        Automatically detect the file names and determine a reading strategy based on the
-        detected files. For more control on the reading process, consider using `read()` instead
-        
-        
-
-        Args:
-            path (st): path to the directory containing all the necessary files
-
-        Returns:
-            VisiumHESTObject: STObject that was read
-        """
-        return super().auto_read(path)
         
     
-    def _auto_read(self, path) -> VisiumHESTData:
+    def _auto_read(self, path, **read_kwargs) -> VisiumHESTData:
         import scanpy as sc
         
         custom_adata = None
@@ -369,7 +347,8 @@ class VisiumReader(Reader):
             metric_file_path=metric_file_path,
             custom_adata=custom_adata,
             autoalign=autoalign,
-            save_autoalign=True
+            save_autoalign=True,
+            **read_kwargs
         )
         
         return st_object        
@@ -657,24 +636,9 @@ class VisiumReader(Reader):
     
     
 class STReader(Reader):
-    
-    def auto_read(self, path) -> STHESTData:
-        """
-        Automatically detect the file names and determine a reading strategy based on the
-        detected files. For more control on the reading process, consider using `read()` instead
-        
-        
-
-        Args:
-            path (st): path to the directory containing all the necessary files
-
-        Returns:
-            STHESTData: STObject that was read
-        """
-        return super().auto_read(path)
 
     
-    def _auto_read(self, path) -> STHESTData:
+    def _auto_read(self, path, **read_kwargs) -> STHESTData:
         packing = SpotPacking.GRID_PACKING
         meta_table_path = None
         custom_adata = None
@@ -743,25 +707,10 @@ class STReader(Reader):
             packing=packing,
             inter_spot_dist=inter_spot_dist,
             spot_diameter=spot_diameter,
-            custom_adata=custom_adata)
+            custom_adata=custom_adata,
+            **read_kwargs)
         
         return st_object
-    
-    
-    def auto_read(self, path) -> STHESTData:
-        """
-        Automatically detect the file names and determine a reading strategy based on the
-        detected files. For more control on the reading process, consider using `read()` instead
-        
-        
-
-        Args:
-            path (st): path to the directory containing all the necessary files
-
-        Returns:
-            STHESTData: STHESTData that was read
-        """
-        super().auto_read(path)
     
     
     def _GSE144239_to_adata(self, raw_counts_path, spot_coord_path):
@@ -901,22 +850,7 @@ class STReader(Reader):
 class XeniumReader(Reader):
     """ 10x Xenium reader """
     
-    def auto_read(self, path) -> XeniumHESTData:
-        """
-        Automatically detect the file names and determine a reading strategy based on the
-        detected files. For more control on the reading process, consider using `read()` instead
-        
-        
-
-        Args:
-            path (st): path to the directory containing all the necessary files
-
-        Returns:
-            XeniumHESTData: XeniumHESTData that was read
-        """
-        return super().auto_read(path)
-    
-    def _auto_read(self, path) -> XeniumHESTData:
+    def _auto_read(self, path, **read_kwargs) -> XeniumHESTData:
         img_filename = find_biggest_img(path)
                 
         alignment_path = None
@@ -944,7 +878,8 @@ class XeniumReader(Reader):
             cells_path=os.path.join(path, 'cells.parquet'),
             nucleus_bound_path=os.path.join(path, 'nucleus_boundaries.parquet'),
             cell_bound_path=os.path.join(path, 'cell_boundaries.parquet'),
-            dapi_path=dapi_path
+            dapi_path=dapi_path,
+            **read_kwargs
         )
         
         return st_object
@@ -994,14 +929,13 @@ class XeniumReader(Reader):
         
         if alignment_file_path is not None:
             print('found an alignment file, aligning transcripts...')
+            # change behavior, make _align_and_estimate create a new 'aligned' column instead of doing inplace
             df_transcripts, pixel_size_estimated, _ = self._align_and_estimate_px_size(alignment_file_path, pixel_size_morph, df_transcripts)
             dict['pixel_size_um_estimated'] = pixel_size_estimated
         else:
             dict['pixel_size_um_estimated'] = pixel_size_morph
             
         transcript_df = df_transcripts
-        transcript_df['he_x'] = transcript_df['x_location'] / pixel_size_morph
-        transcript_df['he_y'] = transcript_df['y_location'] / pixel_size_morph
         return transcript_df, dict
     
     
@@ -1038,14 +972,19 @@ class XeniumReader(Reader):
         nucleus_bound_path: str = None,
         cell_bound_path: str = None,
         use_cache: bool = False,
-        dapi_path = None
+        dapi_path = None,
+        load_transcripts=True,
+        load_cells=True,
+        load_wsi=True
     ) -> XeniumHESTData:
         
         cur_dir = os.path.dirname(transcripts_path)   
             
-        
-        print("Loading the WSI... (can be slow for large images)")
-        img, pixel_size_embedded = load_wsi(img_path)
+        if load_wsi:
+            print("Loading the WSI... (can be slow for large images)")
+            img, pixel_size_embedded = load_wsi(img_path)
+        else:
+            img, pixel_size_embedded = np.zeros((1, 1, 3)), None
         
         dict = {}
         dict['pixel_size_um_embedded'] = pixel_size_embedded
@@ -1067,23 +1006,36 @@ class XeniumReader(Reader):
         shapes.append(xenium_cell_seg)
         shapes.append(xenium_nuc_seg)
         
-        print('Loading transcripts...')
-        df_transcripts, dict = self.__load_transcripts(transcripts_path, alignment_file_path, pixel_size_morph, dict)
         
-                        
-        print("Pooling xenium transcripts in pseudo-visium spots...")
-        adata = xenium_to_pseudo_visium(df_transcripts, dict['pixel_size_um_estimated'], pixel_size_morph)
-        
-        dict['spot_diameter'] = 55.
-        dict['inter_spot_dist'] = 100.
-        dict['spots_under_tissue'] = len(adata.obs)
-        
+        if load_transcripts:
+            print('Loading transcripts...')
+            # TODO move transcrit dataframe to a dask array (can be more than 20GB)
+            transcript_df, dict = self.__load_transcripts(transcripts_path, alignment_file_path, pixel_size_morph, dict)
+                    
+            print("Pooling xenium transcripts in pseudo-visium spots...")
+            adata = xenium_to_pseudo_visium(transcript_df, dict['pixel_size_um_estimated'], pixel_size_morph)
+            
+            dict['spot_diameter'] = 55.
+            dict['inter_spot_dist'] = 100.
+            dict['spots_under_tissue'] = len(adata.obs)
+            
+            register_downscale_img(adata, img, dict['pixel_size_um_estimated'])
+        else:
+            import scanpy as sc
+            adata = sc.AnnData()
+            adata.obsm['spatial'] = np.array([])
+            adata.uns['spatial'] = {}
+            adata.uns['spatial']['ST'] = {}
+            adata.uns['spatial']['ST']['images'] = {}
+            adata.uns['spatial']['ST']['images']['downscaled_fullres'] = np.array([])
+            transcript_df = None
+            dict['pixel_size_um_estimated'] = None
+            
         cell_adata = None
-        if feature_matrix_path is not None and cells_path is not None:
-            print('Reading cells...')
-            cell_adata, dict = self.__load_cells(feature_matrix_path, cells_path, alignment_file_path, pixel_size_morph, dict)
-
-        register_downscale_img(adata, img, dict['pixel_size_um_estimated'])
+        if load_cells:
+            if feature_matrix_path is not None and cells_path is not None:
+                print('Reading cells...')
+                cell_adata, dict = self.__load_cells(feature_matrix_path, cells_path, alignment_file_path, pixel_size_morph, dict)
         
             
         st_object = XeniumHESTData(
@@ -1091,7 +1043,7 @@ class XeniumReader(Reader):
             img, 
             dict['pixel_size_um_estimated'], 
             dict, 
-            transcript_df=df_transcripts,
+            transcript_df=transcript_df,
             cell_adata=cell_adata,
             shapes=shapes,
             dapi_path=dapi_path
@@ -1201,7 +1153,7 @@ def xenium_to_pseudo_visium(df: pd.DataFrame, pixel_size_he: float, pixel_size_m
     
     adata = sc.AnnData(expression_df)
     adata.obsm['spatial'] = coord_df[['x', 'y']].values
-    adata.obs['in_tissue'] = [True for _ in range(len(adata.obs))]
+    adata.obs['in_tissue'] = True
     adata.obs['pxl_col_in_fullres'] = coord_df['x'].values
     adata.obs['pxl_row_in_fullres'] = coord_df['y'].values
     adata.obs['array_col'] = np.arange(len(adata.obs)) % n
@@ -1210,84 +1162,6 @@ def xenium_to_pseudo_visium(df: pd.DataFrame, pixel_size_he: float, pixel_size_m
     sc.pp.filter_cells(adata, min_counts=1)
     
     return adata
-
-
-def process_meta_df(meta_df, save_spatial_plots=True, pyramidal=True, save_img=True, cellvit=False, depr_seg=True, preprocess=False, no_except=False):
-    """Internal use method, process all the raw ST data in the meta_df"""
-    for _, row in tqdm(meta_df.iterrows(), total=len(meta_df)):
-        try:
-            path = get_path_from_meta_row(row)
-            bigtiff = not(isinstance(row['bigtiff'], float) or row['bigtiff'] == 'FALSE')
-            st = read_and_save(path, save_plots=save_spatial_plots, pyramidal=pyramidal, bigtiff=bigtiff, plot_pxl_size=True, save_img=save_img, segment_tissue=True)
-            
-            # TODO register segmentation for xenium and save
-            if preprocess:
-                full_exp_dir = os.path.join('results/preprocessing', row['id'])
-                if isinstance(st, XeniumHESTData):
-                    
-                    for shape in st.shapes:
-                        
-                        if shape.name == 'tenx_cell' and shape.coordinate_system == 'dapi':
-                            dapi_cells = shape.shapes
-                        elif shape.name == 'tenx_nucleus' and shape.coordinate_system == 'dapi':
-                            dapi_nuclei = shape.shapes
-                        
-                    reg_config = {}
-                        
-                    warped_cells, warped_nuclei = preprocess_cells_xenium(
-                        os.path.join(path, 'processed', ALIGNED_HE_FILENAME), 
-                        st.dapi_path,
-                        dapi_cells,
-                        dapi_nuclei,
-                        reg_config,
-                        full_exp_dir,
-                        row['id']
-                    )
-                    
-                    
-                    print('Saving warped cells/nuclei...')
-                    warped_cells.to_parquet(os.path.join(path, 'processed', f'he_cell_seg.parquet'))
-                    warped_nuclei.to_parquet(os.path.join(path, 'processed', f'he_nucleus_seg.parquet'))
-                    write_geojson(warped_cells, os.path.join(path, 'processed', f'he_cell_seg.geojson'), '', chunk=True)
-                    write_geojson(warped_nuclei, os.path.join(path, 'processed', f'he_nucleus_seg.geojson'), '', chunk=True)
-            elif isinstance(st, VisiumHDHESTData):
-                segment_config = {'method': 'cellvit'}
-                binning_config = {}
-                
-                bc_matrix_path = find_first_file_endswith(os.path.join(path, 'binned_outputs', 'square_002um'), 'filtered_feature_bc_matrix.h5')
-                bin_positions_path = find_first_file_endswith(os.path.join(path, 'binned_outputs', 'square_002um', 'spatial'), 'tissue_positions.parquet')
-                
-                preprocess_cells_visium_hd(
-                    os.path.join(path, 'processed', ALIGNED_HE_FILENAME),
-                    full_exp_dir,
-                    row['id'],
-                    st.pixel_size,
-                    segment_config,
-                    binning_config,
-                    bc_matrix_path,
-                    bin_positions_path
-                )
-                
-            
-            row_dict = row.to_dict()
-
-            if depr_seg:
-                st.save_tissue_seg_pkl('', 'TENX24')
-                st.save_tissue_seg_jpg('', 'TENX24')
-            
-            # remove all whitespace values
-            row_dict = {k: (np.nan if isinstance(v, str) and not v.strip() else v) for k, v in row_dict.items()}
-            combined_meta = {**st.meta, **row_dict}
-            cols = get_col_selection()
-            combined_meta = {k: v for k, v in combined_meta.items() if k in cols}
-            with open(os.path.join(path, 'processed', f'meta.json'), 'w') as f:
-                json.dump(combined_meta, f, indent=3)
-                
-            st.dump_patches(os.path.join(path, 'processed'), 'patches')
-        except Exception as e:
-            traceback.print_exc()
-            if not no_except:
-                raise e
         
         
 

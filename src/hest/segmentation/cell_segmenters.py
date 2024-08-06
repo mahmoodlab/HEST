@@ -9,7 +9,7 @@ from abc import abstractmethod
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from multiprocessing import Pool, cpu_count
 from time import sleep
-from typing import Union
+from typing import Tuple, Union
 
 import geopandas as gpd
 import matplotlib.pyplot as plt
@@ -22,7 +22,7 @@ from shapely.affinity import translate
 from tqdm import tqdm
 
 from hest.io.seg_readers import GeojsonCellReader
-from hest.utils import get_n_workers, get_path_relative, verify_paths
+from hest.utils import deprecated, get_n_threads, get_path_relative, verify_paths
 from hest.wsi import wsi_factory
 
 
@@ -261,38 +261,41 @@ def read_adata(adata) -> sc.AnnData: # type: ignore
         ValueError("cells must be either a path (str) or a sc.AnnData, not ", type(adata))
     
     
-def assign_to_cell(cell_gdf, point_gdf):
+def _sjoin(chunk, cell_gdf):
+    return gpd.sjoin(chunk, cell_gdf, how='left', predicate='within')
+    
+def assign_spot_to_cell(cell_gdf, point_gdf, n_workers=-1):
+    """ Return a spot index to cell_id assigment as a pd.Series """
     import geopandas as gpd
     from shapely.geometry import Point
     from shapely.geometry.polygon import Polygon
 
-    # shard points dataframe
-    n = 1000
-    l = round(np.ceil(len(point_gdf) / n))
-    logger.info('matching spots to cells... (can take a few minutes)')
+    logger.info('matching spots to cells...')
     assignments = np.zeros(len(point_gdf), dtype=int)
-    for i in tqdm(range(n)): # TODO parallelize
-        start = l * i
-        end = min(l * (i + 1), len(point_gdf))
+        
+    n_threads = get_n_threads(n_workers)
+    with ThreadPoolExecutor(max_workers=n_threads) as executor:
+        chunk_size = len(point_gdf) // n_threads
+        
+        chunks = [point_gdf.iloc[i:i+chunk_size] for i in range(0, len(point_gdf), chunk_size)]
+        
+        futures = [executor.submit(_sjoin, chunk, cell_gdf) for chunk in chunks]
+        i = 0
+        for future in futures:
+            spatial_join = future.result()
+            spatial_join = spatial_join[~spatial_join.index.duplicated(keep='first')]
+            spot_assignment = spatial_join['index_right']
+            spot_assignment = spot_assignment.fillna(-1).round().astype(int)
+            assignments[i:i+len(spot_assignment)] = spot_assignment
+            i += len(spot_assignment)
         
         
-        gdf_points_shard = point_gdf[start:end]
-        
+    matched = assignments != -1
+    point_gdf = point_gdf.iloc[matched].copy()
+    point_gdf['cell_id'] = cell_gdf['cell_id'].iloc[assignments[assignments != -1]].values
     
-        spatial_join = gpd.sjoin(gdf_points_shard, cell_gdf, how='left', predicate='within')
-        spatial_join = spatial_join[~spatial_join.index.duplicated(keep='first')]
-        spot_assignment = spatial_join['index_right']
-        spot_assignment = spot_assignment.fillna(-1).round().astype(int)
-        assignments[start:end] = spot_assignment
-        
-    point_gdf['index_right'] = assignments
-    # Match index to cell_id
-    point_gdf['cell_id'] = point_gdf.merge(cell_gdf, left_on='index_right', right_index=True, how='left')['cell_id']
     
-    point_gdf = point_gdf.dropna(subset=['cell_id'])
-    point_gdf['cell_id'] = point_gdf['cell_id'].astype(int)
-    
-    return point_gdf
+    return point_gdf['cell_id']
 
 
 def _buffer(block, exp_pixel):
@@ -323,11 +326,11 @@ def expand_nuclei(gdf: gpd.GeoDataFrame, pixel_size: float, exp_um=5, plot=False
     
     logger.info('Expand nuclei... (can take a few minutes)')
     
-    max_workers = get_n_workers(n_workers)
+    max_workers = get_n_threads(n_workers)
     
     # Use multithreading here because geopandas.buffer releases the GIL
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        chunk_size = len(gdf) // cpu_count()
+        chunk_size = len(gdf) // max_workers
         
         chunks = [gdf.iloc[i:i+chunk_size].geometry for i in range(0, len(gdf), chunk_size)]
         
@@ -385,7 +388,7 @@ def expand_nuclei(gdf: gpd.GeoDataFrame, pixel_size: float, exp_um=5, plot=False
     
     gdf_cell.geometry = inter
     
-    gdf_cell = gdf_cell.union(gdf.loc[~invalid_mask])
+    gdf_cell.geometry = gdf_cell.union(gdf.loc[~invalid_mask])
     
     if plot:
         logger.info('Plotting...')
@@ -411,7 +414,7 @@ def bin_per_cell(
     name = '',
     exp_um = 5, 
     exp_nuclei: bool = True
-) -> sc.AnnData:
+) -> Tuple[sc.AnnData, gpd.GeoDataFrame]:
     verify_paths([bc_matrix, path_bins_pos])
     
     nuclei_gdf = read_seg(nuc_seg)
@@ -424,7 +427,7 @@ def bin_per_cell(
     logger.info('Read bin positions...')
     points_gdf = read_spots_gdf(path_bins_pos)
     
-    assignment = assign_to_cell(cell_gdf, points_gdf)
+    assignment = assign_spot_to_cell(cell_gdf, points_gdf)
     
     adata = read_adata(bc_matrix)
     
@@ -433,7 +436,7 @@ def bin_per_cell(
     if save_dir is not None:
         cell_adata.write_h5ad(os.path.join(save_dir, 'aligned_cells.h5ad'))
     
-    return cell_adata
+    return cell_adata, cell_gdf
 
 
 def sum_per_cell(adata: sc.AnnData, assignment: gpd.GeoDataFrame):
@@ -555,66 +558,7 @@ def refine_alignment_reg(
 def refine_alignment(centroids, polygons, class_key='class', method='seg') -> gpd.GeoDataFrame:
     return alignment_refiner_factory(method).refine(centroids, polygons, class_key=class_key)
 
-
-def warp_gdf_old(gdf: gpd.GeoDataFrame, displacement_field, field_factor, pad_src) -> gpd.GeoDataFrame:
-    pad_src_top = pad_src[0][0]
-    pad_src_bottom = pad_src[0][1]
-    pad_src_left = pad_src[1][0]
-    pad_src_right = pad_src[1][1]
-    dis_height = displacement_field.shape[0]
-    dis_width = displacement_field.shape[1]
-    
-    def swap(yx):
-        return yx[1], yx[0]
-    
-    def warp_polygon(polygon):
-        try:
-            return Polygon(
-                [
-                    list(swap(displacement_field[pad_src_top + round(y / 5), pad_src_left + round(x / 5)] * 5 + np.array([y, x])))
-                    for x, y in polygon.exterior.coords 
-                ]
-            )
-        except Exception:
-            print('skip')
-            return float('NaN')
-    
-    gdf.geometry = [warp_polygon(polygon) for polygon in tqdm(gdf.geometry)]
-    return gdf
-
-
-def warp_gdf(gdf: gpd.GeoDataFrame, slide_obj, slide_obj_target) -> gpd.GeoDataFrame:
-    
-    def warp_polygon(polygon):
-        try:
-            return Polygon(
-                [
-                    slide_obj.warp_xy([[x, y]])
-                    for x, y in polygon.exterior.coords 
-                ]
-            )
-        except Exception:
-            print('skip')
-            return float('NaN')
-        
-    gdf['points'] = [list(polygon.exterior.coords) for polygon in gdf.geometry]
-    point_gdf = gdf.explode('points')
-    point_gdf['points'] = point_gdf['points'].apply(lambda x: list(x))
-    warped = slide_obj.warp_xy_from_to(list(point_gdf['points'].values), to_slide_obj=slide_obj_target)
-    point_gdf['warped'] = warped.tolist()
-
-    aggr_df = point_gdf.groupby('cell_id').agg({
-        'warped': list
-        }
-    )
-    
-    polygons = [Polygon(x) for x in aggr_df['warped']]
-    
-    
-    gdf.geometry = polygons
-    return gdf
-
-
+@deprecated
 def refine_with_anchor(
     gdf: gpd.GeoDataFrame, 
     anchor_gdf: gpd.GeoDataFrame, 

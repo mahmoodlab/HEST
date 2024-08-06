@@ -193,15 +193,22 @@ class CuImageWSI(WSI):
             
         
 class WSIPatcher:
+    
     def __init__(self, wsi: WSI, patch_size_src: int, patch_size_target: int = None):
         self.wsi = wsi
         self.patch_size_src = patch_size_src
         self.overlap = 0
         self.width, self.height = self.wsi.get_dimensions()
         self.patch_size_target = patch_size_target
-        self.downsample = patch_size_src / patch_size_target
+        
+        if patch_size_target is None:
+            self.downsample = 1.
+        else:
+            self.downsample = patch_size_src / patch_size_target
         
         self._compute_cols_rows()
+        
+
         
     def _compute_cols_rows(self) -> None:
         img = self.wsi.img

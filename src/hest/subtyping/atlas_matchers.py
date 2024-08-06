@@ -153,18 +153,24 @@ class SCMatcher:
         
         return cells, atlas_cells
     
-    def filter_common_genes(self, cells, atlas_cells):
+    def _filter_common_genes(self, cells, atlas_cells, unify_genes):
         inter_genes = np.intersect1d(cells.var_names, atlas_cells.var_names)
         missing = set(cells.var_names) - set(atlas_cells.var_names)
         if len(missing) > 0:
             missing_str = missing if len(missing) < 100 else str(missing)[:500] + '...'
-            logger.warning(f"{len(missing)} out of {len(cells.var_names)} genes are missing in the Atlas: {missing_str}")
+            
+            warning_str = f"{len(missing)} out of {len(cells.var_names)} genes are missing in the Atlas: {missing_str}"
+            if not unify_genes:
+                warning_str += ". Consider passing unify_genes=True"
+            logger.warning(warning_str)
         
         return cells[:, inter_genes], atlas_cells[:, inter_genes]
     
     
     def unify_genes(self, cells, atlas_cells, species):
+        logger.info('unifying source gene names')
         cells = unify_gene_names(cells, species)
+        logger.info('unifying atlas gene names')
         atlas_cells = unify_gene_names(atlas_cells, species)
         
         return cells, atlas_cells
@@ -184,7 +190,7 @@ class SCMatcher:
         if unify_genes:
             cells, atlas_cells = self.unify_genes(cells, atlas_cells, species)
 
-        cells, atlas_cells = self.filter_common_genes(cells, atlas_cells)
+        cells, atlas_cells = self._filter_common_genes(cells, atlas_cells, unify_genes)
         
         cells, atlas_cells = self._filter_na_cells(cells, atlas_cells, level)
         
@@ -309,7 +315,7 @@ class TangramMatcher(SCMatcher):
         cells,
         atlas_cells,
         level, 
-        mode="cells",
+        mode="clusters",
         chunk_len=None, 
         device=None
     ):
@@ -373,3 +379,5 @@ def matcher_factory(name):
         return HarmonyMatcher()
     elif name == 'tangram':
         return TangramMatcher()
+    else:
+        raise ValueError(f"unknown cell matcher {name}")

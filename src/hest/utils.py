@@ -7,6 +7,7 @@ import gzip
 import json
 import os
 import shutil
+import sys
 import warnings
 from enum import Enum
 from typing import List, Tuple, Union
@@ -24,6 +25,15 @@ from hest.wsi import WSI, NumpyWSI, WSIPatcher, wsi_factory
 
 Image.MAX_IMAGE_PIXELS = 93312000000
 ALIGNED_HE_FILENAME = 'aligned_fullres_HE.tif'
+
+from loguru import logger
+
+logger.remove()
+logger.add(
+    sink=sys.stdout,
+    format="<green>{time:HH:mm:ss}</green> <level>{level}</level>: <level>{message}</level>"
+)
+
 
 def value_error_str(obj, name):
     return f'Unrecognized type for argument `{name}` got {obj}'
@@ -51,7 +61,7 @@ def deprecated(func):
     return new_func
 
 
-def get_n_workers(n_workers):
+def get_n_threads(n_workers):
     return os.cpu_count() if n_workers == -1 else n_workers
 
 
@@ -414,8 +424,8 @@ def get_k_genes_from_df(meta_df: pd.DataFrame, k: int, criteria: str, save_dir: 
     
     adata_list = []
     for _, row in meta_df.iterrows():
-        id = row['id']
-        adata = sc.read_h5ad(f"/mnt/sdb1/paul/images/adata/{id}.h5ad")
+        path = os.path.join(get_path_from_meta_row(row), 'processed')
+        adata = sc.read_h5ad(os.path.join(path, 'aligned_adata.h5ad'))
         adata_list.append(adata)
     return get_k_genes(adata_list, k, criteria, save_dir=save_dir)
 
@@ -798,6 +808,8 @@ def find_first_file_endswith(dir: str, suffix: str, exclude='', anywhere=False) 
     Returns:
         str: filename of first match
     """
+    if dir is None:
+        return None
     files_dir = os.listdir(dir)
     if anywhere:
         matching = [file for file in files_dir if suffix in file and file != exclude]
@@ -1147,7 +1159,7 @@ def write_10X_h5(adata, file):
 
 def check_arg(arg, arg_name, values):
     if arg not in values:
-       raise ValueError(f"{arg_name}={arg} must be one of {values}")
+       raise ValueError(f"{arg_name} can only be one of these: {values}, found {arg}")
         
 
 def helper_mex(path: str, filename: str) -> None:

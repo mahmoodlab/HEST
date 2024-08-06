@@ -6,12 +6,14 @@ from typing import Union
 
 import geopandas as gpd
 import numpy as np
+from loguru import logger
 from PIL import Image
 from shapely import Polygon
 from tqdm import tqdm
 
-from hest.io.seg_readers import read_gdf
-from hest.utils import get_name_datetime, tiff_save, value_error_str, verify_paths
+from hest.io.seg_readers import groupby_shape, read_gdf
+from hest.utils import (get_n_threads, get_name_datetime, tiff_save,
+                        value_error_str, verify_paths)
 from hest.wsi import WSI, wsi_factory
 
 
@@ -40,10 +42,12 @@ def register_dapi_he(
     """
     
     try:
-        from valis import preprocessing, registration, feature_detectors, affine_optimizer
-        from valis.slide_io import BioFormatsSlideReader
-        from .SlideReaderAdapter import SlideReaderAdapter
+        from valis import (affine_optimizer, feature_detectors, preprocessing,
+                           registration)
         from valis.micro_rigid_registrar import MicroRigidRegistrar
+        from valis.slide_io import BioFormatsSlideReader
+
+        from .SlideReaderAdapter import SlideReaderAdapter
     except Exception:
         import traceback
         traceback.print_exc()
@@ -124,7 +128,8 @@ def register_dapi_he(
 def warp(
     shapes: Union[gpd.GeoDataFrame, str],
     path_registrar: str,
-    curr_slide_name: str
+    curr_slide_name: str,
+    n_workers=-1
 ) -> gpd.GeoDataFrame:
     """ Warp some shapes (points or polygons) from an existing Valis registration
 
@@ -150,37 +155,37 @@ def warp(
         gdf = shapes.copy()
     else:
         raise ValueError(value_error_str(shapes, 'shapes'))
-    
-    
-    registration.init_jvm()
 
     registrar = registration.load_registrar(path_registrar)
     slide_obj = registrar.get_slide(registrar.reference_img_f)
     if isinstance(shapes.iloc[0].geometry, Polygon):
-        gdf['points'] = [list(polygon.exterior.coords) for polygon in gdf.geometry]
-        gdf['_cell_id'] = np.arange(len(gdf))
-        point_gdf = gdf.explode('points')
-        point_gdf['points'] = point_gdf['points'].apply(lambda x: list(x))
-        points = list(point_gdf['points'].values)
+        coords = gdf.geometry.get_coordinates(index_parts=True)
+        points_gdf = coords
+        idx = coords.index.get_level_values(0)
+        points_gdf['_polygons'] = idx # keep track of polygons
+        points = list(zip(points_gdf['x'], points_gdf['y']))
+        
+        #gdf['points'] = [list(polygon.exterior.coords) for polygon in gdf.geometry]
+        #gdf['_cell_id'] = np.arange(len(gdf))
+        #point_gdf = gdf.explode('points')
+        #point_gdf['points'] = point_gdf['points'].apply(lambda x: list(x))
+        #points = list(point_gdf['points'].values)
     else:
-        point_gdf = gdf
-        gdf['_cell_id'] = np.arange(len(point_gdf))
+        points_gdf = gdf
+        gdf['_polygons'] = np.arange(len(points_gdf))
         points = list(zip(gdf.geometry.x, gdf.geometry.y))
         
     morph = registrar.get_slide(curr_slide_name)
+    logger.debug('warp with valis...')
     warped = morph.warp_xy_from_to(points, slide_obj)
+    logger.debug('finished warping with valis')
     #warped = slide_obj.warp_xy(points)
-    point_gdf['warped'] = warped.tolist()
-
-    aggr_df = point_gdf.groupby('_cell_id').agg({
-        'warped': list
-        }
-    )
+    points_gdf['xy'] = list(zip(warped[:, 0], warped[:, 1]))
     
-    polygons = [Polygon(x) for x in aggr_df['warped']]
-    gdf = gdf.drop(['_cell_id'], axis=1)
+    n_threads = get_n_threads(n_workers)
+    aggr_df = groupby_shape(points_gdf, '_polygons', n_threads=0)
     
-    gdf.geometry = polygons
+    gdf.geometry = aggr_df.geometry
     
     #registration.kill_jvm()
     return gdf
