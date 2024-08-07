@@ -63,16 +63,13 @@ def segment_tissue_deep(
     
     patch_size_deeplab = 512
     
-    # TODO fix overlap
-    overlap=0
-    
     scale = pixel_size_src / target_pxl_size
     patch_size_src = round(patch_size_um / scale)
     wsi = wsi_factory(wsi)
     
     weights_path = get_path_relative(__file__, f'../../../models/{model_name}')
     
-    patcher = WSIPatcher(wsi, patch_size_src, patch_size_deeplab)
+    patcher = wsi.create_patcher(patch_size_src, patch_size_deeplab)
         
     eval_transforms = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
     dataset = SegWSIDataset(patcher, eval_transforms)
@@ -134,8 +131,8 @@ def segment_tissue_deep(
                 coord = coords[i]
                 x, y = round(coord[0] * src_to_deeplab_scale), round(coord[1] * src_to_deeplab_scale)
                  
-                y_end = min(y+patch_size_deeplab + overlap, height)
-                x_end = min(x+patch_size_deeplab + overlap, width)
+                y_end = min(y+patch_size_deeplab, height)
+                x_end = min(x+patch_size_deeplab, width)
                 stitched_img[y:y_end, x:x_end] += pred[:y_end-y, :x_end-x]
             
         

@@ -3,9 +3,9 @@ from abc import abstractmethod
 from typing import Tuple
 
 import cv2
+import geopandas as gpd
 import numpy as np
 import openslide
-from openslide.deepzoom import DeepZoomGenerator
 
 
 class CucimWarningSingleton:
@@ -29,6 +29,7 @@ def is_cuimage(img):
 
 
 class WSI:
+    
     def __init__(self, img):
         self.img = img
         
@@ -57,6 +58,10 @@ class WSI:
         width, height = self.get_dimensions()
         
         return f"<width={width}, height={height}, backend={self.__class__.__name__}>"
+    
+    @abstractmethod
+    def create_patcher(self, patch_size_src: int, patch_size_target: int = None, overlap: int = 0, mask: gpd.GeoDataFrame = None):
+        pass
     
 
 def wsi_factory(img) -> WSI:
@@ -102,6 +107,9 @@ class NumpyWSI(WSI):
     def get_thumbnail(self, width, height) -> np.ndarray:
         return cv2.resize(self.img, (width, height))
     
+    def create_patcher(self, patch_size_src: int, patch_size_target: int = None, overlap: int = 0, mask: gpd.GeoDataFrame = None):
+        return NumpyWSIPatcher(self, patch_size_src, patch_size_target, overlap, mask)
+    
 
 class OpenSlideWSI(WSI):
     def __init__(self, img: openslide.OpenSlide):
@@ -127,6 +135,9 @@ class OpenSlideWSI(WSI):
     
     def level_downsamples(self):
         return self.img.level_downsamples
+    
+    def create_patcher(self, patch_size_src: int, patch_size_target: int = None, overlap: int = 0, mask: gpd.GeoDataFrame = None):
+        return OpenSlideWSIPatcher(self, patch_size_src, patch_size_target, overlap, mask)
     
 class CuImageWSI(WSI):
     def __init__(self, img: 'CuImage'):
@@ -171,44 +182,110 @@ class CuImageWSI(WSI):
     
     def level_downsamples(self):
         return self.img.resolutions['level_downsamples']
+    
+    def create_patcher(self, patch_size_src: int, patch_size_target: int = None, overlap: int = 0, mask: gpd.GeoDataFrame = None):
+        return CuImageWSIPatcher(self, patch_size_src, patch_size_target, overlap, mask)
             
         
 class WSIPatcher:
-    def __init__(self, wsi: WSI, patch_size_src: int, patch_size_target: int = None):
+    """ Iterator class to handle patching, patch scaling and tissue mask intersection """
+    
+    def __init__(
+        self, 
+        wsi: WSI, 
+        patch_size: int, 
+        patch_size_target: int = None, 
+        overlap: int = 0,
+        mask: gpd.GeoDataFrame = None
+    ):
+        """ Initialize patcher, compute number of (masked) rows, columns.
+
+        Args:
+            wsi (WSI): wsi to patch
+            patch_size (int): patch width/height in pixel on the slide before rescaling
+            patch_size_target (int, optional): largest patch size in pixel after rescaling. Defaults to None.
+            overlap (int, optional): overlap size in pixel before rescaling. Defaults to 0.
+            mask (gpd.GeoDataFrame, optional): geopandas dataframe of Polygons. Defaults to None.
+        """
         self.wsi = wsi
-        self.patch_size_src = patch_size_src
-        self.overlap = 0
+        self.patch_size = patch_size
+        self.overlap = overlap
         self.width, self.height = self.wsi.get_dimensions()
         self.patch_size_target = patch_size_target
-        self.downsample = patch_size_src / patch_size_target
+        self.mask = mask
+        self.i = 0
         
-        self._compute_cols_rows()
+        if patch_size_target is None:
+            self.downsample = 1.
+        else:
+            self.downsample = patch_size / patch_size_target
         
-    def _compute_cols_rows(self) -> None:
-        img = self.wsi.img
-        if isinstance(img, openslide.OpenSlide):
-            self.level = self.wsi.get_best_level_for_downsample(self.downsample)
-            self.level_dimensions = self.wsi.level_dimensions()[self.level]
-            self.level_downsample = self.wsi.level_downsamples()[self.level]
-            self.patch_size_level = round(self.patch_size_src / self.level_downsample)
-            self.dz = DeepZoomGenerator(img, self.patch_size_level, self.overlap)
-            self.nb_levels = len(self.dz.level_tiles)
-            self.cols, self.rows = self.dz.level_tiles[self.nb_levels - self.level - 1]
-        elif isinstance(img, np.ndarray):
-            self.cols, self.rows = round(np.ceil((self.width - self.overlap / 2) / (self.patch_size_src - self.overlap / 2))), round(np.ceil((self.height - self.overlap / 2) / (self.patch_size_src - self.overlap / 2)))
-            self.level = -1
-            self.level_dimensions = (self.width, self.height)
-        elif is_cuimage(img):
-            self.level = self.wsi.get_best_level_for_downsample(self.downsample)
-            self.level_downsample = self.wsi.level_downsamples()[self.level]
-            self.level_dimensions = self.wsi.level_dimensions()[self.level]
-            self.patch_size_level = round(self.patch_size_src / self.level_downsample)
-            level_width, level_height = self.level_dimensions
-            self.cols, self.rows = round(np.ceil((level_width - self.overlap / 2) / (self.patch_size_level - self.overlap / 2))), round(np.ceil((level_height - self.overlap / 2) / (self.patch_size_level - self.overlap / 2)))
+        self.level, self.patch_size_level, self.overlap_level = self._prepare()
+        self.cols, self.rows = self._compute_cols_rows()   
+        
+        col_rows = np.array([
+            [col, row] 
+            for col in range(self.cols) 
+            for row in range(self.rows)
+        ])
+        
+        if self.mask is not None:
+            self.valid_patches_nb, self.valid_col_rows = self._compute_masked(col_rows)
+        else:
+            self.valid_patches_nb, self.valid_col_rows = len(col_rows), col_rows
+            
+    def _colrow_to_xy(self, col, row):
+        """ Convert col row of a tile to its top-left coordinates before rescaling (x, y) """
+        x = col * (self.patch_size) if col == 0 else col * (self.patch_size) - self.overlap
+        y = row * (self.patch_size) if row == 0 else row * (self.patch_size) - self.overlap
+        return (x, y)   
+            
+    def _compute_masked(self, col_rows) -> None:
+        """ Compute tiles which center falls under the tissue """
+        
+        xy_topleft = np.array([self._colrow_to_xy(xy[0], xy[1]) for xy in col_rows])
+        
+        # Note: we don't take into account the overlap size we calculating centers
+        xy_centers = xy_topleft + self.patch_size_level // 2
+        
+        union_mask = self.mask.unary_union
+        
+        points = gpd.points_from_xy(xy_centers)
+        valid_mask = gpd.GeoSeries(points).within(union_mask).values
+        valid_patches_nb = valid_mask.sum()
+        valid_col_rows = col_rows[valid_mask]
+        return valid_patches_nb, valid_col_rows
+        
+    def __len__(self):
+        return self.valid_patches_nb
     
+    def __iter__(self):
+        self.i = 0
+        return self
+    
+    def __next__(self):
+        if self.i >= self.valid_patches_nb:
+            raise StopIteration
+        tile, x, y = self.__getitem__(self.i)
+        self.i += 1
+        return tile, x, y
+    
+    def __getitem__(self, index):
+        if 0 <= index < len(self.valid_col_rows):
+            col_row = self.valid_col_rows[self.i]
+            col, row = col_row[0], col_row[1]
+            tile, x, y = self.get_tile(col, row)
+            return tile, x, y
+        else:
+            raise IndexError("Index out of range")
+        
 
+    @abstractmethod
+    def _prepare(self) -> None:
+        pass
+    
     def get_cols_rows(self) -> Tuple[int, int]:
-        """ Get the number of columns and rows the associated WSI
+        """ Get the number of columns and rows in the associated WSI
 
         Returns:
             Tuple[int, int]: (nb_columns, nb_rows)
@@ -223,33 +300,56 @@ class WSIPatcher:
             row (int): row
 
         Returns:
-            Tuple[np.ndarray, int, int]: (tile, pixel x of top-left corner, pixel_y of top-left corner)
+            Tuple[np.ndarray, int, int]: (tile, pixel x of top-left corner (before rescaling), pixel_y of top-left corner (before rescaling))
         """
-        img = self.wsi.img
-        if isinstance(img, openslide.OpenSlide):
-            raw_tile = self.dz.get_tile(self.nb_levels - self.level - 1, (col, row))
-            addr = self.dz.get_tile_coordinates(self.nb_levels - self.level - 1, (col, row))
-            pxl_x, pxl_y = addr[0]
-            if pxl_x == 556 and pxl_y == 556:
-                a = 1
-        elif isinstance(img, np.ndarray):
-            x_begin = round(col * (self.patch_size_src - self.overlap))
-            x_end = min(x_begin + self.patch_size_src + self.overlap, self.width)
-            y_begin = round(row * (self.patch_size_src - self.overlap))
-            y_end = min(y_begin + self.patch_size_src + self.overlap, self.height)
-            tmp_tile = np.zeros((self.patch_size_src, self.patch_size_src, 3), dtype=np.uint8)
-            tmp_tile[:y_end-y_begin, :x_end-x_begin] += img[y_begin:y_end, x_begin:x_end]
-            pxl_x, pxl_y = x_begin, y_begin
-            raw_tile = tmp_tile
-        elif is_cuimage(img):
-            x_begin = round(col * (self.patch_size_src - self.overlap))
-            y_begin = round(row * (self.patch_size_src - self.overlap))
-            raw_tile = self.wsi.read_region(location=(x_begin, y_begin), level=self.level, size=(self.patch_size_level + self.overlap, self.patch_size_level + self.overlap))
-            pxl_x = x_begin
-            pxl_y = y_begin
-            
+        x, y = self._colrow_to_xy(col, row)
+        raw_tile = self.wsi.read_region(location=(x, y), level=self.level, size=(self.patch_size_level, self.patch_size_level))
         tile = np.array(raw_tile)
         if self.patch_size_target is not None:
             tile = cv2.resize(tile, (self.patch_size_target, self.patch_size_target))
-        assert pxl_x < self.width and pxl_y < self.height
-        return tile, pxl_x, pxl_y
+        assert x < self.width and y < self.height
+        return tile, x, y
+    
+    def _compute_cols_rows(self) -> Tuple[int, int]:
+        col = 0
+        row = 0
+        x, y = self._colrow_to_xy(col, row)
+        while x < self.width:
+            col += 1
+            x, _ = self._colrow_to_xy(col, row)
+        cols = col - 1
+        while y < self.height:
+            row += 1
+            _, y = self._colrow_to_xy(col, row)
+        rows = row - 1
+        return cols, rows 
+    
+    
+class OpenSlideWSIPatcher(WSIPatcher):
+    wsi: OpenSlideWSI
+    
+    def _prepare(self) -> None:
+        level = self.wsi.get_best_level_for_downsample(self.downsample)
+        level_downsample = self.wsi.level_downsamples()[level]
+        patch_size_level = round(self.patch_size / level_downsample)
+        overlap_level = round(self.overlap / level_downsample)
+        return level, patch_size_level, overlap_level
+    
+class CuImageWSIPatcher(WSIPatcher):
+    wsi: CuImageWSI
+    
+    def _prepare(self) -> None:
+        level = self.wsi.get_best_level_for_downsample(self.downsample)
+        level_downsample = self.wsi.level_downsamples()[level]
+        patch_size_level = round(self.patch_size / level_downsample)
+        overlap_level = round(self.overlap / level_downsample)
+        return level, patch_size_level, overlap_level
+
+class NumpyWSIPatcher(WSIPatcher):
+    WSI: NumpyWSI
+    
+    def _prepare(self) -> None:
+        patch_size_level = self.patch_size
+        overlap_level = self.overlap
+        level = -1
+        return level, patch_size_level, overlap_level

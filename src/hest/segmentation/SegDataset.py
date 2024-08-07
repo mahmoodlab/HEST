@@ -55,13 +55,12 @@ class SegWSIDataset(Dataset):
         self.patcher = patcher
         
         self.cols, self.rows = self.patcher.get_cols_rows()
-        self.size = self.cols * self.rows
         
         self.transform = transform
                               
 
     def __len__(self):
-        return self.size
+        return len(self.patcher)
     
     def __getitem__(self, index):
         col = index % self.cols
