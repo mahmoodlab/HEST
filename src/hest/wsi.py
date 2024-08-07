@@ -60,7 +60,7 @@ class WSI:
         return f"<width={width}, height={height}, backend={self.__class__.__name__}>"
     
     @abstractmethod
-    def create_patcher(self, patch_size_src: int, patch_size_target: int = None, overlap: int = 0, mask: gpd.GeoDataFrame = None, coords_only = False):
+    def create_patcher(self, patch_size: int, src_pixel_size: float, dst_pixel_size: float = None, overlap: int = 0, mask: gpd.GeoDataFrame = None, coords_only = False):
         pass
     
 
@@ -107,8 +107,8 @@ class NumpyWSI(WSI):
     def get_thumbnail(self, width, height) -> np.ndarray:
         return cv2.resize(self.img, (width, height))
     
-    def create_patcher(self, patch_size_src: int, patch_size_target: int = None, overlap: int = 0, mask: gpd.GeoDataFrame = None, coords_only = False):
-        return NumpyWSIPatcher(self, patch_size_src, patch_size_target, overlap, mask, coords_only)
+    def create_patcher(self, patch_size: int, src_pixel_size: float, dst_pixel_size: float = None, overlap: int = 0, mask: gpd.GeoDataFrame = None, coords_only = False):
+        return NumpyWSIPatcher(self, patch_size, src_pixel_size, dst_pixel_size, overlap, mask, coords_only)
     
 
 class OpenSlideWSI(WSI):
@@ -136,8 +136,8 @@ class OpenSlideWSI(WSI):
     def level_downsamples(self):
         return self.img.level_downsamples
     
-    def create_patcher(self, patch_size_src: int, patch_size_target: int = None, overlap: int = 0, mask: gpd.GeoDataFrame = None, coords_only = False):
-        return OpenSlideWSIPatcher(self, patch_size_src, patch_size_target, overlap, mask, coords_only)
+    def create_patcher(self, patch_size: int, src_pixel_size: float, dst_pixel_size: float = None, overlap: int = 0, mask: gpd.GeoDataFrame = None, coords_only = False):
+        return OpenSlideWSIPatcher(self, patch_size, src_pixel_size, dst_pixel_size, overlap, mask, coords_only)
     
 class CuImageWSI(WSI):
     def __init__(self, img: 'CuImage'):
@@ -183,8 +183,8 @@ class CuImageWSI(WSI):
     def level_downsamples(self):
         return self.img.resolutions['level_downsamples']
     
-    def create_patcher(self, patch_size_src: int, patch_size_target: int = None, overlap: int = 0, mask: gpd.GeoDataFrame = None, coords_only = False):
-        return CuImageWSIPatcher(self, patch_size_src, patch_size_target, overlap, mask, coords_only)
+    def create_patcher(self, patch_size: int, src_pixel_size: float, dst_pixel_size: float = None, overlap: int = 0, mask: gpd.GeoDataFrame = None, coords_only = False):
+        return CuImageWSIPatcher(self, patch_size, src_pixel_size, dst_pixel_size, overlap, mask, coords_only)
             
         
 class WSIPatcher:
@@ -194,7 +194,8 @@ class WSIPatcher:
         self, 
         wsi: WSI, 
         patch_size: int, 
-        patch_size_target: int = None, 
+        src_pixel_size: float,
+        dst_pixel_size: float = None,
         overlap: int = 0,
         mask: gpd.GeoDataFrame = None,
         coords_only = False
@@ -203,25 +204,27 @@ class WSIPatcher:
 
         Args:
             wsi (WSI): wsi to patch
-            patch_size (int): patch width/height in pixel on the slide before rescaling
-            patch_size_target (int, optional): largest patch size in pixel after rescaling. Defaults to None.
+            patch_size (int): patch width/height in pixel on the slide after rescaling
+            src_pixel_size (float, optional): pixel size in um/px of the slide before rescaling. Defaults to None.
+            dst_pixel_size (float, optional): pixel size in um/px of the slide after rescaling. Defaults to None.
             overlap (int, optional): overlap size in pixel before rescaling. Defaults to 0.
             mask (gpd.GeoDataFrame, optional): geopandas dataframe of Polygons. Defaults to None.
             coords_only (bool, optional): whenever to extract only the coordinates insteaf of coordinates + tile. Default to False.
         """
         self.wsi = wsi
-        self.patch_size = patch_size
         self.overlap = overlap
         self.width, self.height = self.wsi.get_dimensions()
-        self.patch_size_target = patch_size_target
+        self.patch_size_target = patch_size
         self.mask = mask
         self.i = 0
         self.coords_only = coords_only
         
-        if patch_size_target is None:
+        if dst_pixel_size is None:
             self.downsample = 1.
         else:
-            self.downsample = patch_size / patch_size_target
+            self.downsample = dst_pixel_size / src_pixel_size
+            
+        self.patch_size_src = round(patch_size * self.downsample)
         
         self.level, self.patch_size_level, self.overlap_level = self._prepare()
         self.cols, self.rows = self._compute_cols_rows()   
@@ -239,8 +242,8 @@ class WSIPatcher:
             
     def _colrow_to_xy(self, col, row):
         """ Convert col row of a tile to its top-left coordinates before rescaling (x, y) """
-        x = col * (self.patch_size) if col == 0 else col * (self.patch_size) - self.overlap
-        y = row * (self.patch_size) if row == 0 else row * (self.patch_size) - self.overlap
+        x = col * (self.patch_size_src) if col == 0 else col * (self.patch_size_src) - self.overlap
+        y = row * (self.patch_size_src) if row == 0 else row * (self.patch_size_src) - self.overlap
         return (x, y)   
             
     def _compute_masked(self, col_rows) -> None:
@@ -336,7 +339,7 @@ class OpenSlideWSIPatcher(WSIPatcher):
     def _prepare(self) -> None:
         level = self.wsi.get_best_level_for_downsample(self.downsample)
         level_downsample = self.wsi.level_downsamples()[level]
-        patch_size_level = round(self.patch_size / level_downsample)
+        patch_size_level = round(self.patch_size_src / level_downsample)
         overlap_level = round(self.overlap / level_downsample)
         return level, patch_size_level, overlap_level
     
@@ -346,7 +349,7 @@ class CuImageWSIPatcher(WSIPatcher):
     def _prepare(self) -> None:
         level = self.wsi.get_best_level_for_downsample(self.downsample)
         level_downsample = self.wsi.level_downsamples()[level]
-        patch_size_level = round(self.patch_size / level_downsample)
+        patch_size_level = round(self.patch_size_src / level_downsample)
         overlap_level = round(self.overlap / level_downsample)
         return level, patch_size_level, overlap_level
 
@@ -354,7 +357,7 @@ class NumpyWSIPatcher(WSIPatcher):
     WSI: NumpyWSI
     
     def _prepare(self) -> None:
-        patch_size_level = self.patch_size
+        patch_size_level = self.patch_size_src
         overlap_level = self.overlap
         level = -1
         return level, patch_size_level, overlap_level

@@ -26,7 +26,7 @@ def segment_tissue_deep(
     wsi: Union[np.ndarray, openslide.OpenSlide, CuImage, WSI], # type: ignore
     pixel_size: float,
     fast_mode=False,
-    target_pxl_size=1,
+    dst_pixel_size=1,
     patch_size_um=512,
     model_name='deeplabv3_seg_v4.ckpt',
     batch_size=8,
@@ -40,7 +40,7 @@ def segment_tissue_deep(
         pixel_size (float): pixel size in um/px for the wsi
         fast_mode (bool, optional): in fast mode the inference is done at 2 um/px instead of 1 um/px, 
             note that the inference pixel size is overwritten by the `target_pxl_size` argument if != 1. Defaults to False.
-        target_pxl_size (int, optional): patches are scaled to this pixel size in um/px for inference. Defaults to 1.
+        dst_pixel_size (int, optional): patches are scaled to this pixel size in um/px for inference. Defaults to 1.
         patch_size_um (int, optional): patch size in um. Defaults to 512.
         model_name (str, optional): model name in `HEST/models` dir. Defaults to 'deeplabv3_seg_v4.ckpt'.
         batch_size (int, optional): batch size for inference. Defaults to 8.
@@ -56,20 +56,20 @@ def segment_tissue_deep(
     from torchvision import transforms
     from hest.segmentation.SegDataset import SegWSIDataset
     
-    pixel_size_src = pixel_size
+    src_pixel_size = pixel_size
     
-    if fast_mode and target_pxl_size == 1:
-        target_pxl_size = 2
+    if fast_mode and dst_pixel_size == 1:
+        dst_pixel_size = 2
     
     patch_size_deeplab = 512
     
-    scale = pixel_size_src / target_pxl_size
+    scale = src_pixel_size / dst_pixel_size
     patch_size_src = round(patch_size_um / scale)
     wsi = wsi_factory(wsi)
     
     weights_path = get_path_relative(__file__, f'../../../models/{model_name}')
     
-    patcher = wsi.create_patcher(patch_size_src, patch_size_deeplab)
+    patcher = wsi.create_patcher(patch_size_deeplab, src_pixel_size, dst_pixel_size)
         
     eval_transforms = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
     dataset = SegWSIDataset(patcher, eval_transforms)
@@ -138,7 +138,7 @@ def segment_tissue_deep(
         
     mask = (stitched_img > 0).astype(np.uint8)
         
-    gdf_contours = mask_to_gdf(mask, max_nb_holes=5, pixel_size=pixel_size_src, contour_scale=1 / src_to_deeplab_scale)
+    gdf_contours = mask_to_gdf(mask, max_nb_holes=5, pixel_size=src_pixel_size, contour_scale=1 / src_to_deeplab_scale)
         
     return gdf_contours
 
