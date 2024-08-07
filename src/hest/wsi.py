@@ -60,7 +60,7 @@ class WSI:
         return f"<width={width}, height={height}, backend={self.__class__.__name__}>"
     
     @abstractmethod
-    def create_patcher(self, patch_size_src: int, patch_size_target: int = None, overlap: int = 0, mask: gpd.GeoDataFrame = None):
+    def create_patcher(self, patch_size_src: int, patch_size_target: int = None, overlap: int = 0, mask: gpd.GeoDataFrame = None, coords_only = False):
         pass
     
 
@@ -107,8 +107,8 @@ class NumpyWSI(WSI):
     def get_thumbnail(self, width, height) -> np.ndarray:
         return cv2.resize(self.img, (width, height))
     
-    def create_patcher(self, patch_size_src: int, patch_size_target: int = None, overlap: int = 0, mask: gpd.GeoDataFrame = None):
-        return NumpyWSIPatcher(self, patch_size_src, patch_size_target, overlap, mask)
+    def create_patcher(self, patch_size_src: int, patch_size_target: int = None, overlap: int = 0, mask: gpd.GeoDataFrame = None, coords_only = False):
+        return NumpyWSIPatcher(self, patch_size_src, patch_size_target, overlap, mask, coords_only)
     
 
 class OpenSlideWSI(WSI):
@@ -136,8 +136,8 @@ class OpenSlideWSI(WSI):
     def level_downsamples(self):
         return self.img.level_downsamples
     
-    def create_patcher(self, patch_size_src: int, patch_size_target: int = None, overlap: int = 0, mask: gpd.GeoDataFrame = None):
-        return OpenSlideWSIPatcher(self, patch_size_src, patch_size_target, overlap, mask)
+    def create_patcher(self, patch_size_src: int, patch_size_target: int = None, overlap: int = 0, mask: gpd.GeoDataFrame = None, coords_only = False):
+        return OpenSlideWSIPatcher(self, patch_size_src, patch_size_target, overlap, mask, coords_only)
     
 class CuImageWSI(WSI):
     def __init__(self, img: 'CuImage'):
@@ -183,8 +183,8 @@ class CuImageWSI(WSI):
     def level_downsamples(self):
         return self.img.resolutions['level_downsamples']
     
-    def create_patcher(self, patch_size_src: int, patch_size_target: int = None, overlap: int = 0, mask: gpd.GeoDataFrame = None):
-        return CuImageWSIPatcher(self, patch_size_src, patch_size_target, overlap, mask)
+    def create_patcher(self, patch_size_src: int, patch_size_target: int = None, overlap: int = 0, mask: gpd.GeoDataFrame = None, coords_only = False):
+        return CuImageWSIPatcher(self, patch_size_src, patch_size_target, overlap, mask, coords_only)
             
         
 class WSIPatcher:
@@ -196,7 +196,8 @@ class WSIPatcher:
         patch_size: int, 
         patch_size_target: int = None, 
         overlap: int = 0,
-        mask: gpd.GeoDataFrame = None
+        mask: gpd.GeoDataFrame = None,
+        coords_only = False
     ):
         """ Initialize patcher, compute number of (masked) rows, columns.
 
@@ -206,6 +207,7 @@ class WSIPatcher:
             patch_size_target (int, optional): largest patch size in pixel after rescaling. Defaults to None.
             overlap (int, optional): overlap size in pixel before rescaling. Defaults to 0.
             mask (gpd.GeoDataFrame, optional): geopandas dataframe of Polygons. Defaults to None.
+            coords_only (bool, optional): whenever to extract only the coordinates insteaf of coordinates + tile. Default to False.
         """
         self.wsi = wsi
         self.patch_size = patch_size
@@ -214,6 +216,7 @@ class WSIPatcher:
         self.patch_size_target = patch_size_target
         self.mask = mask
         self.i = 0
+        self.coords_only = coords_only
         
         if patch_size_target is None:
             self.downsample = 1.
@@ -266,14 +269,16 @@ class WSIPatcher:
     def __next__(self):
         if self.i >= self.valid_patches_nb:
             raise StopIteration
-        tile, x, y = self.__getitem__(self.i)
+        x = self.__getitem__(self.i)
         self.i += 1
-        return tile, x, y
+        return x
     
     def __getitem__(self, index):
         if 0 <= index < len(self.valid_col_rows):
-            col_row = self.valid_col_rows[self.i]
+            col_row = self.valid_col_rows[index]
             col, row = col_row[0], col_row[1]
+            if self.coords_only:
+                return self._colrow_to_xy(col, row)
             tile, x, y = self.get_tile(col, row)
             return tile, x, y
         else:
