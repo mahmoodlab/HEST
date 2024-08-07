@@ -138,7 +138,7 @@ def segment_tissue_deep(
         
     mask = (stitched_img > 0).astype(np.uint8)
         
-    gdf_contours = mask_to_contours(mask, max_nb_holes=5, pixel_size=pixel_size_src, contour_scale=1 / src_to_deeplab_scale)
+    gdf_contours = mask_to_gdf(mask, max_nb_holes=5, pixel_size=pixel_size_src, contour_scale=1 / src_to_deeplab_scale)
         
     return gdf_contours
 
@@ -204,13 +204,14 @@ def contours_to_img(
         
         for _, row in group.iterrows():
             cont = np.array([[round(x * downsample), round(y * downsample)] for x, y in row.geometry.exterior.coords])
+            holes = np.array([[round(x * downsample), round(y * downsample)] for hole in row.geometry.interiors for x, y in hole.coords])
         
-            if row['hole']:
-                draw_cont_fill(image=img, contours=[cont], color=(0, 0, 0))
-            else:
-                draw_cont_fill(image=img, contours=[cont], color=line_color)
+            draw_cont_fill(image=img, contours=[cont], color=line_color)
             if draw_contours:
                 draw_cont(image=img, contours=[cont], color=line_color)
+        
+            if len(holes) > 0:
+                draw_cont_fill(image=img, contours=[holes], color=(0, 0, 0))
     return img
 
 
@@ -432,7 +433,7 @@ def filter_contours(contours, hierarchy, filter_params, scale, pixel_size):
     return foreground_contours, hole_contours
         
         
-def mask_to_contours(mask: np.ndarray, keep_ids = [], exclude_ids=[], max_nb_holes=0, min_contour_area=1000, pixel_size=1, contour_scale=1.):
+def mask_to_gdf(mask: np.ndarray, keep_ids = [], exclude_ids=[], max_nb_holes=0, min_contour_area=1000, pixel_size=1, contour_scale=1.):
     TARGET_EDGE_SIZE = 2000
     scale = TARGET_EDGE_SIZE / mask.shape[0]
 
@@ -471,15 +472,14 @@ def mask_to_contours(mask: np.ndarray, keep_ids = [], exclude_ids=[], max_nb_hol
     else:
         contour_ids = set(np.arange(len(contours_tissue))) - set(exclude_ids)
 
-    tissue_poly = [Polygon(contours_tissue[i].squeeze(1)) for i in contour_ids]
-    hole_poly = [Polygon(contours_holes[i][0].squeeze(1)) for i in contour_ids if len(contours_holes[i]) > 0]
-    geometry = tissue_poly + hole_poly
     tissue_ids = [i for i in contour_ids] + [i for i in contour_ids if len(contours_holes[i]) > 0]
-    tissue_types = ['tissue' for _ in contour_ids] + ['hole' for i in contour_ids if len(contours_holes[i]) > 0]
+    polygons = []
+    for i in contour_ids:
+        holes = contours_holes[i][0].squeeze(1) if len(contours_holes[i]) > 0 else None
+        polygon = Polygon(contours_tissue[i].squeeze(1), holes=holes)
+        polygons.append(polygon)
     
-    gdf_contours = gpd.GeoDataFrame(pd.DataFrame(tissue_ids, columns=['tissue_id']), geometry=geometry)
-    gdf_contours['hole'] = tissue_types
-    gdf_contours['hole'] = gdf_contours['hole'] == 'hole'
+    gdf_contours = gpd.GeoDataFrame(pd.DataFrame(tissue_ids, columns=['tissue_id']), geometry=polygons)
     
     return gdf_contours
     

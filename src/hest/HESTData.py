@@ -29,7 +29,7 @@ from tqdm import tqdm
 
 from .segmentation.segmentation import (apply_otsu_thresholding,
                                         contours_to_img, get_tissue_vis,
-                                        mask_to_contours, save_pkl,
+                                        mask_to_gdf, save_pkl,
                                         segment_tissue_deep)
 from .utils import (ALIGNED_HE_FILENAME, check_arg, deprecated,
                     find_first_file_endswith, get_path_from_meta_row,
@@ -261,21 +261,14 @@ class HESTData:
             tissue_mask = np.round(cv2.resize(mask, (width, height))).astype(np.uint8)
             
             #TODO directly convert to gpd
-            gdf_contours = mask_to_contours(tissue_mask, pixel_size=self.pixel_size)
+            gdf_contours = mask_to_gdf(tissue_mask, pixel_size=self.pixel_size)
             self._tissue_contours = gdf_contours
             
         return self.tissue_contours
     
     
     def save_tissue_contours(self, save_dir: str, name: str) -> None:
-        write_geojson(
-            self.tissue_contours, 
-            os.path.join(save_dir, name + '_contours.geojson'),
-            'tissue_id',
-            extra_prop=True,
-            index_key='hole'
-        )
-            
+        self.tissue_contours.to_file(os.path.join(save_dir, name + '_contours.geojson'), driver="GeoJSON")   
 
     @deprecated
     def get_tissue_mask(self) -> np.ndarray:
