@@ -29,7 +29,8 @@ jobs:
         python -m pip install -e .
     - name: Install apt dependencies
       run: |
-        sudo apt install libvips libvips-dev openslide-tools
+        sudo apt-get update
+        sudo apt-get install libvips libvips-dev openslide-tools
 
     - name: Run tests
       run: |
