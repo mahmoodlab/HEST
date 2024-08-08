@@ -118,8 +118,6 @@ def segment_tissue_deep(
                 imgs = imgs.cuda()
             masks = model(imgs)['out']
             preds = masks.argmax(1).to(torch.uint8).detach()
-            
-            torch.cuda.synchronize()
 
             preds = preds.cpu().numpy()
             coords = np.column_stack((coords[0], coords[1]))
