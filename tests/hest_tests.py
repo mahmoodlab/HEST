@@ -153,11 +153,11 @@ class TestHESTData(unittest.TestCase):
 
 
     def test_patching(self):
-        for idx, st in enumerate(self.sts):
-            with self.subTest(st_object=idx):
-                name = ''
-                name += st.meta['id']
-                st.dump_patches(self.output_dir, name=name)
+       for idx, st in enumerate(self.sts):
+           with self.subTest(st_object=idx):
+               name = ''
+               name += st.meta['id']
+               st.dump_patches(self.output_dir, name=name)
                
                
     def test_saving(self):
@@ -180,9 +180,9 @@ if __name__ == '__main__':
     #TestHESTReader()
     
     loader = unittest.TestLoader()
-    #suite = loader.loadTestsFromTestCase(TestHESTData)
-    suite = unittest.TestSuite()
-    suite.addTest(TestHESTData('test_patching'))
+    suite = loader.loadTestsFromTestCase(TestHESTData)
+    #suite = unittest.TestSuite()
+    #suite.addTest(TestHESTData('test_patching'))
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     if not result.wasSuccessful():
         raise Exception('Test failed')
