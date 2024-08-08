@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pickle
-from functools import partial
 from typing import Union
 
 import cv2
@@ -26,7 +25,7 @@ def segment_tissue_deep(
     wsi: Union[np.ndarray, openslide.OpenSlide, CuImage, WSI], # type: ignore
     pixel_size: float,
     fast_mode=False,
-    target_pxl_size=1,
+    dst_pixel_size=1,
     patch_size_um=512,
     model_name='deeplabv3_seg_v4.ckpt',
     batch_size=8,
@@ -40,7 +39,7 @@ def segment_tissue_deep(
         pixel_size (float): pixel size in um/px for the wsi
         fast_mode (bool, optional): in fast mode the inference is done at 2 um/px instead of 1 um/px, 
             note that the inference pixel size is overwritten by the `target_pxl_size` argument if != 1. Defaults to False.
-        target_pxl_size (int, optional): patches are scaled to this pixel size in um/px for inference. Defaults to 1.
+        dst_pixel_size (int, optional): patches are scaled to this pixel size in um/px for inference. Defaults to 1.
         patch_size_um (int, optional): patch size in um. Defaults to 512.
         model_name (str, optional): model name in `HEST/models` dir. Defaults to 'deeplabv3_seg_v4.ckpt'.
         batch_size (int, optional): batch size for inference. Defaults to 8.
@@ -56,23 +55,20 @@ def segment_tissue_deep(
     from torchvision import transforms
     from hest.segmentation.SegDataset import SegWSIDataset
     
-    pixel_size_src = pixel_size
-    
-    if fast_mode and target_pxl_size == 1:
-        target_pxl_size = 2
-    
-    patch_size_deeplab = 512
+    src_pixel_size = pixel_size
     
     if fast_mode and dst_pixel_size == 1:
         dst_pixel_size = 2
     
-    scale = pixel_size_src / target_pxl_size
+    patch_size_deeplab = 512
+    
+    scale = src_pixel_size / dst_pixel_size
     patch_size_src = round(patch_size_um / scale)
     wsi = wsi_factory(wsi)
     
     weights_path = get_path_relative(__file__, f'../../../models/{model_name}')
     
-    patcher = WSIPatcher(wsi, patch_size_src, patch_size_deeplab)
+    patcher = wsi.create_patcher(patch_size_deeplab, src_pixel_size, dst_pixel_size)
         
     eval_transforms = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
     dataset = SegWSIDataset(patcher, eval_transforms)
@@ -132,14 +128,14 @@ def segment_tissue_deep(
                 coord = coords[i]
                 x, y = round(coord[0] * src_to_deeplab_scale), round(coord[1] * src_to_deeplab_scale)
                  
-                y_end = min(y+patch_size_deeplab + overlap, height)
-                x_end = min(x+patch_size_deeplab + overlap, width)
+                y_end = min(y+patch_size_deeplab, height)
+                x_end = min(x+patch_size_deeplab, width)
                 stitched_img[y:y_end, x:x_end] += pred[:y_end-y, :x_end-x]
             
         
     mask = (stitched_img > 0).astype(np.uint8)
         
-    gdf_contours = mask_to_contours(mask, max_nb_holes=5, pixel_size=pixel_size_src, contour_scale=1 / src_to_deeplab_scale)
+    gdf_contours = mask_to_gdf(mask, max_nb_holes=5, pixel_size=src_pixel_size, contour_scale=1 / src_to_deeplab_scale)
         
     return gdf_contours
 
@@ -187,76 +183,6 @@ def keep_largest_area(mask: np.ndarray) -> np.ndarray:
     largest_mask[label_image == largest_label] = True
     mask[~largest_mask] = 0
     return mask
-    
-
-
-def contours_to_img(
-    contours: gpd.GeoDataFrame, 
-    img: np.ndarray, 
-    draw_contours=False, 
-    thickness=1, 
-    downsample=1.,
-    line_color=(0, 255, 0)
-) -> np.ndarray:
-    draw_cont = partial(cv2.drawContours, contourIdx=-1, thickness=thickness, lineType=cv2.LINE_8)
-    draw_cont_fill = partial(cv2.drawContours, contourIdx=-1, thickness=cv2.FILLED)
-    
-    groups = contours.groupby('tissue_id')
-    for _, group in groups:
-        
-        for _, row in group.iterrows():
-            cont = np.array([[round(x * downsample), round(y * downsample)] for x, y in row.geometry.exterior.coords])
-        
-            if row['hole']:
-                draw_cont_fill(image=img, contours=[cont], color=(0, 0, 0))
-            else:
-                draw_cont_fill(image=img, contours=[cont], color=line_color)
-            if draw_contours:
-                draw_cont(image=img, contours=[cont], color=line_color)
-    return img
-
-
-def get_tissue_vis(
-            img: Union[np.ndarray, openslide.OpenSlide, CuImage, WSI],
-            tissue_contours: gpd.GeoDataFrame,
-            line_color=(0, 255, 0),
-            line_thickness=5,
-            target_width=1000,
-            seg_display=True,
-    ) -> Image:
-        tissue_contours = tissue_contours.copy()
-    
-        wsi = wsi_factory(img)
-    
-        width, height = wsi.get_dimensions()
-        downsample = target_width / width
-
-        top_left = (0,0)
-        
-        img = wsi.get_thumbnail(round(width * downsample), round(height * downsample))
-
-        if tissue_contours is None:
-            return Image.fromarray(img)
-
-        downscaled_mask = np.zeros(img.shape[:2], dtype=np.uint8)
-        downscaled_mask = np.expand_dims(downscaled_mask, axis=-1)
-        downscaled_mask = downscaled_mask * np.array([0, 0, 0]).astype(np.uint8)
-
-        if tissue_contours is not None and seg_display:
-            downscaled_mask = contours_to_img(
-                tissue_contours, 
-                downscaled_mask, 
-                draw_contours=True, 
-                thickness=line_thickness, 
-                downsample=downsample,
-                line_color=line_color
-            )
-
-        alpha = 0.4
-        img = cv2.addWeighted(img, 1 - alpha, downscaled_mask, alpha, 0)
-        img = img.astype(np.uint8)
-
-        return Image.fromarray(img)
     
 
 @deprecated
@@ -442,7 +368,7 @@ def make_valid(polygon):
     raise Exception("Failed to make a valid polygon")
         
         
-def mask_to_contours(mask: np.ndarray, keep_ids = [], exclude_ids=[], max_nb_holes=0, min_contour_area=1000, pixel_size=1, contour_scale=1.):
+def mask_to_gdf(mask: np.ndarray, keep_ids = [], exclude_ids=[], max_nb_holes=0, min_contour_area=1000, pixel_size=1, contour_scale=1.):
     TARGET_EDGE_SIZE = 2000
     scale = TARGET_EDGE_SIZE / mask.shape[0]
 
@@ -492,9 +418,7 @@ def mask_to_contours(mask: np.ndarray, keep_ids = [], exclude_ids=[], max_nb_hol
                 polygon = make_valid(polygon)
         polygons.append(polygon)
     
-    gdf_contours = gpd.GeoDataFrame(pd.DataFrame(tissue_ids, columns=['tissue_id']), geometry=geometry)
-    gdf_contours['hole'] = tissue_types
-    gdf_contours['hole'] = gdf_contours['hole'] == 'hole'
+    gdf_contours = gpd.GeoDataFrame(pd.DataFrame(tissue_ids, columns=['tissue_id']), geometry=polygons)
     
     return gdf_contours
     
