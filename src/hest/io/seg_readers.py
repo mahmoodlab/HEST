@@ -51,18 +51,13 @@ def _process(x, extra_props, index_key, class_name):
 
 def _read_geojson(path, class_name=None, extra_props=False, index_key=None) -> gpd.GeoDataFrame:
     with open(path) as f:
-        t1 = time.time()
         ls = json.load(f)
-        t3 = time.time()
-        print(f"load geojson in {t3 - t1}s")
         
         sub_gdfs = []
         for x in tqdm(ls):
             sub_gdfs.append(_process(x, extra_props, index_key, class_name))
 
         gdf = gpd.GeoDataFrame(pd.concat(sub_gdfs, ignore_index=True))
-        t2 = time.time()
-        print(f"Read geojson in {t2 - t1}s")
         
     return gdf
 

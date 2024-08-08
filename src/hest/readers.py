@@ -18,6 +18,9 @@ from hest.io.seg_readers import (XeniumParquetCellReader, read_gdf)
 from hest.LazyShapes import LazyShapes
 from hest.segmentation.cell_segmenters import segment_cellvit
 
+from hest.io.seg_readers import read_gdf
+from hest.segmentation.cell_segmenters import segment_cellvit
+
 from .autoalign import autoalign_visium
 from .HESTData import (HESTData, STHESTData, VisiumHDHESTData, VisiumHESTData,
                        XeniumHESTData)
@@ -1065,7 +1068,6 @@ def reader_factory(path: str) -> Reader:
     else:
         raise NotImplementedError('')
         
-
 def read_and_save(path: str, save_plots=True, pyramidal=True, bigtiff=False, plot_pxl_size=False, save_img=True, segment_tissue=False):
     """For internal use, determine the appropriate reader based on the raw data path, and
     automatically process the data at that location, then the processed files are dumped

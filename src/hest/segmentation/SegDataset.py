@@ -7,7 +7,6 @@ from tqdm import tqdm
 
 from hest.wsi import WSIPatcher
 
-
 class SegFileDataset(Dataset):
     masks = []
     patches = []
@@ -47,26 +46,18 @@ class SegFileDataset(Dataset):
     
     
 class SegWSIDataset(Dataset):
-    masks = []
-    patches = []
-    coords = []
     
     def __init__(self, patcher: WSIPatcher, transform):
         self.patcher = patcher
-        
-        self.cols, self.rows = self.patcher.get_cols_rows()
-        self.size = self.cols * self.rows
         
         self.transform = transform
                               
 
     def __len__(self):
-        return self.size
+        return len(self.patcher)
     
     def __getitem__(self, index):
-        col = index % self.cols
-        row = index // self.cols
-        tile, x, y = self.patcher.get_tile(col, row)
+        tile, x, y = self.patcher[index]
         
         if self.transform:
             tile = self.transform(tile)

@@ -1,0 +1,10 @@
+{
+    "name": "remedis",
+    "img_norm": "none",
+    "loader": "remedis_loader",
+    "loader_kwargs": {
+        "model_name": "remedis_name"
+    },
+    "checkpoint_path": "",
+    "load_state_dict_strict": true
+}

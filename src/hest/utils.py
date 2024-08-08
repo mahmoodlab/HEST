@@ -7,7 +7,6 @@ import gzip
 import json
 import os
 import shutil
-import sys
 import warnings
 from enum import Enum
 from typing import List, Tuple, Union
@@ -63,6 +62,27 @@ def deprecated(func):
 
 def get_n_threads(n_workers):
     return os.cpu_count() if n_workers == -1 else n_workers
+
+
+def verify_paths(paths, suffix=""):
+    for path in paths:
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"No such file or directory: {path}" + suffix)
+
+
+def deprecated(func):
+    """This is a decorator which can be used to mark functions
+    as deprecated. It will result in a warning being emitted
+    when the function is used."""
+    @functools.wraps(func)
+    def new_func(*args, **kwargs):
+        warnings.simplefilter('always', DeprecationWarning)  # turn off filter
+        warnings.warn("Call to deprecated function {}.".format(func.__name__),
+                      category=DeprecationWarning,
+                      stacklevel=2)
+        warnings.simplefilter('default', DeprecationWarning)  # reset filter
+        return func(*args, **kwargs)
+    return new_func
 
 
 def verify_paths(paths, suffix=""):
@@ -1175,9 +1195,6 @@ def helper_mex(path: str, filename: str) -> None:
         f_out.close()
         f_in.close()
     
-    #if not os.path.exists(dst) and \
-    #        src is not None:
-    #    shutil.copy(src, dst)
 
 
 def load_wsi(img_path: str) -> Tuple[WSI, float]:

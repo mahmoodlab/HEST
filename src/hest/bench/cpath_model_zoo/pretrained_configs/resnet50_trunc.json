@@ -1,0 +1,17 @@
+{
+    "name": "resnet50_trunc",
+    "img_norm": "imagenet",
+    "loader": "timm_wrapper_cnn",
+    "loader_kwargs": {
+        "model_name": "resnet50.tv_in1k",
+        "kwargs": {
+            "features_only": true,
+            "out_indices": [
+                3
+            ],
+            "pretrained": true,
+            "num_classes": 0
+        },
+        "pool": true
+    }
+}

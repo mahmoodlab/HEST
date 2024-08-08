@@ -63,8 +63,8 @@ def segment_tissue_deep(
     
     patch_size_deeplab = 512
     
-    # TODO fix overlap
-    overlap=0
+    if fast_mode and dst_pixel_size == 1:
+        dst_pixel_size = 2
     
     scale = pixel_size_src / target_pxl_size
     patch_size_src = round(patch_size_um / scale)
@@ -189,6 +189,7 @@ def keep_largest_area(mask: np.ndarray) -> np.ndarray:
     largest_mask[label_image == largest_label] = True
     mask[~largest_mask] = 0
     return mask
+    
 
 
 def contours_to_img(
