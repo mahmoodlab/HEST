@@ -16,6 +16,8 @@ jobs:
   build:
 
     runs-on: ubuntu-latest
+    env:
+      HF_READ_TOKEN_PAUL: ${{ secrets.HF_READ_TOKEN_PAUL }}
 
     steps:
     - uses: actions/checkout@v4
@@ -35,5 +37,3 @@ jobs:
     - name: Run tests
       run: |
         python tests/hest_tests.py
-      env:
-        HF_READ_TOKEN_PAUL: ${{ secrets.HF_READ_TOKEN_PAUL }} 
