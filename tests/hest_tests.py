@@ -121,7 +121,7 @@ class TestHESTData(unittest.TestCase):
                 download_mode='force_redownload'
             )
             
-            self.sts = hest.load_hest(local_dir, id_list)
+            self.sts = hest.load_hest(local_dir, id_list, trust_remote_code=True)
         else:
             self.sts = hest.load_hest('hest_data', id_list)
 
