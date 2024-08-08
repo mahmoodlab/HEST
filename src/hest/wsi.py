@@ -23,18 +23,6 @@ class CucimWarningSingleton:
         return cls._warned_cucim
 
 
-
-class CucimWarningSingleton:
-    _warned_cucim = False
-
-    @classmethod
-    def warn(cls):
-        if cls._warned_cucim is False:
-            warnings.warn("CuImage is not available. Ensure you have a GPU and cucim installed to use GPU acceleration.")
-            cls._warned_cucim = True
-        return cls._warned_cucim
-
-
 def is_cuimage(img):
     try:
         from cucim import CuImage
@@ -67,8 +55,7 @@ class WSI:
         pass
     
     @abstractmethod
-    def level_dimensions(self) -> List[Tuple[int, int]]:
-        """ A list of (width, height) tuples, one for each level of the slide. level_dimensions[k] are the dimensions of level k. """
+    def get_thumbnail(self, width, height):
         pass
     
     def __repr__(self) -> str:
@@ -147,15 +134,11 @@ class NumpyWSI(WSI):
     
 
 class OpenSlideWSI(WSI):
-    _numpy = None
-    
     def __init__(self, img: openslide.OpenSlide):
         super().__init__(img)
         
     def numpy(self) -> np.ndarray:
-        if self._numpy is None:
-            self._numpy = self.get_thumbnail(self.width, self.height)
-        return self._numpy
+        return self.get_thumbnail(self.width, self.height)
 
     def get_dimensions(self):
         return self.img.dimensions
@@ -163,7 +146,7 @@ class OpenSlideWSI(WSI):
     def read_region(self, location, level, size) -> np.ndarray:
         return np.array(self.img.read_region(location, level, size))
 
-    def get_thumbnail(self, width, height) -> np.ndarray:
+    def get_thumbnail(self, width, height):
         return np.array(self.img.get_thumbnail((width, height)))
     
     def get_best_level_for_downsample(self, downsample):
@@ -188,15 +171,11 @@ class OpenSlideWSI(WSI):
         return OpenSlideWSIPatcher(self, patch_size, src_pixel_size, dst_pixel_size, overlap, mask, coords_only, custom_coords)
     
 class CuImageWSI(WSI):
-    _numpy = None
-    
     def __init__(self, img: 'CuImage'):
         super().__init__(img)
 
     def numpy(self) -> np.ndarray:
-        if self._numpy is None:
-            self._numpy = self.get_thumbnail(self.width, self.height)
-        return self._numpy
+        return self.get_thumbnail(self.width, self.height)
 
     def get_dimensions(self):
         return self.img.resolutions['level_dimensions'][0]
@@ -204,7 +183,7 @@ class CuImageWSI(WSI):
     def read_region(self, location, level, size) -> np.ndarray:
         return np.array(self.img.read_region(location=location, level=level, size=size))
     
-    def get_thumbnail(self, width, height) -> np.ndarray:
+    def get_thumbnail(self, width, height):
         downsample = self.width / width
         downsamples = self.img.resolutions['level_downsamples']
         closest = 0
@@ -301,6 +280,8 @@ class WSIPatcher:
             ])
             coords = np.array([self._colrow_to_xy(xy[0], xy[1]) for xy in col_rows])
         else:
+            if round(custom_coords[0][0]) != custom_coords[0][0]:
+                raise ValueError("custom_coords must be a (N, 2) array of int")
             coords = custom_coords
         
         if self.mask is not None:
@@ -319,7 +300,7 @@ class WSIPatcher:
         
         # TODO spots are already at the center
         # Note: we don't take into account the overlap size we calculating centers
-        xy_centers = coords + self.patch_size_level // 2
+        xy_centers = coords + self.patch_size_src // 2
         
         union_mask = self.mask.union_all()
         
@@ -373,7 +354,7 @@ class WSIPatcher:
         if self.patch_size_target is not None:
             tile = cv2.resize(tile, (self.patch_size_target, self.patch_size_target))
         assert x < self.width and y < self.height
-        return tile, x, y
+        return tile[:, :, :3], x, y
     
     def get_tile(self, col: int, row: int) -> Tuple[np.ndarray, int, int]:
         """ get tile at position (column, row)
@@ -398,11 +379,11 @@ class WSIPatcher:
         while x < self.width:
             col += 1
             x, _ = self._colrow_to_xy(col, row)
-        cols = col - 1
+        cols = col
         while y < self.height:
             row += 1
             _, y = self._colrow_to_xy(col, row)
-        rows = row - 1
+        rows = row
         return cols, rows 
     
     def save_visualization(self, path, vis_width=1000, dpi=150):
