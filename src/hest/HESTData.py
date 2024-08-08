@@ -133,7 +133,7 @@ class HESTData:
         filename = f"{name}spatial_plots.png"
         
         # Save the figure
-        fig.savefig(os.path.join(save_path, filename))
+        fig.savefig(os.path.join(save_path, filename), dpi=400)
         print(f"H&E overlay spatial plots saved in {save_path}")
     
     
@@ -304,9 +304,8 @@ class HESTData:
             use_mask (bool, optional): whenever to take into account the tissue mask. Defaults to True.
         """
         
-        import matplotlib
         import matplotlib.pyplot as plt
-        from matplotlib.collections import PatchCollection
+        dst_pixel_size = target_pixel_size
         
         adata = self.adata.copy()
         
@@ -333,75 +332,25 @@ class HESTData:
         mode_HE = 'w'
         i = 0
         img_width, img_height = self.wsi.get_dimensions()
-        patch_rectangles = [] # lower corner (x, y) + (widht, height)
-        downscale_vis = TARGET_VIS_SIZE / img_width
 
-        if use_mask:
-            tissue_mask = np.zeros((img_height, img_width, 3), dtype=np.uint8)
-            tissue_mask = contours_to_img(
-                self.tissue_contours, 
-                tissue_mask, 
-                draw_contours=False, 
-                line_color=(1, 1, 1)
-            )[:, :, 0]
-        else:
-            tissue_mask = np.ones((img_height, img_width)).astype(np.uint8)
-            
-        mask_plot = self.get_tissue_vis()
 
-        ax.imshow(mask_plot)
-        for _, row in tqdm(adata.obs.iterrows(), total=len(adata.obs)):
-            
-            barcode_spot = row.name
+        coords_center = adata.obsm['spatial']
+        coords_topleft = coords_center - target_patch_size // 2
+        barcodes = np.array(adata.obs.index)
+        mask = self.tissue_contours if use_mask else None
+        patcher = self.wsi.create_patcher(target_patch_size, src_pixel_size, dst_pixel_size, mask=mask, custom_coords=coords_topleft)
 
-            xImage = int(adata.obsm['spatial'][i][0])
-            yImage = int(adata.obsm['spatial'][i][1])
-
-            i += 1
+        i = 0
+        for tile, x, y in tqdm(patcher):
             
-            if not(0 <= xImage and xImage < img_width and 0 <= yImage and yImage < img_height):
-                if verbose:
-                    print('Warning, spot is out of the image, skipping')
-                continue
-            
-            if not(0 <= yImage - patch_size_pxl // 2 and yImage + patch_size_pxl // 2 < img_height and \
-                0 <= xImage - patch_size_pxl // 2 and xImage + patch_size_pxl // 2 < img_width):
-                if verbose:
-                    print('Warning, patch is out of the image, skipping')
-                continue
-            
-            ## TODO reimplement now that we use the pyramidal level
-            image_patch = self.wsi.read_region((xImage - patch_size_pxl // 2, yImage - patch_size_pxl // 2), 0, (patch_size_pxl, patch_size_pxl))
-            rect_x = (xImage - patch_size_pxl // 2) * downscale_vis
-            rect_y = (yImage - patch_size_pxl // 2) * downscale_vis
-            rect_width = patch_size_pxl * downscale_vis
-            rect_height = patch_size_pxl * downscale_vis
-
-            image_patch = np.array(image_patch)
-            if image_patch.shape[2] == 4:
-                image_patch = image_patch[:, :, :3]
-                
-            
-            if use_mask:
-                patch_mask = tissue_mask[yImage - patch_size_pxl // 2: yImage + patch_size_pxl // 2,
-                                xImage - patch_size_pxl // 2: xImage + patch_size_pxl // 2]
-                patch_area = patch_mask.shape[0] ** 2
-                pixel_count = patch_mask.sum()
-
-                if pixel_count / patch_area < TISSUE_INTER_THRESH:
-                    continue
-
-            patch_rectangles.append(matplotlib.patches.Rectangle((rect_x, rect_y), rect_width, rect_height))
-            
-            patch_count += 1
-            image_patch = cv2.resize(image_patch, (target_patch_size, target_patch_size), interpolation=cv2.INTER_CUBIC)
-            
+            center_x = x + target_patch_size // 2
+            center_y = y + target_patch_size // 2
             
             # Save ref patches
-            assert image_patch.shape == (target_patch_size, target_patch_size, 3)
-            asset_dict = { 'img': np.expand_dims(image_patch, axis=0),  # (1 x w x h x 3)
-                            'coords': np.expand_dims([yImage, xImage], axis=0),   # (1 x 2)
-                            'barcode': np.expand_dims([barcode_spot], axis=0)
+            assert tile.shape == (target_patch_size, target_patch_size, 3)
+            asset_dict = { 'img': np.expand_dims(tile, axis=0),  # (1 x w x h x 3)
+                            'coords': np.expand_dims([center_y, center_x], axis=0),   # (1 x 2)
+                            'barcode': np.expand_dims([barcodes[i]], axis=0)
                             }
 
             attr_dict = {}
@@ -410,13 +359,10 @@ class HESTData:
 
             initsave_hdf5(output_datafile, asset_dict, attr_dict, mode=mode_HE)
             mode_HE = 'a'
+            i += 1
 
-        
         if dump_visualization:
-            ax.add_collection(PatchCollection(patch_rectangles, facecolor='none', edgecolor='black', linewidth=0.3))
-            ax.set_axis_off()
-            plt.tight_layout()
-            plt.savefig(os.path.join(patch_save_dir, name + '_patch_vis.png'), dpi=400, bbox_inches = 'tight')
+            patcher.save_visualization(os.path.join(patch_save_dir, name + '_patch_vis.png'), dpi=400)
             
         if verbose:
             print(f'found {patch_count} valid patches')

@@ -401,10 +401,10 @@ def mask_to_gdf(mask: np.ndarray, keep_ids = [], exclude_ids=[], max_nb_holes=0,
     else:
         contour_ids = set(np.arange(len(contours_tissue))) - set(exclude_ids)
 
-    tissue_ids = [i for i in contour_ids] + [i for i in contour_ids if len(contours_holes[i]) > 0]
+    tissue_ids = [i for i in contour_ids]
     polygons = []
     for i in contour_ids:
-        holes = contours_holes[i][0].squeeze(1) if len(contours_holes[i]) > 0 else None
+        holes = [contours_holes[i][j].squeeze(1) for j in range(len(contours_holes[i]))] if len(contours_holes[i]) > 0 else None
         polygon = Polygon(contours_tissue[i].squeeze(1), holes=holes)
         polygons.append(polygon)
     

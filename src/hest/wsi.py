@@ -64,7 +64,16 @@ class WSI:
         return f"<width={width}, height={height}, backend={self.__class__.__name__}>"
     
     @abstractmethod
-    def create_patcher(self, patch_size: int, src_pixel_size: float, dst_pixel_size: float = None, overlap: int = 0, mask: gpd.GeoDataFrame = None, coords_only = False) -> WSIPatcher:
+    def create_patcher(
+        self, 
+        patch_size: int, 
+        src_pixel_size: float, 
+        dst_pixel_size: float = None, 
+        overlap: int = 0, 
+        mask: gpd.GeoDataFrame = None, 
+        coords_only = False, 
+        custom_coords = None
+    ) -> WSIPatcher:
         pass
     
 
@@ -111,8 +120,17 @@ class NumpyWSI(WSI):
     def get_thumbnail(self, width, height) -> np.ndarray:
         return cv2.resize(self.img, (width, height))
     
-    def create_patcher(self, patch_size: int, src_pixel_size: float, dst_pixel_size: float = None, overlap: int = 0, mask: gpd.GeoDataFrame = None, coords_only = False) -> WSIPatcher:
-        return NumpyWSIPatcher(self, patch_size, src_pixel_size, dst_pixel_size, overlap, mask, coords_only)
+    def create_patcher(
+        self, 
+        patch_size: int, 
+        src_pixel_size: float, 
+        dst_pixel_size: float = None, 
+        overlap: int = 0, 
+        mask: gpd.GeoDataFrame = None, 
+        coords_only = False, 
+        custom_coords = None
+    ) -> WSIPatcher:
+        return NumpyWSIPatcher(self, patch_size, src_pixel_size, dst_pixel_size, overlap, mask, coords_only, custom_coords)
     
 
 class OpenSlideWSI(WSI):
@@ -140,8 +158,17 @@ class OpenSlideWSI(WSI):
     def level_downsamples(self):
         return self.img.level_downsamples
     
-    def create_patcher(self, patch_size: int, src_pixel_size: float, dst_pixel_size: float = None, overlap: int = 0, mask: gpd.GeoDataFrame = None, coords_only = False) -> WSIPatcher:
-        return OpenSlideWSIPatcher(self, patch_size, src_pixel_size, dst_pixel_size, overlap, mask, coords_only)
+    def create_patcher(
+        self, 
+        patch_size: int, 
+        src_pixel_size: float, 
+        dst_pixel_size: float = None, 
+        overlap: int = 0, 
+        mask: gpd.GeoDataFrame = None, 
+        coords_only = False, 
+        custom_coords = None
+    ) -> WSIPatcher:
+        return OpenSlideWSIPatcher(self, patch_size, src_pixel_size, dst_pixel_size, overlap, mask, coords_only, custom_coords)
     
 class CuImageWSI(WSI):
     def __init__(self, img: 'CuImage'):
@@ -187,8 +214,17 @@ class CuImageWSI(WSI):
     def level_downsamples(self):
         return self.img.resolutions['level_downsamples']
     
-    def create_patcher(self, patch_size: int, src_pixel_size: float, dst_pixel_size: float = None, overlap: int = 0, mask: gpd.GeoDataFrame = None, coords_only = False) -> WSIPatcher:
-        return CuImageWSIPatcher(self, patch_size, src_pixel_size, dst_pixel_size, overlap, mask, coords_only)
+    def create_patcher(
+        self, 
+        patch_size: int, 
+        src_pixel_size: float, 
+        dst_pixel_size: float = None, 
+        overlap: int = 0, 
+        mask: gpd.GeoDataFrame = None, 
+        coords_only = False, 
+        custom_coords = None
+    ) -> WSIPatcher:
+        return CuImageWSIPatcher(self, patch_size, src_pixel_size, dst_pixel_size, overlap, mask, coords_only, custom_coords)
             
         
 class WSIPatcher:
@@ -264,7 +300,7 @@ class WSIPatcher:
         # Note: we don't take into account the overlap size we calculating centers
         xy_centers = coords + self.patch_size_level // 2
         
-        union_mask = self.mask.unary_union
+        union_mask = self.mask.union_all()
         
         points = gpd.points_from_xy(xy_centers[:, 0], xy_centers[:, 1])
         valid_mask = gpd.GeoSeries(points).within(union_mask).values
@@ -376,7 +412,7 @@ class WSIPatcher:
         ax.add_collection(PatchCollection(patch_rectangles, facecolor='none', edgecolor='black', linewidth=0.3))
         ax.set_axis_off()
         plt.tight_layout()
-        plt.savefig(path, dpi=dpi)
+        plt.savefig(path, dpi=dpi, bbox_inches = 'tight')
     
     
 class OpenSlideWSIPatcher(WSIPatcher):
@@ -426,14 +462,15 @@ def contours_to_img(
         
         for _, row in group.iterrows():
             cont = np.array([[round(x * downsample), round(y * downsample)] for x, y in row.geometry.exterior.coords])
-            holes = np.array([[round(x * downsample), round(y * downsample)] for hole in row.geometry.interiors for x, y in hole.coords])
+            holes = [np.array([[round(x * downsample), round(y * downsample)] for x, y in hole.coords]) for hole in row.geometry.interiors]
         
             draw_cont_fill(image=img, contours=[cont], color=line_color)
+        
+            for hole in holes:
+                draw_cont_fill(image=img, contours=[hole], color=(0, 0, 0))
+
             if draw_contours:
                 draw_cont(image=img, contours=[cont], color=line_color)
-        
-            if len(holes) > 0:
-                draw_cont_fill(image=img, contours=[holes], color=(0, 0, 0))
     return img
 
 
