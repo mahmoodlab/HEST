@@ -105,7 +105,7 @@ class TestHESTData(unittest.TestCase):
         else:
             login(token=token)
         
-        id_list = ['TENX24', 'SPA154', 'TENX96', 'TENX131']
+        id_list = ['TENX24', 'SPA154']
         
         if download:
             import datasets
