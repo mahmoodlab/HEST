@@ -298,7 +298,7 @@ class WSIPatcher:
         
         # TODO spots are already at the center
         # Note: we don't take into account the overlap size we calculating centers
-        xy_centers = coords + self.patch_size_level // 2
+        xy_centers = coords + self.patch_size_src // 2
         
         union_mask = self.mask.union_all()
         
@@ -377,11 +377,11 @@ class WSIPatcher:
         while x < self.width:
             col += 1
             x, _ = self._colrow_to_xy(col, row)
-        cols = col - 1
+        cols = col
         while y < self.height:
             row += 1
             _, y = self._colrow_to_xy(col, row)
-        rows = row - 1
+        rows = row
         return cols, rows 
     
     def save_visualization(self, path, vis_width=1000, dpi=150):

@@ -10,8 +10,8 @@ import cv2
 import geopandas as gpd
 import numpy as np
 
-from hest.io.seg_readers import TissueContourReader, write_geojson
-from hest.LazyShapes import LazyShapes, convert_old_to_gpd
+from hest.io.seg_readers import TissueContourReader
+from hest.LazyShapes import LazyShapes, convert_old_to_gpd, old_geojson_to_new
 from hest.segmentation.TissueMask import TissueMask, load_tissue_mask
 from hest.wsi import (WSI, CucimWarningSingleton, NumpyWSI, contours_to_img,
                       get_tissue_vis, wsi_factory)
@@ -710,8 +710,15 @@ def read_HESTData(
     tissue_contours = None
     tissue_seg = None
     if tissue_contours_path is not None:
-        tissue_contours = TissueContourReader().read_gdf(tissue_contours_path)
-        tissue_contours['tissue_id'] = tissue_contours['tissue_id'].astype(int)
+        with open(tissue_contours_path) as f:
+            lines = f.read()
+            if 'hole' in lines:
+                warnings.warn("this type of .geojson tissue contour file is deprecated, please download the new `tissue_seg` folder on huggingface: https://huggingface.co/datasets/MahmoodLab/hest/tree/main")
+                gdf = TissueContourReader().read_gdf(tissue_contours_path)
+                tissue_contours = old_geojson_to_new(gdf)
+            else:
+                tissue_contours = gpd.read_file(tissue_contours_path)
+            
     elif mask_path_pkl is not None and mask_path_jpg is not None:
         tissue_seg = load_tissue_mask(mask_path_pkl, mask_path_jpg, width, height)
     

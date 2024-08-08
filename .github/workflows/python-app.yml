@@ -1,0 +1,38 @@
+# This workflow will install Python dependencies, run tests and lint with a single version of Python
+# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
+
+name: Hest tests
+
+on:
+  #push:
+  #  branches: [ "main", "develop"]
+  pull_request:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python 3.9
+      uses: actions/setup-python@v3
+      with:
+        python-version: "3.9"
+     
+    - name: Install python dependencies
+      run: |
+        python -m pip install -e .
+    - name: Install apt dependencies
+      run: |
+        sudo apt install libvips libvips-dev openslide-tools
+
+    - name: Run tests
+      run: |
+        python tests/hest_tests.py
+      env:
+        HF_READ_TOKEN_PAUL: ${{ secrets.HF_READ_TOKEN_PAUL }} 
