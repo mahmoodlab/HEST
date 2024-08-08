@@ -118,10 +118,11 @@ class TestHESTData(unittest.TestCase):
                 'MahmoodLab/hest', 
                 cache_dir=local_dir,
                 patterns=list_patterns,
-                download_mode='force_redownload'
+                download_mode='force_redownload',
+                trust_remote_code=True
             )
             
-            self.sts = hest.load_hest(local_dir, id_list, trust_remote_code=True)
+            self.sts = hest.load_hest(local_dir, id_list)
         else:
             self.sts = hest.load_hest('hest_data', id_list)
 
