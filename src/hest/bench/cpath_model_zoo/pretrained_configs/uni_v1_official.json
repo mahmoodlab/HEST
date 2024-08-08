@@ -1,0 +1,13 @@
+{
+    "name": "uni_v1",
+    "img_norm": "imagenet",
+    "loader": "timm",
+    "loader_kwargs": {
+        "model_name": "vit_large_patch16_224",
+        "dynamic_img_size": true,
+        "num_classes": 0,
+        "init_values": 1.0
+    },
+    "checkpoint_path": "",
+    "load_state_dict_strict": true
+}

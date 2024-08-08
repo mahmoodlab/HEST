@@ -1,0 +1,10 @@
+{
+    "name": "kimianet",
+    "img_norm": "imagenet",
+    "loader": "kimianet_loader",
+    "loader_kwargs": {
+        "model_name": "kimianet"
+    },
+    "checkpoint_path": "",
+    "load_state_dict_strict": false
+}

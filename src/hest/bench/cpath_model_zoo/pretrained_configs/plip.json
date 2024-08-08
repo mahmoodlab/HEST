@@ -1,0 +1,9 @@
+{
+    "name": "plip",
+    "img_norm": "none",
+    "loader": "plip_loader",
+    "loader_kwargs": {
+        "model_name": "plip_name"
+    },
+    "load_state_dict_strict": true
+}
