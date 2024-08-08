@@ -338,6 +338,7 @@ class HESTData:
         coords_topleft = coords_center - target_patch_size // 2
         barcodes = np.array(adata.obs.index)
         mask = self.tissue_contours if use_mask else None
+        coords_topleft = np.array(coords_topleft).astype(int)
         patcher = self.wsi.create_patcher(target_patch_size, src_pixel_size, dst_pixel_size, mask=mask, custom_coords=coords_topleft)
 
         i = 0

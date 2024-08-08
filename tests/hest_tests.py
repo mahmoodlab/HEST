@@ -181,4 +181,6 @@ if __name__ == '__main__':
     
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromTestCase(TestHESTData)
+    #suite = unittest.TestSuite()
+    #suite.addTest(TestHESTData('test_patching'))
     unittest.TextTestRunner(verbosity=2).run(suite)

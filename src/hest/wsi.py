@@ -280,6 +280,8 @@ class WSIPatcher:
             ])
             coords = np.array([self._colrow_to_xy(xy[0], xy[1]) for xy in col_rows])
         else:
+            if round(custom_coords[0][0]) != custom_coords[0][0]:
+                raise ValueError("custom_coords must be a (N, 2) array of int")
             coords = custom_coords
         
         if self.mask is not None:
@@ -352,7 +354,7 @@ class WSIPatcher:
         if self.patch_size_target is not None:
             tile = cv2.resize(tile, (self.patch_size_target, self.patch_size_target))
         assert x < self.width and y < self.height
-        return tile, x, y
+        return tile[:, :, :3], x, y
     
     def get_tile(self, col: int, row: int) -> Tuple[np.ndarray, int, int]:
         """ get tile at position (column, row)
