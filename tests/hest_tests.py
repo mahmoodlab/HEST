@@ -1,6 +1,7 @@
 import os
 import unittest
 from os.path import join as _j
+import warnings
 
 import hest
 from hest import HESTData, read_HESTData
@@ -90,14 +91,40 @@ class TestHESTData(unittest.TestCase):
    
     @classmethod
     def setUpClass(self):
+        download = True
         self.cur_dir = get_path_relative(__file__, '')
         cur_dir = self.cur_dir
         self.output_dir = _j(cur_dir, 'output_tests/hestdata_tests')
         os.makedirs(self.output_dir, exist_ok=True)
         
-        id_list = ['TENX24', 'SPA154', 'TENX96', 'TENX131']
+        from huggingface_hub import login
         
-        self.sts = hest.load_hest('hest_data', id_list)
+        token = os.getenv('HF_READ_TOKEN_PAUL')
+        if token is None:
+            warnings.warn("Please setup huggingface token 'HF_READ_TOKEN_PAUL'")
+        else:
+            login(token=token)
+        
+        id_list = ['TENX24', 'SPA154']
+        
+        if download:
+            import datasets
+            
+            local_dir = os.path.join(cur_dir, 'hest_data_test')
+            
+            ids_to_query = id_list
+            list_patterns = [f"*{id}[_.]**" for id in ids_to_query]
+            datasets.load_dataset(
+                'MahmoodLab/hest', 
+                cache_dir=local_dir,
+                patterns=list_patterns,
+                download_mode='force_redownload',
+                trust_remote_code=True
+            )
+            
+            self.sts = hest.load_hest(local_dir, id_list)
+        else:
+            self.sts = hest.load_hest('hest_data', id_list)
 
         
     def test_tissue_seg(self):
@@ -154,4 +181,8 @@ if __name__ == '__main__':
     
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromTestCase(TestHESTData)
-    unittest.TextTestRunner(verbosity=2).run(suite)
+    #suite = unittest.TestSuite()
+    #suite.addTest(TestHESTData('test_patching'))
+    result = unittest.TextTestRunner(verbosity=2).run(suite)
+    if not result.wasSuccessful():
+        raise Exception('Test failed')

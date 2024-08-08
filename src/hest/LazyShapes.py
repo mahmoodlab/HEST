@@ -67,3 +67,20 @@ def convert_old_to_gpd(contours_holes, contours_tissue) -> gpd.GeoDataFrame:
             
     return gpd.GeoDataFrame(df, geometry=shapes)
         
+
+def old_geojson_to_new(gdf):
+    polygons = []
+    keys = []
+    for key, group in gdf.groupby('tissue_id'):
+        holes = []
+        for row in group.values:
+            if row[2]:
+                holes.append([coord for coord in row[0].exterior.coords])
+            else:
+                exterior = [coord for coord in row[0].exterior.coords]
+        polygons.append(Polygon(exterior, holes))
+        keys.append(key)
+    
+    gdf = gpd.GeoDataFrame(geometry=polygons)
+    gdf['tissue_id'] = keys
+    return gdf

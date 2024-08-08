@@ -122,8 +122,6 @@ def segment_tissue_deep(
                 imgs = imgs.cuda()
             masks = model(imgs)['out']
             preds = masks.argmax(1).to(torch.uint8).detach()
-            
-            torch.cuda.synchronize()
 
             preds = preds.cpu().numpy()
             coords = np.column_stack((coords[0], coords[1]))
@@ -434,6 +432,14 @@ def filter_contours(contours, hierarchy, filter_params, scale, pixel_size):
         hole_contours.append(filtered_holes)
 
     return foreground_contours, hole_contours
+
+
+def make_valid(polygon):
+    for i in [0, 0.1, -0.1, 0.2]:
+        new_polygon = polygon.buffer(i)
+        if isinstance(new_polygon, Polygon) and new_polygon.is_valid:
+            return new_polygon
+    raise Exception("Failed to make a valid polygon")
         
         
 def mask_to_contours(mask: np.ndarray, keep_ids = [], exclude_ids=[], max_nb_holes=0, min_contour_area=1000, pixel_size=1, contour_scale=1.):
@@ -475,11 +481,16 @@ def mask_to_contours(mask: np.ndarray, keep_ids = [], exclude_ids=[], max_nb_hol
     else:
         contour_ids = set(np.arange(len(contours_tissue))) - set(exclude_ids)
 
-    tissue_poly = [Polygon(contours_tissue[i].squeeze(1)) for i in contour_ids]
-    hole_poly = [Polygon(contours_holes[i][0].squeeze(1)) for i in contour_ids if len(contours_holes[i]) > 0]
-    geometry = tissue_poly + hole_poly
-    tissue_ids = [i for i in contour_ids] + [i for i in contour_ids if len(contours_holes[i]) > 0]
-    tissue_types = ['tissue' for _ in contour_ids] + ['hole' for i in contour_ids if len(contours_holes[i]) > 0]
+    tissue_ids = [i for i in contour_ids]
+    polygons = []
+    for i in contour_ids:
+        holes = [contours_holes[i][j].squeeze(1) for j in range(len(contours_holes[i]))] if len(contours_holes[i]) > 0 else None
+        polygon = Polygon(contours_tissue[i].squeeze(1), holes=holes)
+        if not polygon.is_valid:
+            # TODO replace by shapely make_valid after 2.1
+            if not polygon.is_valid:
+                polygon = make_valid(polygon)
+        polygons.append(polygon)
     
     gdf_contours = gpd.GeoDataFrame(pd.DataFrame(tissue_ids, columns=['tissue_id']), geometry=geometry)
     gdf_contours['hole'] = tissue_types
