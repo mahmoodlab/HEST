@@ -1,0 +1,12 @@
+{
+    "name": "phikon",
+    "img_norm": "imagenet",
+    "loader": "hf_wrapper_vit",
+    "loader_kwargs": {
+        "model_name": "owkin/phikon",
+        "kwargs": {
+            "add_pooling_layer": false
+        }
+    },
+    "checkpoint_path": ""
+}

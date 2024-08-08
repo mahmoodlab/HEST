@@ -1,0 +1,9 @@
+{
+    "name": "conch_v1",
+    "img_norm": "openai_clip",
+    "loader": "conch_openclip_custom",
+    "loader_kwargs": {
+        "model_cfg": "conch_ViT-B-16"
+    },
+    "checkpoint_path": ""
+}

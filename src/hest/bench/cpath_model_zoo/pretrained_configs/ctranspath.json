@@ -1,0 +1,10 @@
+{
+    "name": "ctranspath",
+    "img_norm": "imagenet",
+    "loader": "ctranspath_loader",
+    "loader_kwargs": {
+        "model_name": "ctranspath_name"
+    },
+    "checkpoint_path": "",
+    "load_state_dict_strict": true
+}
