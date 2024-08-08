@@ -47,14 +47,9 @@ class SegFileDataset(Dataset):
     
     
 class SegWSIDataset(Dataset):
-    masks = []
-    patches = []
-    coords = []
     
     def __init__(self, patcher: WSIPatcher, transform):
         self.patcher = patcher
-        
-        self.cols, self.rows = self.patcher.get_cols_rows()
         
         self.transform = transform
                               
@@ -63,9 +58,7 @@ class SegWSIDataset(Dataset):
         return len(self.patcher)
     
     def __getitem__(self, index):
-        col = index % self.cols
-        row = index // self.cols
-        tile, x, y = self.patcher.get_tile(col, row)
+        tile, x, y = self.patcher[index]
         
         if self.transform:
             tile = self.transform(tile)

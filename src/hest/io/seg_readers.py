@@ -98,7 +98,7 @@ class GeojsonCellReader(GDFReader):
 class TissueContourReader(GDFReader):
 
     def read_gdf(self, path) -> gpd.GeoDataFrame:      
-        gdf = gpd.read_file(path)
+        gdf = _read_geojson(path, 'tissue_id')
         return gdf
     
 

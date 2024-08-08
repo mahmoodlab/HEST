@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pickle
-from functools import partial
 from typing import Union
 
 import cv2
@@ -186,76 +185,6 @@ def keep_largest_area(mask: np.ndarray) -> np.ndarray:
     largest_mask[label_image == largest_label] = True
     mask[~largest_mask] = 0
     return mask
-
-
-def contours_to_img(
-    contours: gpd.GeoDataFrame, 
-    img: np.ndarray, 
-    draw_contours=False, 
-    thickness=1, 
-    downsample=1.,
-    line_color=(0, 255, 0)
-) -> np.ndarray:
-    draw_cont = partial(cv2.drawContours, contourIdx=-1, thickness=thickness, lineType=cv2.LINE_8)
-    draw_cont_fill = partial(cv2.drawContours, contourIdx=-1, thickness=cv2.FILLED)
-    
-    groups = contours.groupby('tissue_id')
-    for _, group in groups:
-        
-        for _, row in group.iterrows():
-            cont = np.array([[round(x * downsample), round(y * downsample)] for x, y in row.geometry.exterior.coords])
-            holes = np.array([[round(x * downsample), round(y * downsample)] for hole in row.geometry.interiors for x, y in hole.coords])
-        
-            draw_cont_fill(image=img, contours=[cont], color=line_color)
-            if draw_contours:
-                draw_cont(image=img, contours=[cont], color=line_color)
-        
-            if len(holes) > 0:
-                draw_cont_fill(image=img, contours=[holes], color=(0, 0, 0))
-    return img
-
-
-def get_tissue_vis(
-            img: Union[np.ndarray, openslide.OpenSlide, CuImage, WSI],
-            tissue_contours: gpd.GeoDataFrame,
-            line_color=(0, 255, 0),
-            line_thickness=5,
-            target_width=1000,
-            seg_display=True,
-    ) -> Image:
-        tissue_contours = tissue_contours.copy()
-    
-        wsi = wsi_factory(img)
-    
-        width, height = wsi.get_dimensions()
-        downsample = target_width / width
-
-        top_left = (0,0)
-        
-        img = wsi.get_thumbnail(round(width * downsample), round(height * downsample))
-
-        if tissue_contours is None:
-            return Image.fromarray(img)
-
-        downscaled_mask = np.zeros(img.shape[:2], dtype=np.uint8)
-        downscaled_mask = np.expand_dims(downscaled_mask, axis=-1)
-        downscaled_mask = downscaled_mask * np.array([0, 0, 0]).astype(np.uint8)
-
-        if tissue_contours is not None and seg_display:
-            downscaled_mask = contours_to_img(
-                tissue_contours, 
-                downscaled_mask, 
-                draw_contours=True, 
-                thickness=line_thickness, 
-                downsample=downsample,
-                line_color=line_color
-            )
-
-        alpha = 0.4
-        img = cv2.addWeighted(img, 1 - alpha, downscaled_mask, alpha, 0)
-        img = img.astype(np.uint8)
-
-        return Image.fromarray(img)
     
 
 @deprecated

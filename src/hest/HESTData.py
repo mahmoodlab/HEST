@@ -8,29 +8,25 @@ from typing import Dict, List, Union
 
 import cv2
 import geopandas as gpd
-import matplotlib
 import numpy as np
 
-from hest.io.seg_readers import (TissueContourReader,
-                                 write_geojson)
+from hest.io.seg_readers import TissueContourReader, write_geojson
 from hest.LazyShapes import LazyShapes, convert_old_to_gpd
 from hest.segmentation.TissueMask import TissueMask, load_tissue_mask
-from hest.wsi import WSI, CucimWarningSingleton, NumpyWSI, wsi_factory
+from hest.wsi import (WSI, CucimWarningSingleton, NumpyWSI, contours_to_img,
+                      get_tissue_vis, wsi_factory)
 
 try:
     import openslide
 except Exception:
     print("Couldn't import openslide, verify that openslide is installed on your system, https://openslide.org/download/")
 import pandas as pd
-from matplotlib.collections import PatchCollection
 from PIL import Image
 from shapely import Point
 from tqdm import tqdm
 
-from .segmentation.segmentation import (apply_otsu_thresholding,
-                                        contours_to_img, get_tissue_vis,
-                                        mask_to_gdf, save_pkl,
-                                        segment_tissue_deep)
+from .segmentation.segmentation import (apply_otsu_thresholding, mask_to_gdf,
+                                        save_pkl, segment_tissue_deep)
 from .utils import (ALIGNED_HE_FILENAME, check_arg, deprecated,
                     find_first_file_endswith, get_path_from_meta_row,
                     plot_verify_pixel_size, tiff_save, verify_paths)
@@ -308,7 +304,9 @@ class HESTData:
             use_mask (bool, optional): whenever to take into account the tissue mask. Defaults to True.
         """
         
+        import matplotlib
         import matplotlib.pyplot as plt
+        from matplotlib.collections import PatchCollection
         
         adata = self.adata.copy()
         
