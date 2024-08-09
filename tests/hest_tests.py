@@ -91,7 +91,7 @@ class TestHESTData(unittest.TestCase):
    
     @classmethod
     def setUpClass(self):
-        download = True
+        download = False
         self.cur_dir = get_path_relative(__file__, '')
         cur_dir = self.cur_dir
         self.output_dir = _j(cur_dir, 'output_tests/hestdata_tests')
@@ -181,8 +181,8 @@ if __name__ == '__main__':
     
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromTestCase(TestHESTData)
-    #suite = unittest.TestSuite()
-    #suite.addTest(TestHESTData('test_patching'))
+    # suite = unittest.TestSuite()
+    # suite.addTest(TestHESTData('test_patching'))
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     if not result.wasSuccessful():
         raise Exception('Test failed')

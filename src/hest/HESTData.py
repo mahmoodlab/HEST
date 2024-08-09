@@ -316,49 +316,30 @@ class HESTData:
         
         src_pixel_size = self.pixel_size
         
-        scale_factor = target_pixel_size / src_pixel_size
-        patch_size_pxl = round(target_patch_size * scale_factor)
         patch_count = 0
-        output_datafile = os.path.join(patch_save_dir, name + '.h5')
+        h5_path = os.path.join(patch_save_dir, name + '.h5')
 
         assert len(adata.obs) == len(adata.obsm['spatial'])
         
-        mode_HE = 'w'
-        i = 0
-
         patch_size_src = target_patch_size * (dst_pixel_size / src_pixel_size)
         coords_center = adata.obsm['spatial']
         coords_topleft = coords_center - patch_size_src // 2
         len_tmp = len(coords_topleft)
-        coords_topleft = coords_topleft[(0 <= coords_topleft[:, 0] + patch_size_src) & (coords_topleft[:, 0] < self.wsi.width) & (0 <= coords_topleft[:, 1] + patch_size_src) & (coords_topleft[:, 1] < self.wsi.height)]
+        in_slide_mask = (0 <= coords_topleft[:, 0] + patch_size_src) & (coords_topleft[:, 0] < self.wsi.width) & (0 <= coords_topleft[:, 1] + patch_size_src) & (coords_topleft[:, 1] < self.wsi.height)
+        coords_topleft = coords_topleft[in_slide_mask]
         if len(coords_topleft) < len_tmp:
             warnings.warn(f"Filtered {len_tmp - len(coords_topleft)} spots outside the WSI")
         
         barcodes = np.array(adata.obs.index)
+        barcodes = barcodes[in_slide_mask]
         mask = self.tissue_contours if use_mask else None
         coords_topleft = np.array(coords_topleft).astype(int)
         patcher = self.wsi.create_patcher(target_patch_size, src_pixel_size, dst_pixel_size, mask=mask, custom_coords=coords_topleft)
 
-        i = 0
-        for tile, x, y in tqdm(patcher):
-            
-            center_x = x + patch_size_src // 2
-            center_y = y + patch_size_src // 2
-            
-            # Save ref patches
-            assert tile.shape == (target_patch_size, target_patch_size, 3)
-            asset_dict = { 'img': np.expand_dims(tile, axis=0),  # (1 x w x h x 3)
-                            'coords': np.expand_dims([center_y, center_x], axis=0),   # (1 x 2)
-                            'barcode': np.expand_dims([barcodes[i]], axis=0)
-                            }
+        if mask is not None:
+            valid_barcodes = barcodes[patcher.valid_mask]
 
-            attr_dict = {}
-            attr_dict['img'] = {'patch_size': patch_size_pxl,
-                                'factor': scale_factor}
-
-            initsave_hdf5(output_datafile, asset_dict, attr_dict, mode=mode_HE)
-            mode_HE = 'a'
-            i += 1
+        patcher.to_h5(h5_path, extra_assets={'barcodes': valid_barcodes})
 
         if dump_visualization:
             patcher.save_visualization(os.path.join(patch_save_dir, name + '_patch_vis.png'), dpi=400)

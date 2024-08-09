@@ -53,7 +53,7 @@ def segment_tissue_deep(
     from torch import nn
     from torch.utils.data import DataLoader
     from torchvision import transforms
-    from hest.segmentation.SegDataset import SegWSIDataset
+    from hest.segmentation.SegDataset import WSIPatcherDataset
     
     src_pixel_size = pixel_size
     
@@ -71,7 +71,7 @@ def segment_tissue_deep(
     patcher = wsi.create_patcher(patch_size_deeplab, src_pixel_size, dst_pixel_size)
         
     eval_transforms = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
-    dataset = SegWSIDataset(patcher, eval_transforms)
+    dataset = WSIPatcherDataset(patcher, eval_transforms)
     dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers)
     model = torch.hub.load('pytorch/vision:v0.10.0', 'deeplabv3_resnet50')
     model.classifier[4] = nn.Conv2d(

@@ -11,6 +11,9 @@ import numpy as np
 import openslide
 from PIL import Image
 from shapely import Polygon
+from tqdm import tqdm
+
+from hest.vst_save_utils import initsave_hdf5
 
 
 class CucimWarningSingleton:
@@ -37,6 +40,7 @@ class WSI:
     
     def __init__(self, img):
         self.img = img
+        self.name = None
         
         if not (isinstance(img, openslide.OpenSlide) or isinstance(img, np.ndarray) or is_cuimage(img)) :
             raise ValueError(f"Invalid type for img {type(img)}")
@@ -53,6 +57,10 @@ class WSI:
     
     @abstractmethod
     def read_region(self, location, level, size) -> np.ndarray:
+        pass
+    
+    @abstractmethod
+    def read_region_pil(self, location, level, size) -> np.ndarray:
         pass
     
     @abstractmethod
@@ -128,6 +136,9 @@ class NumpyWSI(WSI):
         
         return padded_tile
     
+    def read_region_pil(self, location, level, size) -> Image:
+        return Image.fromarray(self.read_region(location, level, size))
+    
     def get_thumbnail(self, width, height) -> np.ndarray:
         return cv2.resize(self.img, (width, height))
     
@@ -155,7 +166,10 @@ class OpenSlideWSI(WSI):
         return self.img.dimensions
     
     def read_region(self, location, level, size) -> np.ndarray:
-        return np.array(self.img.read_region(location, level, size))
+        return np.array(self.read_region_pil(location, level, size))
+    
+    def read_region_pil(self, location, level, size) -> Image:
+        return self.img.read_region(location, level, size)
 
     def get_thumbnail(self, width, height):
         return np.array(self.img.get_thumbnail((width, height)))
@@ -192,7 +206,10 @@ class CuImageWSI(WSI):
         return self.img.resolutions['level_dimensions'][0]
     
     def read_region(self, location, level, size) -> np.ndarray:
-        return np.array(self.img.read_region(location=location, level=level, size=size))
+        return np.asarray(self.img.read_region(location=location, level=level, size=size))
+    
+    def read_region_pil(self, location, level, size) -> Image:
+        return Image.fromarray(self.read_region(location, level, size))
     
     def get_thumbnail(self, width, height):
         downsample = self.width / width
@@ -251,7 +268,8 @@ class WSIPatcher:
         mask: gpd.GeoDataFrame = None,
         coords_only = False,
         custom_coords = None,
-        threshold = 0.15
+        threshold = 0.15,
+        pil=False
     ):
         """ Initialize patcher, compute number of (masked) rows, columns.
 
@@ -264,7 +282,8 @@ class WSIPatcher:
             mask (gpd.GeoDataFrame, optional): geopandas dataframe of Polygons. Defaults to None.
             coords_only (bool, optional): whenever to extract only the coordinates insteaf of coordinates + tile. Default to False.
             threshold (float, optional): minimum proportion of the patch under tissue to be kept.
-                This argument is ignored if mask=None, passing threshold=0 will be faster
+                This argument is ignored if mask=None, passing threshold=0 will be faster. Defaults to 0.15
+            pil (bool, optional): whenever to get patches as `PIL.Image` (numpy array by default). Defaults to False
         """
         self.wsi = wsi
         self.overlap = overlap
@@ -274,6 +293,8 @@ class WSIPatcher:
         self.i = 0
         self.coords_only = coords_only
         self.custom_coords = custom_coords
+        self.pil = pil
+        self.src_pixel_size = src_pixel_size
         
         if dst_pixel_size is None:
             self.downsample = 1.
@@ -313,19 +334,18 @@ class WSIPatcher:
         
 		# Filter coordinates by bounding boxes of mask polygons
         bounding_boxes = self.mask.geometry.bounds
-        valid_coords = []
+        bbox_masks = []
         for _, bbox in bounding_boxes.iterrows():
-            bbox_coords = coords[
+            bbox_mask = (
                 (coords[:, 0] >= bbox['minx'] - self.patch_size_src) & (coords[:, 0] <= bbox['maxx'] + self.patch_size_src) & 
                 (coords[:, 1] >= bbox['miny'] - self.patch_size_src) & (coords[:, 1] <= bbox['maxy'] + self.patch_size_src)
-            ]
-            valid_coords.append(bbox_coords)
+            )
+            bbox_masks.append(bbox_mask)
 
-        if len(valid_coords) > 0:
-            coords = np.vstack(valid_coords)
-            coords = np.unique(coords, axis=0)
+        if len(bbox_masks) > 0:
+            bbox_mask = np.vstack(bbox_masks)[0]
         else:
-            coords = np.array([])
+            bbox_mask = np.zeros(len(coords), dtype=bool)
             
         
         union_mask = self.mask.union_all()
@@ -336,7 +356,7 @@ class WSIPatcher:
                 (xy[0] + self.patch_size_src, xy[1]), 
                 (xy[0] + self.patch_size_src, xy[1] + self.patch_size_src), 
                 (xy[0], xy[1] + self.patch_size_src)]) 
-            for xy in coords
+            for xy in coords[bbox_mask]
         ]
         if threshold == 0:
             valid_mask = gpd.GeoSeries(squares).intersects(union_mask).values
@@ -344,9 +364,13 @@ class WSIPatcher:
             gdf = gpd.GeoSeries(squares)
             areas = gdf.area
             valid_mask = gdf.intersection(union_mask).area >= threshold * areas
+            
+        full_mask = bbox_mask
+        full_mask[bbox_mask] &= valid_mask 
 
-        valid_patches_nb = valid_mask.sum()
-        valid_coords = coords[valid_mask]
+        valid_patches_nb = full_mask.sum()
+        self.valid_mask = full_mask
+        valid_coords = coords[full_mask]
         return valid_patches_nb, valid_coords
         
     def __len__(self):
@@ -388,7 +412,10 @@ class WSIPatcher:
         return self.cols, self.rows
       
     def get_tile_xy(self, x: int, y: int) -> Tuple[np.ndarray, int, int]:
-        raw_tile = self.wsi.read_region(location=(x, y), level=self.level, size=(self.patch_size_level, self.patch_size_level))
+        if self.pil:
+            raw_tile = self.wsi.read_region_pil(location=(x, y), level=self.level, size=(self.patch_size_level, self.patch_size_level))
+        else:
+            raw_tile = self.wsi.read_region(location=(x, y), level=self.level, size=(self.patch_size_level, self.patch_size_level))
         tile = np.array(raw_tile)
         if self.patch_size_target is not None:
             tile = cv2.resize(tile, (self.patch_size_target, self.patch_size_target))
@@ -454,6 +481,46 @@ class WSIPatcher:
         ax.set_axis_off()
         plt.tight_layout()
         plt.savefig(path, dpi=dpi, bbox_inches = 'tight')
+        
+        
+    def to_h5(self, path, extra_assets={}):
+        mode_HE = 'w'
+        i = 0
+        
+        if extra_assets != {}:
+            for _, value in extra_assets.items():
+                if len(value) != len(self):
+                    raise ValueError("Each value in extra_assets must have the same length as the patcher object")
+        
+        if not (path.endswith('.h5') or path.endswith('.h5ad')):
+            path = path + '.h5'
+
+        for tile, x, y in tqdm(self):
+            
+            # Save ref patches
+            assert tile.shape == (self.patch_size_target, self.patch_size_target, 3)
+            
+            asset_dict = {}
+            if not self.coords_only:
+                asset_dict['img'] = np.expand_dims(tile, axis=0)  # (1 x w x h x 3)
+            asset_dict['coords'] = np.expand_dims([x, y], axis=0)   # (1 x 2)
+            
+            extra_asset_dict = {key: np.expand_dims([value[i]], axis=0) for key, value in extra_assets.items()}
+            asset_dict = {**asset_dict, **extra_asset_dict}
+
+            attr_dict = {}
+            attr_dict['img'] = {
+                'patch_size': self.patch_size_target,
+                'factor': self.downsample,
+                'pixel_size': self.src_pixel_size,
+            }
+            
+            if self.wsi.name is not None:
+                attr_dict['img']['name'] = self.wsi.name
+
+            initsave_hdf5(path, asset_dict, attr_dict, mode=mode_HE)
+            mode_HE = 'a'
+            i += 1
     
     
 class OpenSlideWSIPatcher(WSIPatcher):
