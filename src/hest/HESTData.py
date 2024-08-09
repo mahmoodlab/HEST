@@ -316,26 +316,24 @@ class HESTData:
         
         src_pixel_size = self.pixel_size
         
-        # minimum intersection percecentage with the tissue mask to keep a patch
-        TISSUE_INTER_THRESH = 0.7
-        TARGET_VIS_SIZE = 1000
-        
         scale_factor = target_pixel_size / src_pixel_size
         patch_size_pxl = round(target_patch_size * scale_factor)
         patch_count = 0
         output_datafile = os.path.join(patch_save_dir, name + '.h5')
 
         assert len(adata.obs) == len(adata.obsm['spatial'])
-
-        _, ax = plt.subplots()
         
         mode_HE = 'w'
         i = 0
-        img_width, img_height = self.wsi.get_dimensions()
 
-
+        patch_size_src = target_patch_size * (dst_pixel_size / src_pixel_size)
         coords_center = adata.obsm['spatial']
-        coords_topleft = coords_center - target_patch_size // 2
+        coords_topleft = coords_center - patch_size_src // 2
+        len_tmp = len(coords_topleft)
+        coords_topleft = coords_topleft[(0 <= coords_topleft[:, 0] + patch_size_src) & (coords_topleft[:, 0] < self.wsi.width) & (0 <= coords_topleft[:, 1] + patch_size_src) & (coords_topleft[:, 1] < self.wsi.height)]
+        if len(coords_topleft) < len_tmp:
+            warnings.warn(f"Filtered {len_tmp - len(coords_topleft)} spots outside the WSI")
+        
         barcodes = np.array(adata.obs.index)
         mask = self.tissue_contours if use_mask else None
         coords_topleft = np.array(coords_topleft).astype(int)
@@ -344,8 +342,8 @@ class HESTData:
         i = 0
         for tile, x, y in tqdm(patcher):
             
-            center_x = x + target_patch_size // 2
-            center_y = y + target_patch_size // 2
+            center_x = x + patch_size_src // 2
+            center_y = y + patch_size_src // 2
             
             # Save ref patches
             assert tile.shape == (target_patch_size, target_patch_size, 3)
