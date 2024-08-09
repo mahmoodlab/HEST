@@ -978,7 +978,7 @@ class XeniumReader(Reader):
         dapi_path = None,
         load_transcripts=True,
         load_cells=True,
-        load_wsi=True
+        load_img=True
     ) -> XeniumHESTData:
         
         cur_dir = os.path.dirname(transcripts_path)   

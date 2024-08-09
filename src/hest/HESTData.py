@@ -28,13 +28,12 @@ from PIL import Image
 from shapely import Point
 from tqdm import tqdm
 
-from .segmentation.segmentation import (apply_otsu_thresholding,
-                                        contours_to_img, get_tissue_vis,
-                                        mask_to_contours, save_pkl,
+from .segmentation.segmentation import (apply_otsu_thresholding, save_pkl,
                                         segment_tissue_deep)
 from .utils import (ALIGNED_HE_FILENAME, check_arg, deprecated,
-                    find_first_file_endswith, get_k_genes_from_df, get_path_from_meta_row,
-                    plot_verify_pixel_size, tiff_save, verify_paths)
+                    find_first_file_endswith, get_k_genes_from_df,
+                    get_path_from_meta_row, plot_verify_pixel_size, tiff_save,
+                    verify_paths)
 from .vst_save_utils import initsave_hdf5
 
 
@@ -339,8 +338,14 @@ class HESTData:
         img_width, img_height = self.wsi.get_dimensions()
 
 
+        patch_size_src = target_patch_size * (dst_pixel_size / src_pixel_size)
         coords_center = adata.obsm['spatial']
-        coords_topleft = coords_center - target_patch_size // 2
+        coords_topleft = coords_center - patch_size_src // 2
+        len_tmp = len(coords_topleft)
+        coords_topleft = coords_topleft[(0 <= coords_topleft[:, 0] + patch_size_src) & (coords_topleft[:, 0] < self.wsi.width) & (0 <= coords_topleft[:, 1] + patch_size_src) & (coords_topleft[:, 1] < self.wsi.height)]
+        if len(coords_topleft) < len_tmp:
+            warnings.warn(f"Filtered {len_tmp - len(coords_topleft)} spots outside the WSI")
+        
         barcodes = np.array(adata.obs.index)
         mask = self.tissue_contours if use_mask else None
         coords_topleft = np.array(coords_topleft).astype(int)
@@ -349,8 +354,8 @@ class HESTData:
         i = 0
         for tile, x, y in tqdm(patcher):
             
-            center_x = x + target_patch_size // 2
-            center_y = y + target_patch_size // 2
+            center_x = x + patch_size_src // 2
+            center_y = y + patch_size_src // 2
             
             # Save ref patches
             assert tile.shape == (target_patch_size, target_patch_size, 3)

@@ -111,7 +111,7 @@ class XeniumParquetCellReader(GDFReader):
     def __init__(self, scaling=None):
         self.scaling = scaling
     
-    def read_gdf(self, path, n_workers=-1) -> gpd.GeoDataFrame:
+    def read_gdf(self, path, n_workers=0) -> gpd.GeoDataFrame:
         
         df = pd.read_parquet(path)
         

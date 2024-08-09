@@ -49,7 +49,7 @@ class XeniumProcessingPipeline(ProcessingPipeline):
         if cell_adata is None:
             import scanpy as sc
             data_dir = self.config.get('data_dir')
-            st = XeniumReader().auto_read(data_dir, load_wsi=False, load_transcripts=False, load_cells=False)
+            st = XeniumReader().auto_read(data_dir, load_img=False, load_transcripts=False, load_cells=False)
             cell_adata = sc.read_h5ad(st.cell_adata_path)
         return cell_adata, nuc_gdf
     
