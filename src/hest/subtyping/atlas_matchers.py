@@ -11,7 +11,7 @@ from loguru import logger
 from hest.HESTData import unify_gene_names
 
 
-def reduce(X, indices=None, harmony=False):
+def reduce_dim(X, indices=None, harmony=False):
     import umap
     from sklearn.decomposition import PCA
     
@@ -27,12 +27,12 @@ def reduce(X, indices=None, harmony=False):
         import harmonypy as hm
         vars_use = ['dataset']
         
-        X = hm.run_harmony(comps, meta_df, vars_use, verbose=True).Z_corr.transpose()
+        X = hm.run_harmony(comps, meta_df, vars_use, verbose=False).Z_corr.transpose()
     else:
         X = comps
     
     print('perform UMAP...')
-    reducer = umap.UMAP(verbose=True)
+    reducer = umap.UMAP(verbose=False)
     embedding = reducer.fit_transform(X)
     return embedding
 
@@ -50,16 +50,14 @@ def get_per_cluster_types(cells: sc.AnnData, cluster_key='Cluster', type_key='ce
             freqs = [(a[0], str(round(100 * a[1] / s)) + '%') for a in freqs if (100 * a[1] / s) > 1]
         ls.append([cluster, freqs])
     return ls
-        
 
 
-def plot_umap(plot_name, embedding, cell_types, indices=None):
+def plot(plot_name, embedding, cell_types, indices=None):
     import seaborn as sns
     from matplotlib import pyplot as plt
 
     print('find uniques...')
     
-    cell_types = cell_types.values.flatten()
     cell_types = np.array([str(s) for s in cell_types])
     names, inverse = np.unique(cell_types, return_inverse=True)
     plt.figure(figsize=(10, 6))
@@ -107,32 +105,14 @@ def plot_umap(plot_name, embedding, cell_types, indices=None):
     plt.ylabel('UMAP Component 2')
     plt.grid(True)
     plt.tight_layout()
-    plt.savefig(os.path.join('plots', plot_name + str(i) + 'umap_l1.jpg'), dpi=300)
-
-    if indices is not None:
-        sns.scatterplot(
-            x=embedding[:, 0],
-            y=embedding[:, 1],
-            hue=indices,
-            palette=palettes[i],  # Choose a color palette
-            legend='full',
-            alpha=0.8,
-            s=2
-        )
-        plt.legend(markerscale=10, labels=names, ncol=6, loc='upper center', bbox_to_anchor=(0.5, -0.1))
-        plt.title('UMAP Visualization of Sparse Matrix')
-        plt.xlabel('UMAP Component 1')
-        plt.ylabel('UMAP Component 2')
-        plt.grid(True)
-        plt.tight_layout()
-        plt.savefig(os.path.join('plots', plot_name + 'umap_dataset.jpg'))
+    plt.savefig(plot_name, dpi=300)
 
 
 def cache_or_read(plot_name, X, indices=None, harmony=None):
     cached_emb_path = os.path.join('emb_cache', plot_name + 'embedding.pkl')
     if not os.path.exists(cached_emb_path):
         print('cache empty, perform dim reduction...')
-        embedding = reduce(X, indices=indices, harmony=harmony)
+        embedding = reduce_dim(X, indices=indices, harmony=harmony)
 
         with open(cached_emb_path, 'wb') as f:
             pickle.dump(embedding, f)
@@ -184,6 +164,8 @@ class SCMatcher:
         unify_genes=False,
         species='hsapiens',
         level='cell_types',
+        plot_atlas=False,
+        plot_preds=False,
         **kwargs
     ) -> sc.AnnData:
         
@@ -196,7 +178,15 @@ class SCMatcher:
         
         atlas_cells.obs['cell_types'] = atlas_cells.obs[level]
         
+        if plot_atlas:
+            embeddings = reduce_dim(atlas_cells.X)
+            plot(f'{name}_atlas_plot.jpg', embeddings, atlas_cells.obs['cell_types'].values)
+        
         preds = self.match_atlas_imp(name, cells, atlas_cells, level, **kwargs)
+        
+        if plot_preds:
+            embeddings = reduce_dim(cells.X)
+            plot(f'{name}_preds_plot.jpg', embeddings, preds.values)
         
         cells.obs['cell_type_pred'] = preds
         
@@ -317,7 +307,8 @@ class TangramMatcher(SCMatcher):
         level, 
         mode="clusters",
         chunk_len=None, 
-        device=None
+        device=None,
+        random_state=None
     ):
         import scanpy as sc
         import tangram as tg
@@ -351,7 +342,8 @@ class TangramMatcher(SCMatcher):
                                 num_epochs=200,
                                 mode=mode,
                                 cluster_label='subclass_label',
-                                device=device)
+                                device=device,
+                                random_state=random_state)
                 tg.project_cell_annotations(ad_map, chunk, annotation='subclass_label')
                 chunks.append(chunk)
             ad_sp = sc.concat(chunks)
