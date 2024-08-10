@@ -10,6 +10,7 @@ from typing import Tuple, Union
 import geopandas as gpd
 import numpy as np
 import openslide
+import pandas as pd
 from tqdm import tqdm
 import yaml
 from loguru import logger
@@ -171,8 +172,9 @@ def process_from_config(config_path: str):
     if subtyping_conf is None:
         logger.info("no 'cell_subtyping' key found in config, skip subtyping")
     else:
-        matcher_kwargs = subtyping_conf.pop('matcher')
-        atlas_name = matcher_kwargs.pop('atlas_name')
+        matcher_kwargs = subtyping_conf.pop('matcher', {})
+        atlas_name = matcher_kwargs.pop('atlas_name', None)
+        
         types_adata, gdf_types = subtyping_pipeline(cell_adata, atlas_name, full_exp_dir, nuc_gdf, matcher_kwargs=matcher_kwargs, **subtyping_conf)
                 
         types_adata.write_h5ad(os.path.join(full_exp_dir, 'types_adata.h5ad'))
@@ -229,7 +231,8 @@ def subtyping_pipeline(
     gdf: gpd.GeoDataFrame=None,
     matcher_kwargs: dict={},
     save_geojson=True,
-    save_parquet=True
+    save_parquet=True,
+    subtypes_path=None
 ) -> Tuple[sc.AnnData, gpd.GeoDataFrame]:
     import scanpy as sc
     
@@ -240,16 +243,25 @@ def subtyping_pipeline(
     if 'cell_id' not in gdf.columns:
         raise ValueError("gdf needs to contain a 'cell_id' column")
     
-    adata = assign_cell_types(
-        cell_adata, 
-        atlas_name,
-        '',
-        **matcher_kwargs
-    )
+    if subtypes_path is None:
+        adata = assign_cell_types(
+            cell_adata, 
+            atlas_name,
+            '',
+            **matcher_kwargs
+        )
+    else:
+        subtypes = pd.read_csv(subtypes_path, index_col=0)
+        cell_adata.obs['cell_type_pred'] = subtypes['Cluster']
+        na_mask = cell_adata.obs['cell_type_pred'].isna()
+        nb_na = na_mask.sum()
+        if nb_na > 0:
+            logger.warning(f"{nb_na} unattributed cells in ground truth file {subtypes_path}. Mark unmatched cells as 'Unknown'")
+        cell_adata.obs.loc[na_mask, 'cell_type_pred'] = 'Unknown'
+        adata = cell_adata
     
     if gdf is not None:
         gdf['cell_id'] = gdf['cell_id'].astype(str)
-
         gdf['cell_type_pred'] = adata.obs.loc[gdf['cell_id'], 'cell_type_pred'].values
         
     if gdf is not None:
