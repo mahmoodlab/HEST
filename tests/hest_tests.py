@@ -91,7 +91,7 @@ class TestHESTData(unittest.TestCase):
    
     @classmethod
     def setUpClass(self):
-        download = False
+        download = True
         self.cur_dir = get_path_relative(__file__, '')
         cur_dir = self.cur_dir
         self.output_dir = _j(cur_dir, 'output_tests/hestdata_tests')
