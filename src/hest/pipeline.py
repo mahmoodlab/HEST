@@ -22,7 +22,7 @@ from hest.registration import register_dapi_he, warp
 from hest.segmentation.cell_segmenters import bin_per_cell, cell_segmenter_factory
 from hest.subtyping.atlas import get_atlas_from_name
 from hest.subtyping.subtyping import assign_cell_types
-from hest.utils import ALIGNED_HE_FILENAME, check_arg, find_first_file_endswith, get_col_selection, get_name_datetime, get_path_from_meta_row, verify_paths
+from hest.utils import ALIGNED_HE_FILENAME, check_arg, find_first_file_endswith, get_col_selection, get_name_datetime, get_path_from_meta_row, print_resource_usage, verify_paths
 from hest.wsi import WSI
 
 
@@ -313,18 +313,7 @@ def process_meta_df(meta_df, save_spatial_plots=True, pyramidal=True, save_img=T
     """Internal use method, process all the raw ST data in the meta_df"""
     for _, row in tqdm(meta_df.iterrows(), total=len(meta_df)):
         try:
-            import psutil
-            current_process = psutil.Process()
-
-            threads = current_process.threads()
-            logger.debug(f'{len(threads)} threads')
-            memory_info = current_process.memory_info()
-
-            # Print memory usage in bytes
-            logger.debug(f"Memory usage (bytes): {memory_info.rss}")
-
-            # Optionally, convert to more readable units
-            logger.debug(f"Memory usage (MB): {memory_info.rss / (1024 * 1024):.2f}")
+            print_resource_usage()
             
             path = get_path_from_meta_row(row)
             bigtiff = not(isinstance(row['bigtiff'], float) or row['bigtiff'] == 'FALSE')
@@ -398,15 +387,13 @@ def process_meta_df(meta_df, save_spatial_plots=True, pyramidal=True, save_img=T
                 json.dump(combined_meta, f, indent=3)
                 
             st.dump_patches(os.path.join(path, 'processed'), 'patches')
-            threads = current_process.threads()
-            logger.debug(f'{len(threads)} threads')
-            memory_info = current_process.memory_info()
-
-            # Print memory usage in bytes
-            logger.debug(f"Memory usage (bytes): {memory_info.rss}")
-
-            # Optionally, convert to more readable units
-            logger.debug(f"Memory usage (MB): {memory_info.rss / (1024 * 1024):.2f}")
+            print_resource_usage()
+            import psutil
+            current_process = psutil.Process()
+            child_processes = current_process.children()
+            number_of_child_processes = len(child_processes)
+            logger.debug(f'{number_of_child_processes} child processes')
+            
             del st
             gc.collect()
         except Exception as e:

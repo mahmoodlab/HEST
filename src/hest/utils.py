@@ -34,6 +34,15 @@ logger.add(
     format="<green>{time:HH:mm:ss}</green> <level>{level}</level>: <level>{message}</level>"
 )
 
+def print_resource_usage():
+            import psutil
+            current_process = psutil.Process()
+
+            threads = current_process.threads()
+            logger.debug(f'{len(threads)} threads')
+            memory_info = current_process.memory_info()
+            logger.debug(f"Memory usage (MB): {memory_info.rss / (1024 * 1024):.2f}")
+
 
 def value_error_str(obj, name):
     return f'Unrecognized type for argument `{name}` got {obj}'
