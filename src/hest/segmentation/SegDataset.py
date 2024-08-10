@@ -2,7 +2,8 @@ from torch.utils.data import Dataset
 
 from hest.wsi import WSIPatcher
 
-class SegWSIDataset(Dataset):
+
+class WSIPatcherDataset(Dataset):
     
     def __init__(self, patcher: WSIPatcher, transform):
         self.patcher = patcher
