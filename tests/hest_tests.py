@@ -8,7 +8,7 @@ from hest import HESTData, read_HESTData
 from hest.autoalign import autoalign_visium
 from hest.readers import VisiumReader
 from hest.utils import get_path_relative, load_image
-from hest.wsi import WSI, CucimWarningSingleton, wsi_factory
+from hestcore.wsi import WSI, CucimWarningSingleton, wsi_factory
 
 try:
     from cucim import CuImage
@@ -91,7 +91,7 @@ class TestHESTData(unittest.TestCase):
    
     @classmethod
     def setUpClass(self):
-        download = True
+        download = False
         self.cur_dir = get_path_relative(__file__, '')
         cur_dir = self.cur_dir
         self.output_dir = _j(cur_dir, 'output_tests/hestdata_tests')
