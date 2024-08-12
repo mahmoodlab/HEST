@@ -27,7 +27,8 @@ dependencies = [
     "dask >= 2024.2.1",
     "spatial_image >= 0.3.0",
     "datasets",
-    "mygene"
+    "mygene",
+    "hestcore == 1.0.0"
 ]
 
 requires-python = ">=3.9"

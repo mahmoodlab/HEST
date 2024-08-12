@@ -12,29 +12,27 @@ import geopandas as gpd
 import matplotlib
 import numpy as np
 from loguru import logger
+from hestcore.wsi import (WSI, CucimWarningSingleton, NumpyWSI,
+                          contours_to_img, wsi_factory)
 
 from hest.io.seg_readers import TissueContourReader
 from hest.LazyShapes import LazyShapes, convert_old_to_gpd, old_geojson_to_new
 from hest.segmentation.TissueMask import TissueMask, load_tissue_mask
-from hest.wsi import (WSI, CucimWarningSingleton, NumpyWSI, contours_to_img,
-                      get_tissue_vis, wsi_factory)
 
 try:
     import openslide
 except Exception:
     print("Couldn't import openslide, verify that openslide is installed on your system, https://openslide.org/download/")
 import pandas as pd
+from hestcore.segmentation import (apply_otsu_thresholding, mask_to_gdf,
+                                   save_pkl, segment_tissue_deep)
 from PIL import Image
 from shapely import Point
 from tqdm import tqdm
 
-from .segmentation.segmentation import (apply_otsu_thresholding, save_pkl,
-                                        segment_tissue_deep)
 from .utils import (ALIGNED_HE_FILENAME, check_arg, deprecated,
-                    find_first_file_endswith, get_k_genes_from_df,
-                    get_path_from_meta_row, plot_verify_pixel_size, tiff_save,
-                    verify_paths)
-from .vst_save_utils import initsave_hdf5
+                    find_first_file_endswith, get_path_from_meta_row,
+                    plot_verify_pixel_size, tiff_save, verify_paths)
 
 
 class HESTData:
@@ -444,8 +442,7 @@ class HESTData:
         
     
     def get_tissue_vis(self):
-         return get_tissue_vis(
-            self.wsi.img,
+         return self.wsi.get_tissue_vis(
             self.tissue_contours,
             line_color=(0, 255, 0),
             line_thickness=5,

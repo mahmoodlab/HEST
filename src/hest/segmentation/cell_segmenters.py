@@ -22,8 +22,8 @@ from shapely.affinity import translate
 from tqdm import tqdm
 
 from hest.io.seg_readers import GeojsonCellReader
-from hest.utils import deprecated, get_n_threads, get_path_relative, verify_paths
-from hest.wsi import wsi_factory
+from hest.utils import get_n_threads, get_path_relative, verify_paths
+from hestcore.wsi import wsi_factory
 
 
 def cellvit_light_error():

@@ -8,7 +8,7 @@ from hest import HESTData, read_HESTData
 from hest.autoalign import autoalign_visium
 from hest.readers import VisiumReader
 from hest.utils import get_path_relative, load_image
-from hest.wsi import WSI, CucimWarningSingleton, wsi_factory
+from hestcore.wsi import WSI, CucimWarningSingleton, wsi_factory
 
 try:
     from cucim import CuImage
