@@ -19,7 +19,7 @@ from PIL import Image
 from scipy import sparse
 from tqdm import tqdm
 
-from hest.wsi import WSI, NumpyWSI, WSIPatcher, wsi_factory
+from hestcore.wsi import WSI, NumpyWSI, WSIPatcher, wsi_factory
 
 Image.MAX_IMAGE_PIXELS = 93312000000
 ALIGNED_HE_FILENAME = 'aligned_fullres_HE.tif'

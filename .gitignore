@@ -49,6 +49,5 @@ hest_vis
 vis
 vis2
 models/deeplabv3*
-.github
 htmlcov
 models/CellViT-SAM-H-x40.pth

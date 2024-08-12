@@ -45,19 +45,28 @@ def convert_old_to_gpd(contours_holes, contours_tissue) -> gpd.GeoDataFrame:
     types = []
     for i in range(len(contours_holes)):
         tissue = contours_tissue[i]
-        shapes.append(Polygon(tissue[:, 0, :]))
         tissue_ids.append(i)
-        types.append('tissue')
-        holes = contours_holes[i]
-        if len(holes) > 0:
-            for hole in holes:
-                shapes.append(Polygon(hole[:, 0, :]))
-                tissue_ids.append(i)
-                types.append('hole')
-                
+        holes = contours_holes[i] if len(contours_holes[i]) > 0 else None
+        shapes.append(Polygon(tissue[:, 0, :]), holes=holes)
+            
     df = pd.DataFrame(tissue_ids, columns=['tissue_id'])
-    df['hole'] = types
-    df['hole'] = df['hole'] == 'hole'
             
     return gpd.GeoDataFrame(df, geometry=shapes)
         
+
+def old_geojson_to_new(gdf):
+    polygons = []
+    keys = []
+    for key, group in gdf.groupby('tissue_id'):
+        holes = []
+        for row in group.values:
+            if row[2]:
+                holes.append([coord for coord in row[0].exterior.coords])
+            else:
+                exterior = [coord for coord in row[0].exterior.coords]
+        polygons.append(Polygon(exterior, holes))
+        keys.append(key)
+    
+    gdf = gpd.GeoDataFrame(geometry=polygons)
+    gdf['tissue_id'] = keys
+    return gdf
