@@ -30,7 +30,6 @@ from .segmentation.segmentation import (apply_otsu_thresholding, mask_to_gdf,
 from .utils import (ALIGNED_HE_FILENAME, check_arg, deprecated,
                     find_first_file_endswith, get_path_from_meta_row,
                     plot_verify_pixel_size, tiff_save, verify_paths)
-from .vst_save_utils import initsave_hdf5
 
 
 class HESTData:

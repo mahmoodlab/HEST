@@ -11,8 +11,7 @@ from huggingface_hub import snapshot_download
 from PIL import Image
 from shapely import Polygon
 
-from hest.utils import deprecated, get_path_relative
-from hest.wsi import WSI, WSIPatcher, wsi_factory
+from hest.wsi import WSI, wsi_factory
 
 try:
     import openslide
@@ -183,6 +182,21 @@ def keep_largest_area(mask: np.ndarray) -> np.ndarray:
     largest_mask[label_image == largest_label] = True
     mask[~largest_mask] = 0
     return mask
+
+
+def deprecated(func):
+    """This is a decorator which can be used to mark functions
+    as deprecated. It will result in a warning being emitted
+    when the function is used."""
+    @functools.wraps(func)
+    def new_func(*args, **kwargs):
+        warnings.simplefilter('always', DeprecationWarning)  # turn off filter
+        warnings.warn("Call to deprecated function {}.".format(func.__name__),
+                      category=DeprecationWarning,
+                      stacklevel=2)
+        warnings.simplefilter('default', DeprecationWarning)  # reset filter
+        return func(*args, **kwargs)
+    return new_func
     
 
 @deprecated
@@ -290,6 +304,11 @@ def apply_otsu_thresholding(tile: np.ndarray) -> np.ndarray:
     #Image.fromarray(np.expand_dims(otsu_thr, axis=-1) * np.array([255, 255, 255]).astype(np.uint8)).save('otsu_thr.png')
 
     return otsu_thr
+
+
+def get_path_relative(file, path) -> str:
+    curr_dir = os.path.dirname(os.path.abspath(file))
+    return os.path.join(curr_dir, path)
 
 
 def filter_contours(contours, hierarchy, filter_params, scale, pixel_size):
