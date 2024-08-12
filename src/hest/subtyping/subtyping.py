@@ -48,7 +48,7 @@ def assign_cell_types_hest(meta_df, method='tangram'):
 
 def place_in_right_folder(path, rename=False):
     paths = os.listdir(path)
-    ids = np.unique([path.split('_')[0] for path in paths])
+    ids = np.unique([path.split('.')[0] for path in paths])
     for id in ids:
         os.makedirs(os.path.join(path, id), exist_ok=True)
     for f in paths:
@@ -57,7 +57,7 @@ def place_in_right_folder(path, rename=False):
         if not os.path.isfile(src):
             continue
         
-        name = f.split('_')[0]
+        name = f.split('.')[0]
         if rename:
             if 'barcodes' in f:
                 f = 'barcodes.tsv.gz'
@@ -66,7 +66,7 @@ def place_in_right_folder(path, rename=False):
             elif 'matrix' in f:
                 f = 'matrix.mtx.gz' 
         dst = os.path.join(path, name, f)
-        shutil.copy(src, dst)
+        shutil.move(src, dst)
         
         
 def join_MEX(dir):

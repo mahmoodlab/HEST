@@ -914,7 +914,7 @@ def find_biggest_img(path: str) -> str:
     Returns:
         str: filename of biggest image in `path` directory
     """
-    ACCEPTED_FORMATS = ['.tif', '.jpg', '.btf', '.png', '.tiff', '.TIF']
+    ACCEPTED_FORMATS = ['.tif', '.jpg', '.btf', '.png', '.tiff', '.TIF', 'ndpi', 'nd2']
     biggest_size = -1
     biggest_img_filename = None
     for file in os.listdir(path):
@@ -1208,7 +1208,7 @@ def helper_mex(path: str, filename: str) -> None:
 
 
 def load_wsi(img_path: str) -> Tuple[WSI, float]:
-    """Load WSI from path and its corresponding embedded pixel size in um/px
+    """Load full WSI in memory from path and its corresponding embedded pixel size in um/px
     
     the embedded pixel size is only determined in tiff/tif/btf/TIF images and
     only if the tags 'XResolution' and 'YResolution' are set
@@ -1228,8 +1228,12 @@ def load_wsi(img_path: str) -> Tuple[WSI, float]:
     }
     pixel_size_embedded = None
     
-    img = tifffile.imread(img_path)
-
+    if img_path.endswith('.nd2'):
+        import nd2
+        img = nd2.imread(img_path)
+    else:
+        img = tifffile.imread(img_path)
+        
     if img_path.endswith('tiff') or img_path.endswith('tif') or img_path.endswith('btf') or img_path.endswith('TIF'):
             
         my_img = tifffile.TiffFile(img_path)
@@ -1240,9 +1244,9 @@ def load_wsi(img_path: str) -> Tuple[WSI, float]:
             pixel_size_embedded = (my_img.pages[0].tags['XResolution'].value[1] / my_img.pages[0].tags['XResolution'].value[0]) * factor
     
     # sometimes the RGB axis are inverted
-    if img.shape[0] == 3:
+    if img.shape[0] == 3 or img.shape[0] == 4:
         img = np.transpose(img, axes=(1, 2, 0))
-    elif img.shape[2] == 4: # RGBA to RGB
+    if img.shape[2] == 4: # RGBA to RGB
         img = img[:,:,:3]
     if np.max(img) > 1000:
         img = img.astype(np.float32)

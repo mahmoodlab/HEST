@@ -10,6 +10,22 @@ from .utils import (find_first_file_endswith, split_join_adata_by_col,
                     write_10X_h5)
 
 
+def colon_atlas_to_adata(path):
+    h5_path = find_first_file_endswith(path, 'filtered.h5ad')
+    custom_adata = sc.read_h5ad(h5_path)
+    #custom_adata.obs['pxl_col_in_fullres'] = custom_adata.obsm['spatial'][:, 0]
+    #custom_adata.obs['pxl_row_in_fullres'] = custom_adata.obsm['spatial'][:, 1]
+    custom_adata = custom_adata[custom_adata.obs['in_tissue'] == 1]
+    return custom_adata
+
+def heart_atlas_to_adata(path):
+    h5_path = find_first_file_endswith(path, '.raw.h5ad')
+    custom_data = sc.read_h5ad(h5_path)
+    custom_data.obs['pxl_col_in_fullres'] = custom_data.obsm['spatial'][:, 0]
+    custom_data.obs['pxl_row_in_fullres'] = custom_data.obsm['spatial'][:, 1]
+    custom_data.obs.index = [idx.split('_')[1] for idx in custom_data.obs.index]
+    return custom_data
+
 def GSE238145_to_adata(path):
     counts_path = find_first_file_endswith(path, 'counts.txt')
     coords_path = find_first_file_endswith(path, 'coords.txt')

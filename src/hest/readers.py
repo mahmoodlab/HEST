@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import pandas as pd
 
+from hest.custom_readers import colon_atlas_to_adata, heart_atlas_to_adata
 from hest.io.seg_readers import (XeniumParquetCellReader, read_gdf)
 from hest.LazyShapes import LazyShapes
 from hest.segmentation.cell_segmenters import segment_cellvit
@@ -329,6 +330,14 @@ class VisiumReader(Reader):
         if 'Batf3-dendritic cells and 4-1BB-4-1BB ligand axis are required at the effector phase within the tumor microenvironment for PD-1-PD-L1 blockade efficacy' in path:
             custom_adata = GSE238145_to_adata(path)
             
+        if 'Spatially resolved multiomics of human cardiac niches' in path:
+            custom_adata = heart_atlas_to_adata(path)
+            autoalign = 'never'
+            
+        if 'COLON MAP: Colon Molecular Atlas Project' in path:
+            custom_adata = colon_atlas_to_adata(path)
+            autoalign = 'always'
+            
         if raw_count_path is not None:
             custom_adata = raw_count_to_adata(raw_count_path)
             
@@ -456,7 +465,7 @@ class VisiumReader(Reader):
             autoalign_save_dir = None
             if save_autoalign:
                 autoalign_save_dir = os.path.join(os.path.dirname(img_path), 'spatial')
-            align_json = autoalign_visium(img, autoalign_save_dir)
+            align_json = autoalign_visium(wsi.numpy(), autoalign_save_dir)
             spatial_aligned = self._alignment_file_to_tissue_positions('', adata, align_json)
         
         elif tissue_position_exists:
@@ -583,7 +592,7 @@ class VisiumReader(Reader):
                 match_spatial_aligned = spatial_aligned
         
         if highest_nb_match == 0:
-            raise Exception(f"Couldn't find a visium having the following spot barcodes: {adata.obs.index}")
+            raise Exception(f"Couldn't find a visium slide having the following spot barcodes: {adata.obs.index}")
             
         spatial_aligned = match_spatial_aligned.reindex(adata.obs.index)
         return spatial_aligned
