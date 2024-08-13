@@ -14,7 +14,7 @@ from tqdm import tqdm
 from hest.io.seg_readers import groupby_shape, read_gdf
 from hest.utils import (get_n_threads, get_name_datetime, tiff_save,
                         value_error_str, verify_paths)
-from hest.wsi import WSI, wsi_factory
+from hestcore.wsi import WSI, wsi_factory
 
 
 def register_dapi_he(

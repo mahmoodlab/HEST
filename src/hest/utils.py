@@ -1194,12 +1194,14 @@ def check_arg(arg, arg_name, values):
 
 def helper_mex(path: str, filename: str) -> None:
     """If filename doesn't exist in directory `path`, find similar filename in same directory and zip it to patch filename"""
+    zipped_file = find_first_file_endswith(path, filename)
+    if zipped_file.split('/')[-1] != filename:
+        shutil.move(zipped_file, os.path.join(path, filename))
+    
+    unzipped_file = find_first_file_endswith(path, filename.strip('.gz'))
     # zip if needed
-    file = find_first_file_endswith(path, filename.strip('.gz'))
-    #dst = os.path.join(path, filename)
-    src = find_first_file_endswith(path, filename)
-    if file is not None and src is None:
-        f_in = open(file, 'rb')
+    if unzipped_file is not None and zipped_file is None:
+        f_in = open(unzipped_file, 'rb')
         f_out = gzip.open(os.path.join(os.path.join(path), filename), 'wb')
         f_out.writelines(f_in)
         f_out.close()

@@ -22,7 +22,7 @@ from shapely.affinity import translate
 from tqdm import tqdm
 
 from hest.io.seg_readers import GeojsonCellReader
-from hest.utils import get_n_threads, get_path_relative, verify_paths
+from hest.utils import deprecated, get_n_threads, get_path_relative, verify_paths
 from hestcore.wsi import wsi_factory
 
 
@@ -221,11 +221,11 @@ def segment_cellvit(
         wsi_path, 
         name, 
         src_pixel_size, 
-        dst_pixel_size, 
-        batch_size, 
-        gpu, 
-        save_dir,
-        model
+        dst_pixel_size=dst_pixel_size, 
+        batch_size=batch_size, 
+        gpu=gpu, 
+        save_dir=save_dir,
+        model=model
     )
     
 

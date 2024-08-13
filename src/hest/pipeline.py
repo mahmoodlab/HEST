@@ -23,7 +23,7 @@ from hest.segmentation.cell_segmenters import bin_per_cell, cell_segmenter_facto
 from hest.subtyping.atlas import get_atlas_from_name
 from hest.subtyping.subtyping import assign_cell_types
 from hest.utils import ALIGNED_HE_FILENAME, check_arg, find_first_file_endswith, get_col_selection, get_name_datetime, get_path_from_meta_row, print_resource_usage, verify_paths
-from hest.wsi import WSI
+from hestcore.wsi import WSI
 
 
 class ProcessingPipeline:

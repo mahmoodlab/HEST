@@ -9,7 +9,7 @@ import threading
 import traceback
 import zipfile
 from abc import abstractmethod
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 
 import numpy as np
 import pandas as pd
@@ -22,10 +22,10 @@ from hest.segmentation.cell_segmenters import segment_cellvit
 from hest.io.seg_readers import read_gdf
 from hest.segmentation.cell_segmenters import segment_cellvit
 
-from .autoalign import autoalign_visium
-from .HESTData import (HESTData, STHESTData, VisiumHDHESTData, VisiumHESTData,
+from hest.autoalign import autoalign_visium
+from hest.HESTData import (HESTData, STHESTData, VisiumHDHESTData, VisiumHESTData,
                        XeniumHESTData)
-from .utils import (SpotPacking, align_xenium_df,
+from hest.utils import (SpotPacking, align_xenium_df,
                     check_arg, df_morph_um_to_pxl, find_biggest_img,
                     find_first_file_endswith, find_pixel_size_from_spot_coords,
                     get_path_from_meta_row,
@@ -1176,7 +1176,7 @@ def xenium_to_pseudo_visium(df: pd.DataFrame, pixel_size_he: float, pixel_size_m
         
         
 
-def _process_cellvit(available_gpus, available_gpus_lock, row, dest):
+def _process_cellvit(available_gpus, row, dest):
     with available_gpus_lock:
         gpu_id = available_gpus.pop()
         print(f'get gpu {gpu_id}', flush=True)
@@ -1210,13 +1210,17 @@ def _process_cellvit(available_gpus, available_gpus_lock, row, dest):
         available_gpus.add(gpu_id)
         print(f'release gpu {gpu_id}', flush=True)
         
+        
+available_gpus_lock = threading.Lock()
 def cellvit_meta_df(meta_df, dest):
     import concurrent
-    available_gpus_lock = threading.Lock()
+    os.makedirs(dest, exist_ok=True)
     available_gpus = {0, 1, 2}
-    
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        future_results = [executor.submit(_process_cellvit, available_gpus, available_gpus_lock, row, dest) for _, row in meta_df.iterrows()]
+
+    #for _, row in meta_df.iterrows():
+    #    _process_cellvit(available_gpus, available_gpus_lock, row, dest)
+    with ProcessPoolExecutor(max_workers=1) as executor:
+        future_results = [executor.submit(_process_cellvit, available_gpus, row, dest) for _, row in meta_df.iterrows()]
 
         for future in concurrent.futures.as_completed(future_results):
             future.result()
