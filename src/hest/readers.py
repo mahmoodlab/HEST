@@ -1219,11 +1219,7 @@ def process_meta_df(meta_df, save_spatial_plots=True, pyramidal=True, save_img=T
         a = 1
         
 
-def _process_cellvit(available_gpus, available_gpus_lock, row, dest, **cellvit_kwargs):
-    with available_gpus_lock:
-        gpu_id = available_gpus.pop()
-        print(f'get gpu {gpu_id}', flush=True)
-        
+def _process_cellvit(row, dest, **cellvit_kwargs):
     path = get_path_from_meta_row(row)
     wsi_path = os.path.join(path, 'processed', 'aligned_fullres_HE.tif')
     with open(os.path.join(path, 'processed', 'metrics.json')) as f:
@@ -1247,22 +1243,9 @@ def _process_cellvit(available_gpus, available_gpus_lock, row, dest, **cellvit_k
     id = row['id']
     path_dest_cellvit = os.path.join(dest, 'cellvit_seg', f'{id}_cellvit_seg.zip')
     shutil.copy(path_cellvit, path_dest_cellvit)
-
-
-    with available_gpus_lock:
-        available_gpus.add(gpu_id)
-        print(f'release gpu {gpu_id}', flush=True)
+    
         
 def cellvit_meta_df(meta_df, dest, **cellvit_kwargs):
-    import concurrent
-    available_gpus_lock = threading.Lock()
-    available_gpus = {0, 1, 2}
-    
     for _, row in meta_df.iterrows():
-        _process_cellvit(available_gpus, available_gpus_lock, row, dest, **cellvit_kwargs)
+        _process_cellvit(row, dest, **cellvit_kwargs)
     
-    # with ThreadPoolExecutor(max_workers=3) as executor:
-    #     future_results = [executor.submit(_process_cellvit, available_gpus, available_gpus_lock, row, dest) for _, row in meta_df.iterrows()]
-
-    #     for future in concurrent.futures.as_completed(future_results):
-    #         future.result()
