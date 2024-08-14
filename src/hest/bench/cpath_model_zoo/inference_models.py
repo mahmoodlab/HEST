@@ -48,6 +48,7 @@ class ConchInferenceEncoder(InferenceEncoder):
         return model, eval_transform, precision
     
     def forward(self, x):
+        x = x.permute((0, 3, 1, 2))
         return self.model.encode_image(x, proj_contrast=False, normalize=True)
     
     
@@ -130,6 +131,10 @@ class RemedisInferenceEncoder(InferenceEncoder):
         precision = torch.float32
         eval_transform = None
         return model, eval_transform, precision
+
+    def forward(self, x):
+        x = x.permute((0, 3, 1, 2))
+        return self.model.forward(x)
     
     
 class ResNet50InferenceEncoder(InferenceEncoder):
@@ -324,6 +329,8 @@ def inf_encoder_factory(enc_name):
         return GigaPathInferenceEncoder
     elif enc_name == 'virchow':
         return VirchowInferenceEncoder
+    elif enc_name == 'virchow2':
+        return Virchow2InferenceEncoder
     elif enc_name == 'hoptimus0':
         return HOptimus0InferenceEncoder
     else:
