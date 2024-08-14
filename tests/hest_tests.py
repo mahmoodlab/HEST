@@ -1,14 +1,15 @@
 import os
 import unittest
-from os.path import join as _j
 import warnings
+from os.path import join as _j
+
+from hestcore.segmentation import get_path_relative
+from hestcore.wsi import CucimWarningSingleton
 
 import hest
-from hest import HESTData, read_HESTData
 from hest.autoalign import autoalign_visium
 from hest.readers import VisiumReader
-from hest.utils import get_path_relative, load_image
-from hestcore.wsi import WSI, CucimWarningSingleton, wsi_factory
+from hest.utils import load_image
 
 try:
     from cucim import CuImage

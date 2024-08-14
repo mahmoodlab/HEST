@@ -235,11 +235,6 @@ def read_10x_seg(seg_file: Union[str, pd.DataFrame], type: str = 'Nucleus') -> l
         cells.append(cell)
     
     return cells
-    
-
-def get_path_relative(file, path) -> str:
-    curr_dir = os.path.dirname(os.path.abspath(file))
-    return os.path.join(curr_dir, path)
 
 
 def enc_results_to_table(path) -> str:
@@ -276,10 +271,10 @@ def enc_results_to_table(path) -> str:
         'ciga': 'Ciga',
         'ctranspath': 'CTransPath',
         'remedis': 'Remedis',
-        'phikon_official_hf': 'Phikon',
+        'phikon': 'Phikon',
         'plip': 'PLIP',
-        'uni_v1_official': 'UNI',
-        'conch_v1_official': 'CONCH',
+        'uni_v1': 'UNI',
+        'conch_v1': 'CONCH',
         'gigapath': 'gigapath'
     }
     
@@ -962,7 +957,6 @@ def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal:
         print(f"couldn't find {path}")
         return
     if cp_pyramidal:
-        print(f"create pyramidal tiff for {row['id']}")
         src_pyramidal = os.path.join(path, 'aligned_fullres_HE.tif')
         dst_pyramidal = os.path.join(dest, 'wsis', _sample_id_to_filename(row['id']))
         os.makedirs(os.path.join(dest, 'wsis'), exist_ok=True)

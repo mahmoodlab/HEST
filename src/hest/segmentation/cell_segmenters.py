@@ -13,14 +13,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 import openslide
 import pandas as pd
+from hestcore.segmentation import get_path_relative
+from hestcore.wsi import wsi_factory
 from loguru import logger
 from shapely import Polygon
 from shapely.affinity import translate
 from tqdm import tqdm
 
 from hest.io.seg_readers import GeojsonCellReader
-from hest.utils import get_path_relative, verify_paths
-from hestcore.wsi import wsi_factory
+from hest.utils import verify_paths
 
 
 def cellvit_light_error():
@@ -121,7 +122,7 @@ class CellViTSegmenter():
         src_pixel_size: float=None, 
         dst_pixel_size: float=0.25, 
         batch_size=2, 
-        gpu=0, 
+        gpu=-1, 
         save_dir='results/segmentation',
         model='CellViT-SAM-H-x40.pth'
     ) -> str:
@@ -150,6 +151,12 @@ class CellViTSegmenter():
         all_entries = os.listdir(preprocess_path)
         sub_name = [entry for entry in all_entries if os.path.isdir(os.path.join(preprocess_path, entry))][0]
 
+        if gpu == -1:
+            gpu = 0
+            multi_gpu = True
+        else:
+            multi_gpu = False        
+
         sys.argv = [
             '',
             "--model", model_path,
@@ -162,7 +169,10 @@ class CellViTSegmenter():
             "--wsi_path", wsi_path,
             "--patched_slide_path", os.path.join(preprocess_path, sub_name),
         ]
-
+        if multi_gpu:
+            sys.argv = [''] + sys.argv
+            sys.argv[1] = '--multigpu'
+        
         cellvit_light.segment_cells()
         sys.argv = original_argv
         
@@ -178,10 +188,22 @@ def segment_cellvit(
     src_pixel_size: float=None, 
     dst_pixel_size: float=0.25, 
     batch_size=2, 
-    gpu=0, 
+    gpu=-1, 
     save_dir='results/segmentation',
     model='CellViT-SAM-H-x40.pth'
 ) -> str:
+    """ Segment nuclei with CellViT
+
+    Args:
+        wsi_path (str): path to slide to segment (.tiff prefered)
+        name (str): name of run
+        src_pixel_size (float, optional): pixel size (um/px) of the slide at wsi_path. Defaults to None.
+        dst_pixel_size (float, optional): patch will be resized to this (um/px) before being fed to CellViT. Defaults to 0.25.
+        batch_size (int, optional): batch_size. Defaults to 2.
+        gpu (int, optional): gpu id to use (-1 means use all gpus available in parallel). Defaults to -1.
+        save_dir (str, optional): directory where to save the output. Defaults to 'results/segmentation'.
+        model (str, optional): name of model weights to use. Defaults to 'CellViT-SAM-H-x40.pth'.
+    """
     segmenter = CellViTSegmenter()
     return segmenter.segment_cells(
         wsi_path, 
