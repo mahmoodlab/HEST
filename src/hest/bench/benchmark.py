@@ -150,7 +150,7 @@ def embed_tiles(
     model.eval()
     for batch_idx, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
         batch = post_collate_fn(batch)
-        imgs = batch['imgs'].to(device).float().permute((0, 3, 1, 2)) 
+        imgs = batch['imgs'].to(device).float()
         with torch.inference_mode(), torch.cuda.amp.autocast(dtype=precision):
             embeddings = model(imgs)
         if batch_idx == 0:
