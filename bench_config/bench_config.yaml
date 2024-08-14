@@ -1,5 +1,5 @@
 # directory containing the data for each task
-source_dataroot: 'bench_data'
+bench_data_root: 'bench_data'
 
 # directory where benchmark results will be dumped
 results_dir: 'ST_pred_results'
@@ -22,10 +22,14 @@ encoders: [
   #"ctranspath",
   #"phikon",
   #"remedis", # uncomment after requesting the weights
-  #"conch_v1_official", # uncomment after requesting the weights
+  #"conch_v1", # uncomment after requesting the weights
+  #"gigapath", # uncomment after requesting the weights
+  #"virchow", # uncomment after requesting the weights
+  #"virchow2", # uncomment after requesting the weights
+  #"hoptimus0",
 ]
 
-# datasets contained in `source_dataroot` to benchmark
+# datasets contained in `bench_data_root` to benchmark
 datasets: [
   "IDC",
   # "PRAD",

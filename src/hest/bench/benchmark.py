@@ -38,7 +38,7 @@ parser.add_argument('--seed', type=int, default=1,
                     help='random seed for reproducible experiment (default: 1)')
 parser.add_argument('--overwrite', action='store_true', default=False,
                     help='overwrite existing results')
-parser.add_argument('--source_dataroot', type=str, help='root directory containing all the datasets')
+parser.add_argument('--bench_data_root', type=str, help='root directory containing all the datasets')
 parser.add_argument('--embed_dataroot', type=str)
 parser.add_argument('--weights_root', type=str)
 parser.add_argument('--private_weights_root', type=str, default=None)
@@ -59,7 +59,7 @@ parser.add_argument('--normalize', type=bool, default=True)
 parser.add_argument('--dimreduce', type=str, default=None, help='whenever to perform dimensionality reduction before linear probing, can be "PCA" or None')
 parser.add_argument('--latent_dim', type=int, default=256, help='dimensionality reduction latent dimension')
 parser.add_argument('--encoders', nargs='+', help='All the encoders to benchmark', default=[])
-parser.add_argument('--datasets', nargs='+', help='Datasets from source_dataroot to use during benchmark', default=['*'])
+parser.add_argument('--datasets', nargs='+', help='Datasets from bench_data_root to use during benchmark', default=['*'])
 parser.add_argument('--config', type=str, help='Path to a benchmark config file, arguments provided in the config file will overwrite the command line args', default=None)
             
 
@@ -77,12 +77,12 @@ def benchmark_grid(args, device, model_names, datasets: List[str], save_dir, cus
     
     dataset_perfs = []
     for dataset in datasets:
-        source_dataroot = os.path.join(get_path(args.source_dataroot), dataset)
+        bench_data_root = os.path.join(get_path(args.bench_data_root), dataset)
         enc_perfs = []
         for model_name in model_names:
             exp_save_dir = os.path.join(save_dir, dataset, model_name)
             os.makedirs(exp_save_dir, exist_ok=True)
-            enc_results = predict_folds(args, exp_save_dir, model_name, dataset, device, source_dataroot)
+            enc_results = predict_folds(args, exp_save_dir, model_name, dataset, device, bench_data_root)
             
             enc_perfs.append({
                 'encoder_name': model_name,
@@ -150,7 +150,7 @@ def embed_tiles(
     model.eval()
     for batch_idx, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
         batch = post_collate_fn(batch)
-        imgs = batch['imgs'].to(device)    
+        imgs = batch['imgs'].to(device).float().permute((0, 3, 1, 2)) 
         with torch.inference_mode(), torch.cuda.amp.autocast(dtype=precision):
             embeddings = model(imgs)
         if batch_idx == 0:
@@ -178,11 +178,11 @@ def get_bench_weights(weights_root, name):
     else:
         raise ValueError(f"Please specify the weights path to {name} in {local_ckpt_registry}")
 
-def predict_single_split(train_split, test_split, args, save_dir, dataset_name, model_name, device, source_dataroot):
+def predict_single_split(train_split, test_split, args, save_dir, dataset_name, model_name, device, bench_data_root):
     if not os.path.isfile(train_split):
-        train_split = os.path.join(source_dataroot, 'splits', train_split)
+        train_split = os.path.join(bench_data_root, 'splits', train_split)
     if not os.path.isfile(test_split):
-        test_split = os.path.join(source_dataroot, 'splits', test_split)
+        test_split = os.path.join(bench_data_root, 'splits', test_split)
     
     train_df = pd.read_csv(train_split)
     test_df = pd.read_csv(test_split)
@@ -199,7 +199,7 @@ def predict_single_split(train_split, test_split, args, save_dir, dataset_name, 
     for split in [train_df, test_df]:
         for i in tqdm(range(len(split))):
             sample_id = split.iloc[i]['sample_id']
-            tile_h5_path = os.path.join(source_dataroot, split.iloc[i]['patches_path'])
+            tile_h5_path = os.path.join(bench_data_root, split.iloc[i]['patches_path'])
             assert os.path.isfile(tile_h5_path)
             embed_path = os.path.join(embedding_dir, f'{sample_id}.h5')
             if not os.path.isfile(embed_path) or args.overwrite:
@@ -228,7 +228,7 @@ def predict_single_split(train_split, test_split, args, save_dir, dataset_name, 
     gene_list = args.gene_list
 
     print(f'using gene_list {gene_list}')
-    with open(os.path.join(source_dataroot, gene_list), 'r') as f:
+    with open(os.path.join(bench_data_root, gene_list), 'r') as f:
         genes = json.load(f)['genes']
             
     for split_key, split in zip(['train', 'test'], [train_df, test_df]):
@@ -236,7 +236,7 @@ def predict_single_split(train_split, test_split, args, save_dir, dataset_name, 
         for i in tqdm(range(len(split))):
             sample_id = split.iloc[i]['sample_id']
             embed_path = os.path.join(embedding_dir, f'{sample_id}.h5')
-            expr_path = os.path.join(source_dataroot, split.iloc[i]['expr_path'])
+            expr_path = os.path.join(bench_data_root, split.iloc[i]['expr_path'])
             assets, _ = read_assets_from_h5(embed_path)
             barcodes = assets['barcodes'].flatten().astype(str).tolist()
             adata = load_adata(expr_path, genes=genes, barcodes=barcodes, normalize=args.normalize)
@@ -307,8 +307,10 @@ def benchmark_encoder(encoder: torch.nn.Module, enc_transf, precision, config_pa
     benchmark(args, encoder=encoder, enc_transf=enc_transf, precision=precision)
         
         
-def predict_folds(args, exp_save_dir, model_name, dataset_name, device, source_dataroot):
-    split_dir = os.path.join(source_dataroot, 'splits')
+def predict_folds(args, exp_save_dir, model_name, dataset_name, device, bench_data_root):
+    split_dir = os.path.join(bench_data_root, 'splits')
+    #if not os.path.exists(split_dir):
+    #    raise FileNotFoundError(f"{split_dir} doesn't exist, make sure that you specified the ")
     splits = os.listdir(split_dir)
     n_splits = len(splits) // 2
     
@@ -319,7 +321,7 @@ def predict_folds(args, exp_save_dir, model_name, dataset_name, device, source_d
         test_split = os.path.join(split_dir, f'test_{i}.csv')
         kfold_save_dir = os.path.join(exp_save_dir, f'split{i}')
         os.makedirs(kfold_save_dir, exist_ok=True)
-        linprobe_results = predict_single_split(train_split, test_split, args, kfold_save_dir, dataset_name, model_name, device=device, source_dataroot=source_dataroot)
+        linprobe_results = predict_single_split(train_split, test_split, args, kfold_save_dir, dataset_name, model_name, device=device, bench_data_root=bench_data_root)
         libprobe_results_arr.append(linprobe_results)
         
         
@@ -345,12 +347,10 @@ def benchmark(args, encoder, enc_transf, precision):
                 setattr(args, key, config[key])
                 
     
-    bench_fm_dir = get_path_relative(__file__, f'../../../../')
-    snapshot_download(repo_id="MahmoodLab/hest-bench", repo_type='dataset', local_dir=bench_fm_dir, allow_patterns=['fm_v1/*'])
+    snapshot_download(repo_id="MahmoodLab/hest-bench", repo_type='dataset', local_dir=args.weights_root, allow_patterns=['fm_v1/*'])
     
     logger.info(f'Fetch the bench data...')
-    bench_data_dir = get_path_relative(__file__, f'../../../bench_data')
-    snapshot_download(repo_id="MahmoodLab/hest-bench", repo_type='dataset', local_dir=bench_data_dir, ignore_patterns=['fm_v1/*'])
+    snapshot_download(repo_id="MahmoodLab/hest-bench", repo_type='dataset', local_dir=args.bench_data_root, ignore_patterns=['fm_v1/*'])
     
     
     logger.info(f'Benchmarking on the following datasets {args.datasets}')
@@ -361,7 +361,7 @@ def benchmark(args, encoder, enc_transf, precision):
 
     datasets = args.datasets
     if len(datasets) >= 1 and datasets[0] == '*':
-        datasets = os.listdir(get_path(args.source_dataroot))
+        datasets = os.listdir(get_path(args.bench_data_root))
     
     #### Setup Save Directory ####
     save_dir = get_path(args.results_dir)
@@ -389,8 +389,8 @@ def benchmark(args, encoder, enc_transf, precision):
 if __name__ == '__main__':
     args = parser.parse_args()
     
-    if args.config is None and (args.source_dataroot is None or args.embed_dataroot, args.results_dir):
-        parser.error("if --config isn't provided, --source_dataroot, --embed_dataroot and --results_dir must be provided")
+    if args.config is None:
+        parser.error("Please provide --config")
     
     benchmark(args, None, None, None)
     

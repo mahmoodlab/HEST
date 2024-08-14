@@ -1,9 +1,13 @@
 {
-    "conch_v1": "conch/pytorch_model.bin",
-    "uni_v1": "uni/pytorch_model.bin",
-    "ctranspath": "ctranspath/ctranspath.pth",
-    "remedis": "remedis/path-152x2-remedis-m_torch.pth",
-    "phikon": "phikon/ibot_vit_base_pancan.pth",
+    "conch_v1": "",
+    "uni_v1": "",
+    "ctranspath": "fm_v1/ctranspath/ctranspath.pth",
+    "remedis": "fm_v1/remedis/path-152x2-remedis-m_torch.pth",
+    "phikon": "",
     "plip": "",
-    "resnet50": ""
+    "resnet50": "",
+    "gigapath": "",
+    "virchow": "",
+    "virchow2": "",
+    "hoptimus0": ""
 }

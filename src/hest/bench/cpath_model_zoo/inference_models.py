@@ -15,7 +15,7 @@ class InferenceEncoder(torch.nn.Module):
         super(InferenceEncoder, self).__init__()
         
         self.weights_path = weights_path
-        self.model, self.eval_transforms, self.precision = self._build(weights_path=self.weights_path, **build_kwargs)
+        self.model, self.eval_transforms, self.precision = self._build(weights_path, **build_kwargs)
         
     def forward(self, x):
         z = self.model(x)
@@ -34,7 +34,7 @@ class ConchInferenceEncoder(InferenceEncoder):
             from conch.open_clip_custom import create_model_from_pretrained
         except:
             traceback.print_exc()
-            raise Exception("Please install CONCH pip install `git+https://github.com/Mahmoodlab/CONCH.git`")
+            raise Exception("Please install CONCH `pip install git+https://github.com/Mahmoodlab/CONCH.git`")
         
         try:
             model, _ = create_model_from_pretrained('conch_ViT-B-16', "hf_hub:MahmoodLab/conch")
@@ -84,7 +84,7 @@ class CustomInferenceEncoder(InferenceEncoder):
     
 
 class PhikonInferenceEncoder(InferenceEncoder):
-    def _build(self):
+    def _build(self, _):
         from transformers import ViTModel
         
         model = ViTModel.from_pretrained("owkin/phikon", add_pooling_layer=False)
@@ -104,23 +104,18 @@ class PhikonInferenceEncoder(InferenceEncoder):
     
 
 class PlipInferenceEncoder(InferenceEncoder):
-    def _build(self, weights_path):
+    def _build(self, _):
         from transformers import CLIPImageProcessor, CLIPVisionModel
 
-        from .models.plip.post_processor import CLIPVisionModelPostProcessor
         model_name = "vinid/plip"
         img_transforms_clip = CLIPImageProcessor.from_pretrained(model_name)
         model = CLIPVisionModel.from_pretrained(
             model_name)  # Use for feature extraction
-        model = CLIPVisionModelPostProcessor(model)
         def _eval_transform(img): return img_transforms_clip(
-            img, return_tensors='pt', padding=True)['pixel_values'].squeeze(0)
+            img, return_tensors='pt')['pixel_values'].squeeze(0)
         eval_transform = _eval_transform
         precision = torch.float32
         
-        missing, unexpected = model.load_state_dict(torch.load(weights_path, map_location="cpu"), strict=True)
-        logger.info(f"Missing keys: {missing}")
-        logger.info(f"Unexpected keys: {unexpected}")
         return model, eval_transform, precision
     
     def forward(self, x):
@@ -132,10 +127,6 @@ class RemedisInferenceEncoder(InferenceEncoder):
         from .models.remedis.remedis_models import resnet152_remedis
         ckpt_path = weights_path
         model = resnet152_remedis(ckpt_path=ckpt_path, pretrained=True)
-        missing, unexpected = model.load_state_dict(torch.load(weights_path, map_location="cpu"), strict=True)
-        logger.info(f"Missing keys: {missing}")
-        logger.info(f"Unexpected keys: {unexpected}")
-        
         precision = torch.float32
         eval_transform = None
         return model, eval_transform, precision
@@ -144,6 +135,7 @@ class RemedisInferenceEncoder(InferenceEncoder):
 class ResNet50InferenceEncoder(InferenceEncoder):
     def _build(
         self, 
+        _,
         pretrained=True, 
         timm_kwargs={"features_only": True, "out_indices": [3], "num_classes": 0},
         pool=True
@@ -178,6 +170,7 @@ class ResNet50InferenceEncoder(InferenceEncoder):
 class UNIInferenceEncoder(InferenceEncoder):
     def _build(
         self, 
+        _,
         timm_kwargs={"dynamic_img_size": True, "num_classes": 0, "init_values": 1.0}
     ):
         import timm
@@ -194,6 +187,124 @@ class UNIInferenceEncoder(InferenceEncoder):
         precision = torch.float16
         return model, eval_transform, precision
     
+
+class GigaPathInferenceEncoder(InferenceEncoder):
+    def _build(
+        self, 
+        _,
+        timm_kwargs={}
+        ):
+        import timm
+        from torchvision import transforms
+        
+        model = timm.create_model("hf_hub:prov-gigapath/prov-gigapath", pretrained=True, **timm_kwargs)
+
+        eval_transform = transforms.Compose(
+            [
+                transforms.Resize(256, interpolation=transforms.InterpolationMode.BICUBIC),
+                transforms.CenterCrop(224),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+            ]
+        )
+        precision = torch.float32
+        return model, eval_transform, precision
+    
+    
+class VirchowInferenceEncoder(InferenceEncoder):
+    import timm
+    
+    def _build(
+        self,
+        _,
+        return_cls=False,
+        timm_kwargs={'mlp_layer': timm.layers.SwiGLUPacked, 'act_layer': torch.nn.SiLU}
+    ):
+        import timm
+        from timm.data import resolve_data_config
+        from timm.data.transforms_factory import create_transform
+        model = timm.create_model(
+            "hf-hub:paige-ai/Virchow",
+            pretrained=True,
+            **timm_kwargs
+        )
+        eval_transform = create_transform(**resolve_data_config(model.pretrained_cfg, model=model))
+
+        precision = torch.float32
+        self.return_cls = return_cls
+        
+        return model, eval_transform, precision
+        
+    def forward(self, x):
+        output = self.model(x)
+        class_token = output[:, 0]
+
+        if self.return_cls:
+            return class_token
+        else:
+            patch_tokens = output[:, 1:]
+            embeddings = torch.cat([class_token, patch_tokens.mean(1)], dim=-1)
+            return embeddings
+        
+
+class Virchow2InferenceEncoder(InferenceEncoder):
+    import timm
+    
+    def _build(
+        self,
+        _,
+        return_cls=False,
+        timm_kwargs={'mlp_layer': timm.layers.SwiGLUPacked, 'act_layer': torch.nn.SiLU}
+    ):
+        import timm
+        from timm.data import resolve_data_config
+        from timm.data.transforms_factory import create_transform
+        model = timm.create_model(
+            "hf-hub:paige-ai/Virchow2",
+            pretrained=True,
+            **timm_kwargs
+        )
+        eval_transform = create_transform(**resolve_data_config(model.pretrained_cfg, model=model))
+        precision = torch.float16
+        self.return_cls = return_cls
+        
+        return model, eval_transform, precision
+
+    def forward(self, x):
+        output = self.model(x)
+    
+        class_token = output[:, 0]
+        if self.return_cls:
+            return class_token
+        
+        patch_tokens = output[:, 5:]
+        embedding = torch.cat([class_token, patch_tokens.mean(1)], dim=-1)
+        return embedding
+
+class HOptimus0InferenceEncoder(InferenceEncoder):
+    
+    def _build(
+        self,
+        _,
+        timm_kwargs={'init_values': 1e-5, 'dynamic_img_size': False}
+    ):
+        import timm
+        from torchvision import transforms
+
+        model = timm.create_model("hf-hub:bioptimus/H-optimus-0", pretrained=True, **timm_kwargs)
+
+        eval_transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=(0.707223, 0.578729, 0.703617), 
+                std=(0.211883, 0.230117, 0.177517)
+            ),
+        ])
+        
+        precision = torch.float16
+        return model, eval_transform, precision
+         
+    
 def inf_encoder_factory(enc_name):
     if enc_name == 'conch_v1':
         return ConchInferenceEncoder
@@ -209,5 +320,11 @@ def inf_encoder_factory(enc_name):
         return RemedisInferenceEncoder
     elif enc_name == 'resnet50':
         return ResNet50InferenceEncoder
+    elif enc_name == 'gigapath':
+        return GigaPathInferenceEncoder
+    elif enc_name == 'virchow':
+        return VirchowInferenceEncoder
+    elif enc_name == 'hoptimus0':
+        return HOptimus0InferenceEncoder
     else:
         raise ValueError(f"Unknown encoder name {enc_name}")

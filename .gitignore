@@ -51,3 +51,6 @@ vis2
 models/deeplabv3*
 htmlcov
 models/CellViT-SAM-H-x40.pth
+debug_seg
+replace_seg
+test_vis
