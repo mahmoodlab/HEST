@@ -35,20 +35,25 @@ def train_test_reg(X_train, X_test, y_train, y_test,
         for i in tqdm(range(y_train.shape[1])):
             results.append(train_regressor(X_train, y_train[:, i], i))
         
-        
-        #futures = [client.submit(train_regressor, X_train, y_train[:, i], i) for i in range(y_train.shape[1])]
-        #wait(futures)
-        #results = [future.result() for future in futures]
-        
-        #for future in futures:
-        #    future.release()  # Release memory for futures
-            
-        #    #client.retire_workers(workers=client.scheduler_info()['workers'].keys())
-    
-        
         preds_all = np.zeros(y_test.shape)
         for i in range(len(results)):
             preds_all[:, i] = results[i]
+            
+    elif method == 'xgboost':
+        import xgboost as xgb
+        reg = xgb.XGBRegressor(
+            n_estimators=100,
+            learning_rate=0.1,
+            max_depth=3,
+            min_child_weight=1,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            gamma=0,
+            reg_alpha=0,
+            reg_lambda=1
+        )
+        reg.fit(X_train, y_train)
+        preds_all = reg.predict(X_test)
             
 
     

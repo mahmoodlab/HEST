@@ -28,7 +28,7 @@ dependencies = [
     "spatial_image >= 0.3.0",
     "datasets",
     "mygene",
-    "hestcore == 1.0.0"
+    "hestcore == 1.0.2"
 ]
 
 requires-python = ">=3.9"

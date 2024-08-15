@@ -1,14 +1,15 @@
 import os
 import unittest
-from os.path import join as _j
 import warnings
+from os.path import join as _j
+
+from hestcore.segmentation import get_path_relative
+from hestcore.wsi import CucimWarningSingleton
 
 import hest
-from hest import HESTData, read_HESTData
 from hest.autoalign import autoalign_visium
 from hest.readers import VisiumReader
-from hest.utils import get_path_relative, load_image
-from hestcore.wsi import WSI, CucimWarningSingleton, wsi_factory
+from hest.utils import load_image
 
 try:
     from cucim import CuImage
@@ -91,7 +92,6 @@ class TestHESTData(unittest.TestCase):
    
     @classmethod
     def setUpClass(self):
-        download = True
         self.cur_dir = get_path_relative(__file__, '')
         cur_dir = self.cur_dir
         self.output_dir = _j(cur_dir, 'output_tests/hestdata_tests')
@@ -101,9 +101,12 @@ class TestHESTData(unittest.TestCase):
         
         token = os.getenv('HF_READ_TOKEN_PAUL')
         if token is None:
+            download = False
             warnings.warn("Please setup huggingface token 'HF_READ_TOKEN_PAUL'")
         else:
+            download = True
             login(token=token)
+        download=True
         
         id_list = ['TENX24', 'SPA154']
         
@@ -118,7 +121,7 @@ class TestHESTData(unittest.TestCase):
                 'MahmoodLab/hest', 
                 cache_dir=local_dir,
                 patterns=list_patterns,
-                download_mode='force_redownload',
+                #download_mode='force_redownload',
                 trust_remote_code=True
             )
             
@@ -153,11 +156,33 @@ class TestHESTData(unittest.TestCase):
 
 
     def test_patching(self):
-       for idx, st in enumerate(self.sts):
-           with self.subTest(st_object=idx):
-               name = ''
-               name += st.meta['id']
-               st.dump_patches(self.output_dir, name=name)
+        """ Save patches as .h5 then load with H5HESTDataset """
+        from hestcore.datasets import H5HESTDataset
+        from torch.utils.data import DataLoader
+        from PIL import Image, ImageDraw
+        output_dir = os.path.join(self.output_dir, 'test_patching')
+        
+        for idx, st in enumerate(self.sts):
+            target_patch_size = 224
+            with self.subTest(st_object=idx):
+                name = ''
+                name += st.meta['id']
+                st.dump_patches(output_dir, name=name, target_patch_size=target_patch_size)
+                
+                dataset = H5HESTDataset(os.path.join(output_dir, name + '.h5'), chunk_size=8)
+                dataloader = DataLoader(dataset)
+                for batch in dataloader:
+                    imgs, barcodes, coords = batch['imgs'].squeeze(0), batch['barcodes'], batch['coords'].squeeze(0)
+                    for i in range(len(imgs)):
+                        img = imgs[i]
+                        assert img.shape == (target_patch_size, target_patch_size, 3)
+                        barcode = barcodes[i][0]
+                        assert barcode.decode('utf-8') in st.adata.obs.index
+                        img = Image.fromarray(img.numpy())
+                        draw = ImageDraw.Draw(img)
+                        text_color = (0, 255, 0)
+                        draw.text((0, 0), f'{barcode}, {coords[i]}', fill=text_color)
+                        img.save(os.path.join(output_dir, f'{i}_h5_dataset_vis.jpg'))
                
                
     def test_saving(self):

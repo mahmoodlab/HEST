@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pandas as pd
+from hestcore.segmentation import get_path_relative
 from tqdm import tqdm
 
 from hest.io.seg_readers import read_gdf
@@ -22,9 +23,9 @@ from .HESTData import (HESTData, STHESTData, VisiumHDHESTData, VisiumHESTData,
 from .utils import (SpotPacking, align_xenium_df, check_arg,
                     df_morph_um_to_pxl, find_biggest_img,
                     find_first_file_endswith, find_pixel_size_from_spot_coords,
-                    get_col_selection, get_path_from_meta_row,
-                    get_path_relative, helper_mex, load_image, load_wsi,
-                    metric_file_do_dict, read_10x_seg, register_downscale_img)
+                    get_col_selection, get_path_from_meta_row, helper_mex,
+                    load_image, load_wsi, metric_file_do_dict, read_10x_seg,
+                    register_downscale_img)
 
 LOCAL = False
 if LOCAL:
@@ -1218,16 +1219,12 @@ def process_meta_df(meta_df, save_spatial_plots=True, pyramidal=True, save_img=T
         a = 1
         
 
-def _process_cellvit(available_gpus, available_gpus_lock, row, dest):
-    with available_gpus_lock:
-        gpu_id = available_gpus.pop()
-        print(f'get gpu {gpu_id}', flush=True)
-        
+def _process_cellvit(row, dest, **cellvit_kwargs):
     path = get_path_from_meta_row(row)
     wsi_path = os.path.join(path, 'processed', 'aligned_fullres_HE.tif')
     with open(os.path.join(path, 'processed', 'metrics.json')) as f:
         meta = json.load(f)
-    src_cell_path = segment_cellvit(wsi_path, row['id'], meta['pixel_size_um_estimated'], gpu=gpu_id)
+    src_cell_path = segment_cellvit(wsi_path, row['id'], meta['pixel_size_um_estimated'], **cellvit_kwargs)
     dst_cell_path = os.path.join(path, 'processed', 'cellvit_seg.geojson')
     shutil.copy(src_cell_path, dst_cell_path)
     
@@ -1246,19 +1243,9 @@ def _process_cellvit(available_gpus, available_gpus_lock, row, dest):
     id = row['id']
     path_dest_cellvit = os.path.join(dest, 'cellvit_seg', f'{id}_cellvit_seg.zip')
     shutil.copy(path_cellvit, path_dest_cellvit)
-
-
-    with available_gpus_lock:
-        available_gpus.add(gpu_id)
-        print(f'release gpu {gpu_id}', flush=True)
-        
-def cellvit_meta_df(meta_df, dest):
-    import concurrent
-    available_gpus_lock = threading.Lock()
-    available_gpus = {0, 1, 2}
     
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        future_results = [executor.submit(_process_cellvit, available_gpus, available_gpus_lock, row, dest) for _, row in meta_df.iterrows()]
-
-        for future in concurrent.futures.as_completed(future_results):
-            future.result()
+        
+def cellvit_meta_df(meta_df, dest, **cellvit_kwargs):
+    for _, row in meta_df.iterrows():
+        _process_cellvit(row, dest, **cellvit_kwargs)
+    

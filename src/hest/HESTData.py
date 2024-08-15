@@ -210,7 +210,8 @@ class HESTData:
         auto_download=True,
         num_workers=8,
         thumbnail_width=2000, 
-        method: str='deep'
+        method: str='deep',
+        weights_dir = None
     ) -> Union[None, np.ndarray]:
         """ Compute tissue mask and stores it in the current HESTData object
 
@@ -226,6 +227,7 @@ class HESTData:
             thumbnail_width (int, optional): size at which otsu segmentation is performed, ignored if method is 'deep'
             method (str, optional): perform deep learning based segmentation ('deep') or otsu based ('otsu').
                 Deep-learning based segmentation will be more accurate but a GPU is recommended, 'otsu' is faster but less accurate. Defaults to 'deep'.
+            weights_dir (str, optional): directory containing the models, if None will be ../models relative to the src package of hestcore. None
                 
         Returns:
             gpd.GeoDataFrame: a geodataframe of the tissue contours, contains a column `tissue_id` indicating to which tissue the contour belongs to and a 
@@ -244,7 +246,8 @@ class HESTData:
                 model_name,
                 batch_size,
                 auto_download,
-                num_workers
+                num_workers,
+                weights_dir
             )
         elif method == 'otsu':
         
@@ -285,7 +288,8 @@ class HESTData:
         target_pixel_size: float=0.5,
         verbose=0,
         dump_visualization=True,
-        use_mask=True
+        use_mask=True,
+        threshold=0.15
     ):
         """ Dump H&E patches centered around ST spots to a .h5 file. 
         
@@ -301,7 +305,10 @@ class HESTData:
             verbose (int, optional): verbose. Defaults to 0.
             dump_visualization (bool, optional): whenever to dump a visualization of the patches on top of the downscaled WSI. Defaults to True.
             use_mask (bool, optional): whenever to take into account the tissue mask. Defaults to True.
+            threshold (float, optional): Tissue intersection threshold for a patch to be kept. Defaults to 0.15
         """
+        
+        os.makedirs(patch_save_dir, exist_ok=True)
         
         import matplotlib.pyplot as plt
         dst_pixel_size = target_pixel_size
@@ -333,12 +340,12 @@ class HESTData:
         barcodes = barcodes[in_slide_mask]
         mask = self.tissue_contours if use_mask else None
         coords_topleft = np.array(coords_topleft).astype(int)
-        patcher = self.wsi.create_patcher(target_patch_size, src_pixel_size, dst_pixel_size, mask=mask, custom_coords=coords_topleft)
+        patcher = self.wsi.create_patcher(target_patch_size, src_pixel_size, dst_pixel_size, mask=mask, custom_coords=coords_topleft, threshold=threshold)
 
         if mask is not None:
             valid_barcodes = barcodes[patcher.valid_mask]
 
-        patcher.to_h5(h5_path, extra_assets={'barcodes': valid_barcodes})
+        patcher.to_h5(h5_path, extra_assets={'barcode': valid_barcodes})
 
         if dump_visualization:
             patcher.save_visualization(os.path.join(patch_save_dir, name + '_patch_vis.png'), dpi=400)
@@ -399,8 +406,7 @@ class HESTData:
         tissue_mask = contours_to_img(
                 self.tissue_contours, 
                 tissue_mask, 
-                draw_contours=False, 
-                line_color=(1, 1, 1)
+                fill_color=(1, 1, 1)
         )[:, :, 0]
         
         MAX_EDGE = 40000
@@ -434,8 +440,7 @@ class HESTData:
     def get_tissue_vis(self):
          return self.wsi.get_tissue_vis(
             self.tissue_contours,
-            line_color=(0, 255, 0),
-            line_thickness=5,
+            fill_color=(0, 255, 0),
             target_width=1000,
             seg_display=True,
         )

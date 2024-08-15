@@ -7,7 +7,7 @@ import matplotlib.collections as mc
 import matplotlib.patches as patches
 import numpy as np
 
-from hest.utils import get_path_relative
+from hestcore.segmentation import get_path_relative
 
 orientations = {
     'hourglass': 0,
