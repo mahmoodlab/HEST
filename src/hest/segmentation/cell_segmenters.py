@@ -122,7 +122,7 @@ class CellViTSegmenter():
         src_pixel_size: float=None, 
         dst_pixel_size: float=0.25, 
         batch_size=2, 
-        gpu=-1, 
+        gpu_ids=[], 
         save_dir='results/segmentation',
         model='CellViT-SAM-H-x40.pth'
     ) -> str:
@@ -147,20 +147,12 @@ class CellViTSegmenter():
         
         original_argv = sys.argv
         
-        
         all_entries = os.listdir(preprocess_path)
-        sub_name = [entry for entry in all_entries if os.path.isdir(os.path.join(preprocess_path, entry))][0]
-
-        if gpu == -1:
-            gpu = 0
-            multi_gpu = True
-        else:
-            multi_gpu = False        
+        sub_name = [entry for entry in all_entries if os.path.isdir(os.path.join(preprocess_path, entry))][0]     
 
         sys.argv = [
             '',
             "--model", model_path,
-            "--gpu", str(gpu),
             "--geojson",
             "--batch_size", str(batch_size),
             "--magnification",
@@ -169,9 +161,12 @@ class CellViTSegmenter():
             "--wsi_path", wsi_path,
             "--patched_slide_path", os.path.join(preprocess_path, sub_name),
         ]
-        if multi_gpu:
-            sys.argv = [''] + sys.argv
-            sys.argv[1] = '--multigpu'
+        
+        gpu_args = ["--gpu_ids"]
+        for gpu in gpu_ids:
+            gpu_args.append(str(gpu))
+            
+        sys.argv = sys.argv[0:1] + gpu_args + sys.argv[1:]
         
         cellvit_light.segment_cells()
         sys.argv = original_argv
@@ -188,7 +183,7 @@ def segment_cellvit(
     src_pixel_size: float=None, 
     dst_pixel_size: float=0.25, 
     batch_size=2, 
-    gpu=-1, 
+    gpu_ids=[0], 
     save_dir='results/segmentation',
     model='CellViT-SAM-H-x40.pth'
 ) -> str:
@@ -200,7 +195,7 @@ def segment_cellvit(
         src_pixel_size (float, optional): pixel size (um/px) of the slide at wsi_path. Defaults to None.
         dst_pixel_size (float, optional): patch will be resized to this (um/px) before being fed to CellViT. Defaults to 0.25.
         batch_size (int, optional): batch_size. Defaults to 2.
-        gpu (int, optional): gpu id to use (-1 means use all gpus available in parallel). Defaults to -1.
+        gpu_ids (List[int], optional): list of gpu ids to use during inference. Defaults to [0].
         save_dir (str, optional): directory where to save the output. Defaults to 'results/segmentation'.
         model (str, optional): name of model weights to use. Defaults to 'CellViT-SAM-H-x40.pth'.
     """
@@ -211,7 +206,7 @@ def segment_cellvit(
         src_pixel_size, 
         dst_pixel_size, 
         batch_size, 
-        gpu, 
+        gpu_ids, 
         save_dir,
         model
     )
