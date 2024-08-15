@@ -347,7 +347,7 @@ class HESTData:
         if mask is not None:
             valid_barcodes = barcodes[patcher.valid_mask]
 
-        patcher.to_h5(h5_path, extra_assets={'barcodes': valid_barcodes})
+        patcher.to_h5(h5_path, extra_assets={'barcode': valid_barcodes})
 
         if dump_visualization:
             patcher.save_visualization(os.path.join(patch_save_dir, name + '_patch_vis.png'), dpi=400)
@@ -415,8 +415,7 @@ class HESTData:
         tissue_mask = contours_to_img(
                 self.tissue_contours, 
                 tissue_mask, 
-                draw_contours=False, 
-                line_color=(1, 1, 1)
+                fill_color=(1, 1, 1)
         )[:, :, 0]
         
         MAX_EDGE = 40000
