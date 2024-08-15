@@ -27,7 +27,6 @@ class InferenceEncoder(torch.nn.Module):
         
 
 class ConchInferenceEncoder(InferenceEncoder):
-    name = 'conch_v1'
     
     def _build(self, _):
         try:
@@ -37,19 +36,18 @@ class ConchInferenceEncoder(InferenceEncoder):
             raise Exception("Please install CONCH `pip install git+https://github.com/Mahmoodlab/CONCH.git`")
         
         try:
-            model, _ = create_model_from_pretrained('conch_ViT-B-16', "hf_hub:MahmoodLab/conch")
+            model, preprocess = create_model_from_pretrained('conch_ViT-B-16', "hf_hub:MahmoodLab/conch")
         except:
             traceback.print_exc()
             raise Exception("Failed to download CONCH model, make sure that you were granted access and that you correctly registered your token")
         
-        eval_transform = None
+        eval_transform = preprocess
         precision = torch.float32
         
         return model, eval_transform, precision
     
     def forward(self, x):
-        x = x.permute((0, 3, 1, 2))
-        return self.model.encode_image(x, proj_contrast=False, normalize=True)
+        return self.model.encode_image(x, proj_contrast=False, normalize=False)
     
     
 class CTransPathInferenceEncoder(InferenceEncoder):
