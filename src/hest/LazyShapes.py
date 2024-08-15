@@ -51,19 +51,11 @@ def convert_old_to_gpd(contours_holes, contours_tissue) -> gpd.GeoDataFrame:
     types = []
     for i in range(len(contours_holes)):
         tissue = contours_tissue[i]
-        shapes.append(Polygon(tissue[:, 0, :]))
         tissue_ids.append(i)
-        types.append('tissue')
-        holes = contours_holes[i]
-        if len(holes) > 0:
-            for hole in holes:
-                shapes.append(Polygon(hole[:, 0, :]))
-                tissue_ids.append(i)
-                types.append('hole')
-                
+        holes = contours_holes[i] if len(contours_holes[i]) > 0 else None
+        shapes.append(Polygon(tissue[:, 0, :]), holes=holes)
+            
     df = pd.DataFrame(tissue_ids, columns=['tissue_id'])
-    df['hole'] = types
-    df['hole'] = df['hole'] == 'hole'
             
     return gpd.GeoDataFrame(df, geometry=shapes)
         

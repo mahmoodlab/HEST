@@ -50,28 +50,3 @@ def load_tiles(h5_path):
         coords = f['coords'][:]
         tiles = f['img'][:]
     return barcodes, coords, tiles
-    
-
-class H5TileDataset(Dataset):
-    def __init__(self, h5_path, img_transform=None, chunk_size=1000):
-        self.h5_path = h5_path
-        self.img_transform = img_transform
-        self.chunk_size = chunk_size
-        with h5py.File(h5_path, 'r') as f:
-            self.n_chunks = int(np.ceil(len(f['barcode']) / chunk_size))
-        
-    def __len__(self):
-        return self.n_chunks
-
-    def __getitem__(self, idx):
-        start_idx = idx * self.chunk_size
-        end_idx = (idx + 1) * self.chunk_size
-        with h5py.File(self.h5_path, 'r') as f:
-            imgs = f['img'][start_idx:end_idx]
-            barcodes = f['barcode'][start_idx:end_idx].flatten().tolist()
-            coords = f['coords'][start_idx:end_idx]
-            
-        if self.img_transform:
-            imgs = torch.stack([self.img_transform(Image.fromarray(img)) for img in imgs])
-                    
-        return {'imgs': imgs, 'barcodes': barcodes, 'coords': coords}
