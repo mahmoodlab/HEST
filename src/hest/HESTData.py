@@ -132,6 +132,8 @@ class HESTData:
         fig = sc.pl.spatial(self.adata, show=None, img_key="downscaled_fullres", color=[key], title=f"in_tissue spots", return_fig=True, **pl_kwargs)
         
         filename = f"{name}spatial_plots.png"
+
+        fig.tight_layout()
         
         # Save the figure
         fig.savefig(os.path.join(save_path, filename), dpi=400)
