@@ -353,23 +353,23 @@ def process_meta_df(meta_df, save_spatial_plots=True, pyramidal=True, save_img=T
                     warped_nuclei.to_parquet(os.path.join(path, 'processed', f'he_nucleus_seg.parquet'))
                     write_geojson(warped_cells, os.path.join(path, 'processed', f'he_cell_seg.geojson'), '', chunk=True)
                     write_geojson(warped_nuclei, os.path.join(path, 'processed', f'he_nucleus_seg.geojson'), '', chunk=True)
-            elif isinstance(st, VisiumHDHESTData):
-                segment_config = {'method': 'cellvit'}
-                binning_config = {}
-                
-                bc_matrix_path = find_first_file_endswith(os.path.join(path, 'binned_outputs', 'square_002um'), 'filtered_feature_bc_matrix.h5')
-                bin_positions_path = find_first_file_endswith(os.path.join(path, 'binned_outputs', 'square_002um', 'spatial'), 'tissue_positions.parquet')
-                
-                preprocess_cells_visium_hd(
-                    os.path.join(path, 'processed', ALIGNED_HE_FILENAME),
-                    full_exp_dir,
-                    row['id'],
-                    st.pixel_size,
-                    bc_matrix_path,
-                    bin_positions_path,
-                    segment_config,
-                    binning_config,
-                )
+                elif isinstance(st, VisiumHDHESTData):
+                    segment_config = {'method': 'cellvit'}
+                    binning_config = {}
+                    
+                    bc_matrix_path = find_first_file_endswith(os.path.join(path, 'binned_outputs', 'square_002um'), 'filtered_feature_bc_matrix.h5')
+                    bin_positions_path = find_first_file_endswith(os.path.join(path, 'binned_outputs', 'square_002um', 'spatial'), 'tissue_positions.parquet')
+                    
+                    preprocess_cells_visium_hd(
+                        os.path.join(path, 'processed', ALIGNED_HE_FILENAME),
+                        full_exp_dir,
+                        row['id'],
+                        st.pixel_size,
+                        bc_matrix_path,
+                        bin_positions_path,
+                        segment_config,
+                        binning_config,
+                    )
                 
             
             row_dict = row.to_dict()
