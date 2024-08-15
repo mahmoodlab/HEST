@@ -146,7 +146,7 @@ def embed_tiles(
     device: str,
     precision
 ):
-    """ Extract embeddings from tiles using `encoder` and save to an h5 file """
+    """ Extract embeddings from tiles using `encoder` and save to an h5 file (TODO move to hestcore) """
     model.eval()
     for batch_idx, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
         batch = post_collate_fn(batch)
@@ -179,6 +179,8 @@ def get_bench_weights(weights_root, name):
         raise ValueError(f"Please specify the weights path to {name} in {local_ckpt_registry}")
 
 def predict_single_split(train_split, test_split, args, save_dir, dataset_name, model_name, device, bench_data_root):
+    """ Predict a single split for a single model """
+
     if not os.path.isfile(train_split):
         train_split = os.path.join(bench_data_root, 'splits', train_split)
     if not os.path.isfile(test_split):
@@ -253,8 +255,10 @@ def predict_single_split(train_split, test_split, args, save_dir, dataset_name, 
     
     
     if args.dimreduce == 'PCA':
+        from sklearn.decomposition import PCA
+        
         print('perform PCA dim reduction')
-        pipe = Pipeline([('scaler', StandardScaler()), (f'{args.dimreduce}', eval(args.dimreduce)(n_components=args.latent_dim))])
+        pipe = Pipeline([('scaler', StandardScaler()), (f'PCA', PCA(n_components=args.latent_dim))])
         X_train, X_test = torch.Tensor(pipe.fit_transform(X_train)), torch.Tensor(pipe.transform(X_test))
     
     
@@ -308,6 +312,7 @@ def benchmark_encoder(encoder: torch.nn.Module, enc_transf, precision, config_pa
         
         
 def predict_folds(args, exp_save_dir, model_name, dataset_name, device, bench_data_root):
+    """ Predict all folds for a given model """
     split_dir = os.path.join(bench_data_root, 'splits')
     #if not os.path.exists(split_dir):
     #    raise FileNotFoundError(f"{split_dir} doesn't exist, make sure that you specified the ")

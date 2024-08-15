@@ -43,10 +43,3 @@ def load_adata(expr_path, genes = None, barcodes = None, normalize=False):
     if normalize:
         adata = normalize_adata(adata)
     return adata.to_df()
-
-def load_tiles(h5_path):
-    with h5py.File(h5_path, 'r') as f:
-        barcodes = f['barcode'][:].astype(str).flatten().tolist()
-        coords = f['coords'][:]
-        tiles = f['img'][:]
-    return barcodes, coords, tiles
