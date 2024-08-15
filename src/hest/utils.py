@@ -492,6 +492,7 @@ def get_k_genes(adata_list: List[sc.AnnData], k: int, criteria: str, save_dir: s
             
 
     common_genes = [gene for gene in common_genes if 'BLANK' not in gene and 'Control' not in gene]
+    logger.info(f"Found {len(common_genes)} common genes")
 
     for adata in adata_list:
 
@@ -519,7 +520,7 @@ def get_k_genes(adata_list: List[sc.AnnData], k: int, criteria: str, save_dir: s
         with open(save_dir, mode='w') as json_file:
             json.dump(json_dict, json_file)
 
-    print(f'selected genes {top_k}')
+    logger.info(f'selected genes {top_k}')
     return top_k
 
 

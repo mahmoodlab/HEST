@@ -30,7 +30,7 @@ from shapely import Point
 from tqdm import tqdm
 
 from .utils import (ALIGNED_HE_FILENAME, check_arg, deprecated,
-                    find_first_file_endswith, get_path_from_meta_row,
+                    find_first_file_endswith, get_k_genes_from_df, get_path_from_meta_row,
                     plot_verify_pixel_size, tiff_save, verify_paths)
 
 
@@ -290,7 +290,8 @@ class HESTData:
         target_pixel_size: float=0.5,
         verbose=0,
         dump_visualization=True,
-        use_mask=True
+        use_mask=True,
+        threshold=0.15
     ):
         """ Dump H&E patches centered around ST spots to a .h5 file. 
         
@@ -306,7 +307,10 @@ class HESTData:
             verbose (int, optional): verbose. Defaults to 0.
             dump_visualization (bool, optional): whenever to dump a visualization of the patches on top of the downscaled WSI. Defaults to True.
             use_mask (bool, optional): whenever to take into account the tissue mask. Defaults to True.
+            threshold (float, optional): Tissue intersection threshold for a patch to be kept. Defaults to 0.15
         """
+        
+        os.makedirs(patch_save_dir, exist_ok=True)
         
         import matplotlib.pyplot as plt
         dst_pixel_size = target_pixel_size
@@ -338,7 +342,7 @@ class HESTData:
         barcodes = barcodes[in_slide_mask]
         mask = self.tissue_contours if use_mask else None
         coords_topleft = np.array(coords_topleft).astype(int)
-        patcher = self.wsi.create_patcher(target_patch_size, src_pixel_size, dst_pixel_size, mask=mask, custom_coords=coords_topleft)
+        patcher = self.wsi.create_patcher(target_patch_size, src_pixel_size, dst_pixel_size, mask=mask, custom_coords=coords_topleft, threshold=threshold)
 
         if mask is not None:
             valid_barcodes = barcodes[patcher.valid_mask]
@@ -446,8 +450,7 @@ class HESTData:
     def get_tissue_vis(self):
          return self.wsi.get_tissue_vis(
             self.tissue_contours,
-            line_color=(0, 255, 0),
-            line_thickness=5,
+            fill_color=(0, 255, 0),
             target_width=1000,
             seg_display=True,
         )

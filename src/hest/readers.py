@@ -26,7 +26,7 @@ from hest.utils import (SpotPacking, align_xenium_df, check_arg,
                         df_morph_um_to_pxl, find_biggest_img,
                         find_first_file_endswith,
                         find_pixel_size_from_spot_coords,
-                        get_path_from_meta_row, get_path_relative, helper_mex,
+                        get_path_from_meta_row, helper_mex,
                         load_wsi, metric_file_do_dict, read_10x_seg,
                         register_downscale_img, verify_paths)
 
