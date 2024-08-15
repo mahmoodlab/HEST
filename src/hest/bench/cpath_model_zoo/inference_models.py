@@ -79,7 +79,7 @@ class CustomInferenceEncoder(InferenceEncoder):
         self.precision = precision
         
     def _build(self, weights_path):
-        return self.model, self.transforms, self.precision
+        return None, None, None
     
 
 class PhikonInferenceEncoder(InferenceEncoder):
