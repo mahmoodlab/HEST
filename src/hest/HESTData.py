@@ -37,11 +37,9 @@ class HESTData:
     Object representing a Spatial Transcriptomics sample along with a full resolution H&E image and metadatas
     """
     
-    tissue_mask: np.ndarray = None
-    """tissue mask for that sample, will be None until segment_tissue() is called"""
-    
     shapes: List[LazyShapes] = []
-    
+    """ List of `LazyShapes`, i.e. cells, nuclei """
+
     
     def _verify_format(self, adata):
         assert 'spatial' in adata.obsm
@@ -230,8 +228,7 @@ class HESTData:
             weights_dir (str, optional): directory containing the models, if None will be ../models relative to the src package of hestcore. None
                 
         Returns:
-            gpd.GeoDataFrame: a geodataframe of the tissue contours, contains a column `tissue_id` indicating to which tissue the contour belongs to and a 
-                `type` column to indicate if the shape corresponds to a `tissue` contour or a `hole`
+            gpd.GeoDataFrame: a geodataframe of the tissue contours, contains a column `tissue_id` indicating to which tissue the contour belongs to.
         """
         
         check_arg(method, 'method', ['deep', 'otsu'])
@@ -270,7 +267,7 @@ class HESTData:
 
     @deprecated
     def get_tissue_mask(self) -> np.ndarray:
-        """ Return existing tissue segmentation mask if it exists, raise an error if it doesn't exist
+        """ Deprecated. Return existing tissue segmentation mask if it exists, raise an error if it doesn't exist
 
         Returns:
             np.ndarray: an array with the same resolution as the WSI image, where 1 means tissue and 0 means background
@@ -385,6 +382,7 @@ class HESTData:
     
     @property
     def tissue_contours(self) -> gpd.GeoDataFrame:
+        """ Geodataframe of tissue contours polygons also contains a tissue_id column """
         if self._tissue_contours is None:
             raise Exception("No tissue segmentation attached to this sample, segment tissue first by calling `segment_tissue()` for this object")
         return self._tissue_contours
