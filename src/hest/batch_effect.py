@@ -1,15 +1,16 @@
 import os
+import warnings
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 
-from hest.HESTData import HESTData
+from hest.HESTData import HESTData, unify_gene_names
 from hest.utils import check_arg, verify_paths
 from hestcore.segmentation import get_path_relative
 
 
-def evaluate_stromal_batch_effect(st: HESTData, species: str, stromal_threshold = 0.7, min_cells_treshold = 2):
-    adata = st.adata
+def evaluate_stromal_batch_effect(st: HESTData, species: str, stromal_threshold = 0.7, min_cells_treshold = 2, unify_genes=True, strict_genes=True):
+    adata = unify_gene_names(st.adata, 'hsapiens') if unify_genes else st.adata
     
     check_arg(species.lower(), 'species', ['human', 'mouse'])
     
@@ -18,7 +19,13 @@ def evaluate_stromal_batch_effect(st: HESTData, species: str, stromal_threshold 
     filename = 'MostStable_Human.csv' if species.lower() == 'human' else 'MostStable_Mouse.csv'
     path_genes = os.path.join(asset_dir, filename)
     
-    df_genes = pd.read_csv(path_genes, sep=';')
+    housekeep_genes = pd.read_csv(path_genes, sep=';')['Gene name'].values
+    missing_genes = np.setdiff1d(housekeep_genes, adata.var_names)
+    if len(missing_genes) > 0:
+        if strict_genes:
+            raise ValueError(f"The following housekeeping genes are missing in st.adata: {missing_genes}. If you still want to evaluate the batch effect, pass strict_genes=False")
+        else:
+            warnings.warn(f"The following housekeeping genes are missing in st.adata: {missing_genes}")
     
     cellvit_cells = st.get_shapes('cellvit', 'he').shapes
     cell_centers = cellvit_cells.copy()

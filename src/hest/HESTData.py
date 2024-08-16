@@ -11,6 +11,7 @@ import geopandas as gpd
 import numpy as np
 from hestcore.wsi import (WSI, CucimWarningSingleton, NumpyWSI,
                           contours_to_img, wsi_factory)
+from loguru import logger
 
 from hest.io.seg_readers import TissueContourReader
 from hest.LazyShapes import LazyShapes, convert_old_to_gpd, old_geojson_to_new
@@ -897,10 +898,11 @@ def unify_gene_names(adata: sc.AnnData, species="hsapiens", cache_dir='.genes', 
 
     gene_df = get_gene_db(species, cache_dir=cache_dir)
     
+    duplicated_genes_before = adata.var_names[adata.var_names.duplicated()]
     
     std_genes = np.intersect1d(gene_df.index.dropna().values, adata.var_names.values)
     unknown_genes = np.setdiff1d(adata.var_names.values, std_genes)
-    print(f'Found {len(unknown_genes)} unknown genes out of {len(adata.var_names)}')
+    logger.info(f'found {len(unknown_genes)} unknown genes out of {len(adata.var_names)}')
     
     
     mg.set_caching('db')
@@ -928,7 +930,16 @@ def unify_gene_names(adata: sc.AnnData, species="hsapiens", cache_dir='.genes', 
     mapped.loc[mask,'gene_names'] = mapped.index[mask].values
     adata.var_names = mapped['gene_names'].values
     
+    duplicated_genes_after = adata.var_names[adata.var_names.duplicated()]
+    if len(duplicated_genes_after) > len(duplicated_genes_before):
+        logger.warning(f"duplicated genes increased from {len(duplicated_genes_before)} to {len(duplicated_genes_after)} after resolving aliases")
+        logger.info('deduplicating...')
+        mask = ~adata.var_names.duplicated(keep='first')
+        adata = adata[:, mask]
+    
     if drop:
         adata = adata[:, ~remaining]
+    
+    # TODO return dict map of renamed, and remaining
     
     return adata
