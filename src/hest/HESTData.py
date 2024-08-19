@@ -356,6 +356,13 @@ class HESTData:
         if self.tissue_contours is None:
             raise Exception("No existing tissue mask for that sample, compute the tissue mask with self.segment_tissue()")        
     
+    
+    def get_shapes(self, name, coordinate_system):
+        for shape in self.shapes:
+            if shape.name == name and shape.coordinate_system == coordinate_system:
+                return shape
+        return None
+    
 
     @deprecated
     def get_tissue_contours(self) -> Dict[str, list]:
@@ -879,6 +886,15 @@ def get_gene_db(species, cache_dir='.genes') -> pd.DataFrame:
     return annots
 
 
+def _get_alias_to_parent_df():
+    df = pd.read_parquet('assets/gene_db.parquet')
+    df = df[['symbol', 'ensembl_gene_id', 'alias_symbol']].explode('alias_symbol')
+    none_mask = df['alias_symbol'].isna()
+    df.loc[none_mask, 'alias_symbol'] = df.loc[none_mask, 'symbol']
+    df.index = df['alias_symbol']
+    df = df[~df.index.duplicated('first')]
+    return df
+
 def unify_gene_names(adata: sc.AnnData, species="hsapiens", cache_dir='.genes', drop=False) -> sc.AnnData: # type: ignore
     """ unify gene names by resolving aliases
 
@@ -892,48 +908,41 @@ def unify_gene_names(adata: sc.AnnData, species="hsapiens", cache_dir='.genes', 
         sc.AnnData: anndata with unified gene names in var_names
     """
     adata = adata.copy()
-    import mygene
-        
-    mg = mygene.MyGeneInfo()
-
-    gene_df = get_gene_db(species, cache_dir=cache_dir)
-    
     duplicated_genes_before = adata.var_names[adata.var_names.duplicated()]
+
+    var_names = adata.var_names.values
+
+
+    alias_to_parent_df = _get_alias_to_parent_df()
+    parent_names = alias_to_parent_df['symbol'].values
     
-    std_genes = np.intersect1d(gene_df.index.dropna().values, adata.var_names.values)
-    unknown_genes = np.setdiff1d(adata.var_names.values, std_genes)
-    logger.info(f'found {len(unknown_genes)} unknown genes out of {len(adata.var_names)}')
+    var_names = np.unique(var_names)
     
+    # Conventional gene names in adata
+    adata_conv_genes = np.intersect1d(parent_names, var_names)
     
-    mg.set_caching('db')
+    # Unconventional (alias) gene names in adata
+    unknown_genes = np.setdiff1d(var_names, adata_conv_genes, assume_unique=True)
+    logger.info(f'found {len(unknown_genes)} unknown genes out of {len(var_names)}')
     
-    # look for aliases
-    res = mg.querymany(unknown_genes, scopes='alias', as_dataframe=True, fields='ensembl', verbose=False)
-    res = res.loc[~res.index.duplicated(keep='first')]
+    parent_names = alias_to_parent_df.reindex(unknown_genes)
     
-    gene_df['gene_names'] = gene_df.index
-    res['query'] = res.index
+    matched_parent = parent_names.dropna()
+    remaining = parent_names[parent_names.isna()]
     
-    # mygenes sometimes return a nan in ensembl.gene, the id then contained in 'ensembl'
-    mask_na = res['ensembl.gene'].isna() & res['ensembl'].apply(lambda x: isinstance(x, list) and len(x) > 0 and 'gene' in x[0])
-    res.loc[mask_na, 'ensembl.gene'] = res.loc[mask_na, 'ensembl'].apply(lambda x: x[0]['gene'])
+    print(f"Mapped {len(matched_parent)} aliases to their parent name, {len(remaining)} remaining unknown genes")
     
-    # map alias name to its parent gene name
-    alias_map = res.merge(gene_df, right_on='ensembl_gene_id', left_on='ensembl.gene', how='inner').set_index('query')[['gene_names']]
+    mapped = pd.DataFrame(var_names.copy(), index=var_names)
+    mapped.loc[parent_names.index, 0] = parent_names['symbol'].values
     
-    remaining = np.setdiff1d(unknown_genes, alias_map.index.values)
-    
-    print(f"Mapped {len(alias_map)} aliases to their parent name, {len(remaining)} remaining unknown genes")
-    
-    mapped = pd.DataFrame(index=adata.var_names).merge(alias_map, left_index=True, right_index=True, how='left')
-    mask = mapped.isna()['gene_names']
-    mapped.loc[mask,'gene_names'] = mapped.index[mask].values
-    adata.var_names = mapped['gene_names'].values
+    mask = mapped.isna()[0].values
+    mapped.loc[mask, 0] = mapped.index[mask].values
+    adata.var_names =  mapped.loc[adata.var_names][0].values
     
     duplicated_genes_after = adata.var_names[adata.var_names.duplicated()]
     if len(duplicated_genes_after) > len(duplicated_genes_before):
         logger.warning(f"duplicated genes increased from {len(duplicated_genes_before)} to {len(duplicated_genes_after)} after resolving aliases")
-        logger.info('deduplicating...')
+        logger.warning('deduplicating... (can remove useful genes)')
         mask = ~adata.var_names.duplicated(keep='first')
         adata = adata[:, mask]
     
