@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import warnings
 from typing import List
 
 import geopandas as gpd
@@ -9,32 +8,44 @@ import numpy as np
 import pandas as pd
 from hestcore.segmentation import get_path_relative
 from loguru import logger
+from tqdm import tqdm
 
-from hest.HESTData import HESTData, unify_gene_names
-from hest.utils import check_arg, verify_paths
+from hest.HESTData import HESTData, load_hest, unify_gene_names
+from hest.utils import check_arg
 
 
-def get_housekeeping_stromal_adata(
-    st: HESTData, 
+def filter_stromal_housekeeping(
+    st: HESTData,
     species: str, 
     stromal_threshold = 0.7, 
     min_cells_treshold = 2, 
-    unify_genes=True, 
-    strict_genes=True,
+    unify_genes=False, 
     min_stromal_spot=5,
-    plot_path='',
+    plot_dir=None,
+    name='',
     whole_tissue=False,
 ):
     """ Filter the st.adata of a HEST sample to only keep stromal regions and housekeeping genes
     
-    Stromal regions are determined by computing the proportion of cells classified as stromal by CellViT. If the propotion
-    is greater than `stromal_threshold` the region will be determined as stromal. The st.adata genes are then filtered to only keep housekeeping genes
-    
+        Stromal regions are determined by computing the proportion of cells classified as stromal by CellViT. If the propotion
+        is greater than `stromal_threshold` the region will be determined as stromal. The st.adata genes are then filtered to only keep housekeeping genes
+
+        Args:
+            st (HESTData): HEST sample to filter
+            species (str): species (can be 'human' or 'mouse')
+            stromal_threshold (float, optional): If the propotion
+                of stromal cells within a spot is greater than `stromal_threshold` the region will be determined as stromal. Defaults to 0.7.
+            min_cells_treshold (int, optional): spots containing less than `min_cells_treshold` will be filtered out. Defaults to 2.
+            unify_genes (bool, optional): whenever to maps gene aliases to their parents. Defaults to False.
+            min_stromal_spot (int, optional): minimum number of stromal_pots detected before throwing an exception. Defaults to 5.
+            plot_dir (str, optional): if not None, will save a plot of the filtered adata in that directory. Defaults to None.
+            name (str, optional): name. Defaults to ''.
+            whole_tissue (bool, optional): whenever to keep the whole tissue or only stromal regions. Defaults to False.
     """
     
-    adata = unify_gene_names(st.adata, 'hsapiens') if unify_genes else st.adata.copy()
-    
     check_arg(species.lower(), 'species', ['human', 'mouse'])
+    
+    adata = unify_gene_names(st.adata, 'human') if unify_genes else st.adata.copy()
     
     asset_dir = get_path_relative(__file__, '../../assets/')
     
@@ -44,20 +55,23 @@ def get_housekeeping_stromal_adata(
     housekeep_genes = pd.read_csv(path_genes, sep=';')['Gene name'].values
     missing_genes = np.setdiff1d(housekeep_genes, adata.var_names)
     if len(missing_genes) > 0:
-        if strict_genes:
-            raise ValueError(f"The following housekeeping genes are missing in st.adata: {missing_genes}. If you still want to evaluate the batch effect, pass strict_genes=False")
-        else:
-            warnings.warn(f"The following housekeeping genes are missing in st.adata: {missing_genes}")
+        raise ValueError(f"The following housekeeping genes are missing in st.adata: {missing_genes}. Make sure {missing_genes} or one of its aliases is in st.adata.var_names")
     common_genes = np.intersect1d(housekeep_genes, adata.var_names)
+    
+    xy = adata.obsm['spatial']
+    spot_centers = gpd.GeoDataFrame(geometry=gpd.points_from_xy(xy[:, 0], xy[:, 1]), index=adata.obs.index)
+    
+    union_contours = st.tissue_contours.union_all()
+    
+    under_tissue_mask = spot_centers.geometry.within(union_contours)
+    adata = adata[under_tissue_mask]
+    spot_centers = spot_centers[under_tissue_mask]
     
     if not whole_tissue:
         logger.info("Detecting stromal regions under tissue from CellViT segmentation...")
         cellvit_cells = st.get_shapes('cellvit', 'he').shapes
         cell_centers = cellvit_cells.copy()
         cell_centers['geometry'] = cellvit_cells.centroid
-        
-        xy = adata.obsm['spatial']
-        spot_centers = gpd.GeoDataFrame(geometry=gpd.points_from_xy(xy[:, 0], xy[:, 1]), index=adata.obs.index)
         
         nearest_spot_idx = spot_centers.geometry.sindex.nearest(cell_centers.geometry)[1]
         cell_centers['spot_idx'] = nearest_spot_idx
@@ -84,31 +98,92 @@ def get_housekeeping_stromal_adata(
         
         stromal_spots = spot_centers[(spot_counts['stromal_pct'] > stromal_threshold) & (spot_counts['stromal'] > min_cells_treshold)]
         
-        union_contours = st.tissue_contours.union_all()
+        adata = adata[stromal_spots.index]
         
-        strom_stromal_spots_under_tissue = stromal_spots[stromal_spots.geometry.within(union_contours)]
-        
-        adata = adata[strom_stromal_spots_under_tissue.index]
-        
-        logger.info(f"Detected {len(adata)} stromal regions under tissue")
+        logger.info(f"Detected {len(adata)} stromal regions")
         
         if len(adata) < min_stromal_spot:
-            raise Exception(f"Detected less than {min_stromal_spot} stromal patches under tissue")
+            raise Exception(f"Detected less than {min_stromal_spot} stromal patches")
     
     adata = adata[:, common_genes]
 
-
     st.adata = adata
     
-    if plot_path is not None:
-        st.save_spatial_plot(plot_path)
+    if plot_dir is not None:
+        st.save_spatial_plot(plot_dir, name)
     return adata
 
 
-def plot_umap(adata_list: List[sc.AnnData], plot_path, names):
-    import matplotlib.pyplot as plt
+def filter_hest_stromal_housekeeping(meta_df: pd.DataFrame, hest_dir, whole_tissue=False, unify_genes=False) -> List[HESTData]:
+    """ Filter the genes of HESTData samples, such that:
+    - only stable housekeeping genes are kept (see assets/MostStable_{species}.csv).
+    - only stromal regions are kept (determined from CellViT segmentation)
+    
+    The lists of most stable housekeeping genes across organs were taken from https://housekeeping.unicamp.br/?download
+
+    Args:
+        meta_df (pd.DataFrame): panda dataframe containing the following columns ['id', 'species']
+        whole_tissue (bool, optional): whenever to only keep stromal regions. Defaults to False.
+        unify_genes (bool, optional): whenever to all the gene names beforehand. Defaults to False.
+
+    Returns:
+        List[HESTData]: filtered list of sc.AnnData containing only stromal regions and stable housekeeping genes
+    """
+    adata_list = []
+    for _, row in tqdm(meta_df.iterrows()):
+        id = row['id']
+        species = 'human' if row['species'] == 'Homo sapiens' else 'mouse'
+        logger.debug(f'Filtering {id}')
+        st = load_hest(hest_dir, [id])[0]
+        adata = filter_stromal_housekeeping(
+            st, 
+            species, 
+            whole_tissue=whole_tissue,
+            name=st.meta['id'],
+            unify_genes=unify_genes
+        )     
+        adata_list.append(adata)
+    return adata_list
+
+
+def _concat_adata_and_labels(adata_list, labels):
     import scanpy as sc
+    concat_adata = sc.concat(adata_list)
+    concat_arr = concat_adata.to_df().values
+    concat_labels = ['' for _ in range(len(concat_adata))]
+    start = 0
+    for i, adata in enumerate(adata_list):
+        l = adata.shape[0]
+        concat_labels[start:start+ l] = [labels[i]] * l
+        start = start + l
+    return concat_arr, concat_labels
+
+
+def get_silhouette_score(adata_list: List[sc.AnnData], labels, random_state=42) -> float:
+    """ Compute the silhouette score for `adata_list`, cluster memberships are passed in `labels` (len(labels) == len(adata_list)) """
+    from sklearn.metrics import silhouette_score
+    
+    if len(adata_list) == 0:
+        raise ValueError("adata_list can't be empty")
+    
+    if len(adata_list) != len(labels):
+        raise ValueError('adata_list and labels must be the same length')
+    
+    concat_arr, concat_labels = _concat_adata_and_labels(adata_list, labels)
+    
+    s_score = silhouette_score(concat_arr, concat_labels, random_state=random_state)
+    return s_score
+
+def plot_umap(adata_list: List[sc.AnnData], labels, plot_path, random_state=42, umap_kwargs={}, verbose=True):
+    """ Create UMAP plot (n=2) for `adata_list`, cluster memberships are passed in `labels` (len(labels) == len(adata_list)) """
+    import matplotlib.pyplot as plt
     import umap
+    
+    if len(adata_list) == 0:
+        raise ValueError("adata_list can't be empty")
+    
+    if len(adata_list) != len(labels):
+        raise ValueError('adata_list and labels must be the same length')
     
     common_genes = adata_list[0].var_names
     for adata in adata_list[1:]:
@@ -116,22 +191,24 @@ def plot_umap(adata_list: List[sc.AnnData], plot_path, names):
             raise ValueError("Each adata in adata_list must have the same var_names")
     
 
-    concat_adata = sc.concat(adata_list)
-    arr = concat_adata.to_df().values
-    labels = np.zeros(len(concat_adata))
-    start = 0
-    for i, adata in enumerate(adata_list):
-        l = adata.shape[0]
-        labels[start:start+ l] = i
-        start = start + l
+    concat_arr, concat_labels = _concat_adata_and_labels(adata_list, labels)
     
-    umap_model = umap.UMAP(n_neighbors=15, min_dist=0.1, metric='euclidean', verbose=1)
-    embedding = umap_model.fit_transform(arr)
+    umap_model = umap.UMAP(metric='euclidean', verbose=verbose, random_state=random_state, **umap_kwargs)
+    embedding = umap_model.fit_transform(concat_arr)
     
     plt.figure(figsize=(10, 8))
-    for i, arr in enumerate(adata_list):
-        name = names[i]
-        plt.scatter(embedding[labels == i, 0], embedding[labels == i, 1], label=name, s=0.8)
+    if len(adata_list) > 10:
+        colors = plt.get_cmap('tab20').colors
+    else:
+        colors = plt.get_cmap('tab10').colors
+        
+    unique_labels = np.unique(labels)
+    concat_labels = np.array(concat_labels)
+    for i in range(len(unique_labels)):
+        label = unique_labels[i]
+        mask = concat_labels == label
+        color = colors[i % len(colors)]
+        plt.scatter(embedding[mask, 0], embedding[mask, 1], label=label, s=0.5, color=color)
     plt.title('UMAP')
     plt.xlabel('UMAP1')
     plt.ylabel('UMAP2')

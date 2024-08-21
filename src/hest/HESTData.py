@@ -122,17 +122,8 @@ class HESTData:
             key (str): feature to plot. Default: 'total_counts'
             pl_kwargs(Dict): arguments for sc.pl.spatial
         """
-        print("Plotting spatial plots...")
         
-        import scanpy as sc
-             
-        fig = sc.pl.spatial(self.adata, show=None, img_key="downscaled_fullres", color=[key], title=f"in_tissue spots", return_fig=True, **pl_kwargs)
-        
-        filename = f"{name}spatial_plots.png"
-        
-        # Save the figure
-        fig.savefig(os.path.join(save_path, filename), dpi=400)
-        print(f"H&E overlay spatial plots saved in {save_path}")
+        save_spatial_plot(self.adata, save_path, name, key, pl_kwargs)
     
     
     def load_wsi(self) -> None:
@@ -895,13 +886,12 @@ def _get_alias_to_parent_df():
     df = df[~df.index.duplicated('first')]
     return df
 
-def unify_gene_names(adata: sc.AnnData, species="hsapiens", cache_dir='.genes', drop=False) -> sc.AnnData: # type: ignore
+def unify_gene_names(adata: sc.AnnData, species="human", drop=False) -> sc.AnnData: # type: ignore
     """ unify gene names by resolving aliases
 
     Args:
         adata (sc.AnnData): scanpy anndata
-        species (str, optional): species, choose between ["hsapiens", "mmusculus"]. Defaults to "hsapiens".
-        cache_dir (str, optional): directory where biomart database will be cached. Defaults to '.genes'.
+        species (str, optional): species, choose between ["human", "mouse"]. Defaults to "human".
         drop (bool, optional): whenever to drop gene names having no alias. Defaults to False.
 
     Returns:
@@ -923,17 +913,22 @@ def unify_gene_names(adata: sc.AnnData, species="hsapiens", cache_dir='.genes', 
     
     # Unconventional (alias) gene names in adata
     unknown_genes = np.setdiff1d(var_names, adata_conv_genes, assume_unique=True)
-    logger.info(f'found {len(unknown_genes)} unknown genes out of {len(var_names)}')
+    logger.info(f'Found {len(unknown_genes)} unknown genes out of {len(var_names)}')
     
     parent_names = alias_to_parent_df.reindex(unknown_genes)
     
     matched_parent = parent_names.dropna()
-    remaining = parent_names[parent_names.isna()]
     
-    print(f"Mapped {len(matched_parent)} aliases to their parent name, {len(remaining)} remaining unknown genes")
+    # If the parent of the alias already exists, keep the alis
+    parent_already_exists = matched_parent['symbol'].isin(var_names)
+    matched_parent = matched_parent[~parent_already_exists]
+    
+    remaining = parent_names.drop(matched_parent.index, axis=0)
+    
+    logger.info(f"Mapped {len(matched_parent)} aliases to their parent name, {len(remaining)} remaining unknown genes")
     
     mapped = pd.DataFrame(var_names.copy(), index=var_names)
-    mapped.loc[parent_names.index, 0] = parent_names['symbol'].values
+    mapped.loc[matched_parent.index, 0] = matched_parent['symbol'].values
     
     mask = mapped.isna()[0].values
     mapped.loc[mask, 0] = mapped.index[mask].values
@@ -952,3 +947,21 @@ def unify_gene_names(adata: sc.AnnData, species="hsapiens", cache_dir='.genes', 
     # TODO return dict map of renamed, and remaining
     
     return adata
+
+def save_spatial_plot(adata: sc.AnnData, save_path: str, name: str='', key='total_counts', pl_kwargs={}):
+    """Save the spatial plot from that sc.AnnData
+
+    Args:
+        save_path (str): path to a directory where the spatial plot will be saved
+        name (str): save plot as {name}spatial_plots.png
+        key (str): feature to plot. Default: 'total_counts'
+        pl_kwargs(Dict): arguments for sc.pl.spatial
+    """
+    import scanpy as sc
+    
+    fig = sc.pl.spatial(adata, show=None, img_key="downscaled_fullres", color=[key], title=f"in_tissue spots", return_fig=True, **pl_kwargs)
+    
+    filename = f"{name}spatial_plots.png"
+    
+    # Save the figure
+    fig.savefig(os.path.join(save_path, filename), dpi=400)

@@ -1015,6 +1015,20 @@ def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal:
         path_dest_cont = os.path.join(dest, 'tissue_seg', f'{id}_contours.geojson')
         shutil.copy(path_cont, path_dest_cont)
         
+        path_cont = os.path.join(path, f'tissue_seg_vis.jpg')
+        path_dest_cont = os.path.join(dest, 'tissue_seg', f'{id}_vis.jpg')
+        shutil.copy(path_cont, path_dest_cont)
+        
+    if cp_cellvit:
+        os.makedirs(os.path.join(dest, 'cellvit_seg'), exist_ok=True)
+        path_cellvit = os.path.join(path, f'cellvit_seg.zip')
+        path_dest_cellvit = os.path.join(dest, 'cellvit_seg', f'{id}_cellvit_seg.geojson.zip')
+        shutil.copy(path_cellvit, path_dest_cellvit)
+        
+        path_cellvit = os.path.join(path, f'{id}_cellvit_seg.parquet')
+        path_dest_cellvit = os.path.join(dest, 'cellvit_seg', f'{id}_cellvit_seg.parquet')
+        shutil.copy(path_cellvit, path_dest_cellvit)
+        
         
             
 def copy_processed(
