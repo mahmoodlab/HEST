@@ -1092,16 +1092,16 @@ def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal:
         path_dest_cont = os.path.join(dest, 'tissue_seg', f'{id}_contours.geojson')
         shutil.copy(path_cont, path_dest_cont)
         
-    if cp_dapi_seg:
-        os.makedirs(os.path.join(dest, 'dapi_seg'), exist_ok=True)
-        path_dapi_seg = os.path.join(path, f'cell_dapi_seg.parquet')
-        path_dest_dapi_seg = os.path.join(dest, 'dapi_seg', f'{id}_cell_dapi_seg.parquet')
-        shutil.copy(path_dapi_seg, path_dest_dapi_seg)
+    # if cp_dapi_seg:
+    #     os.makedirs(os.path.join(dest, 'dapi_seg'), exist_ok=True)
+    #     path_dapi_seg = os.path.join(path, f'cell_dapi_seg.parquet')
+    #     path_dest_dapi_seg = os.path.join(dest, 'dapi_seg', f'{id}_cell_dapi_seg.parquet')
+    #     shutil.copy(path_dapi_seg, path_dest_dapi_seg)
         
-        os.makedirs(os.path.join(dest, 'dapi_seg'), exist_ok=True)
-        path_dapi_seg = os.path.join(path, f'nuc_dapi_seg.parquet')
-        path_dest_dapi_seg = os.path.join(dest, 'dapi_seg', f'{id}_nuc_dapi_seg.parquet')
-        shutil.copy(path_dapi_seg, path_dest_dapi_seg)
+    #     os.makedirs(os.path.join(dest, 'dapi_seg'), exist_ok=True)
+    #     path_dapi_seg = os.path.join(path, f'nuc_dapi_seg.parquet')
+    #     path_dest_dapi_seg = os.path.join(dest, 'dapi_seg', f'{id}_nuc_dapi_seg.parquet')
+    #     shutil.copy(path_dapi_seg, path_dest_dapi_seg)
         
         
             

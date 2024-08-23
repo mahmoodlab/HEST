@@ -4,7 +4,7 @@ import numpy as np
 from valis import slide_tools
 from valis.slide_io import PIXEL_UNIT, MetaData, SlideReader
 
-from hest.wsi import wsi_factory
+from hestcore.wsi import wsi_factory
 
 
 class SlideReaderAdapter(SlideReader):

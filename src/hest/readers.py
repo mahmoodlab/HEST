@@ -1,19 +1,16 @@
 from __future__ import annotations
 
-import gc
 import json
 import math
 import os
 import shutil
-import threading
-import traceback
 import zipfile
 from abc import abstractmethod
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 
 import numpy as np
 import pandas as pd
 from hestcore.segmentation import get_path_relative
+from loguru import logger
 
 from hest.autoalign import autoalign_visium
 from hest.custom_readers import colon_atlas_to_adata, heart_atlas_to_adata
@@ -26,8 +23,8 @@ from hest.utils import (SpotPacking, align_xenium_df, check_arg,
                         df_morph_um_to_pxl, find_biggest_img,
                         find_first_file_endswith,
                         find_pixel_size_from_spot_coords,
-                        get_path_from_meta_row, helper_mex,
-                        load_wsi, metric_file_do_dict, read_10x_seg,
+                        get_path_from_meta_row, helper_mex, load_wsi,
+                        metric_file_do_dict, read_10x_seg,
                         register_downscale_img, verify_paths)
 
 LOCAL = False
@@ -334,7 +331,7 @@ class VisiumReader(Reader):
             
         if 'COLON MAP: Colon Molecular Atlas Project' in path:
             custom_adata = colon_atlas_to_adata(path)
-            autoalign = 'always'
+            autoalign = 'auto'
             
         if raw_count_path is not None:
             custom_adata = raw_count_to_adata(raw_count_path)
@@ -1088,9 +1085,9 @@ def read_and_save(path: str, save_plots=True, pyramidal=True, bigtiff=False, plo
     print(f'Reading from {path}...')
     reader = reader_factory(path)
     st_object = reader.auto_read(path)
-    print('Loaded object:')
+    logger.info('Loaded object:')
     print(st_object)
-    print('Segment tissue')
+    logger.info('Segment tissue')
     if segment_tissue:
         st_object.segment_tissue()
     save_path = os.path.join(path, 'processed')
