@@ -1169,7 +1169,6 @@ def xenium_to_pseudo_visium(df: pd.DataFrame, pixel_size_he: float, pixel_size_m
     
     return adata
         
-        
 
 def _process_cellvit(row, dest, **cellvit_kwargs):
     path = get_path_from_meta_row(row)

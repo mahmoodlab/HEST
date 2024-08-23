@@ -82,7 +82,7 @@ def benchmark_grid(args, device, model_names, datasets: List[str], save_dir, cus
         for model_name in model_names:
             exp_save_dir = os.path.join(save_dir, dataset, model_name)
             os.makedirs(exp_save_dir, exist_ok=True)
-            enc_results = predict_folds(args, exp_save_dir, model_name, dataset, device, bench_data_root)
+            enc_results = predict_folds(args, exp_save_dir, model_name, dataset, device, bench_data_root, custom_encoder)
             
             enc_perfs.append({
                 'encoder_name': model_name,
@@ -146,7 +146,7 @@ def embed_tiles(
     device: str,
     precision
 ):
-    """ Extract embeddings from tiles using `encoder` and save to an h5 file """
+    """ Extract embeddings from tiles using `encoder` and save to an h5 file (TODO move to hestcore) """
     model.eval()
     for batch_idx, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
         batch = post_collate_fn(batch)
@@ -178,7 +178,9 @@ def get_bench_weights(weights_root, name):
     else:
         raise ValueError(f"Please specify the weights path to {name} in {local_ckpt_registry}")
 
-def predict_single_split(train_split, test_split, args, save_dir, dataset_name, model_name, device, bench_data_root):
+def predict_single_split(train_split, test_split, args, save_dir, dataset_name, model_name, device, bench_data_root, custom_encoder):
+    """ Predict a single split for a single model """
+
     if not os.path.isfile(train_split):
         train_split = os.path.join(bench_data_root, 'splits', train_split)
     if not os.path.isfile(test_split):
@@ -193,7 +195,10 @@ def predict_single_split(train_split, test_split, args, save_dir, dataset_name, 
     # Embed patches
     logger.info(f"Embedding tiles using {model_name} encoder")
     weights_path = get_bench_weights(args.weights_root, model_name)
-    encoder: InferenceEncoder = inf_encoder_factory(model_name)(weights_path)
+    if model_name == 'custom_encoder':
+        encoder = custom_encoder
+    else:
+        encoder: InferenceEncoder = inf_encoder_factory(model_name)(weights_path)
     precision = encoder.precision
     
     for split in [train_df, test_df]:
@@ -253,8 +258,10 @@ def predict_single_split(train_split, test_split, args, save_dir, dataset_name, 
     
     
     if args.dimreduce == 'PCA':
+        from sklearn.decomposition import PCA
+        
         print('perform PCA dim reduction')
-        pipe = Pipeline([('scaler', StandardScaler()), (f'{args.dimreduce}', eval(args.dimreduce)(n_components=args.latent_dim))])
+        pipe = Pipeline([('scaler', StandardScaler()), (f'PCA', PCA(n_components=args.latent_dim))])
         X_train, X_test = torch.Tensor(pipe.fit_transform(X_train)), torch.Tensor(pipe.transform(X_test))
     
     
@@ -307,7 +314,8 @@ def benchmark_encoder(encoder: torch.nn.Module, enc_transf, precision, config_pa
     benchmark(args, encoder=encoder, enc_transf=enc_transf, precision=precision)
         
         
-def predict_folds(args, exp_save_dir, model_name, dataset_name, device, bench_data_root):
+def predict_folds(args, exp_save_dir, model_name, dataset_name, device, bench_data_root, custom_encoder):
+    """ Predict all folds for a given model """
     split_dir = os.path.join(bench_data_root, 'splits')
     #if not os.path.exists(split_dir):
     #    raise FileNotFoundError(f"{split_dir} doesn't exist, make sure that you specified the ")
@@ -321,7 +329,7 @@ def predict_folds(args, exp_save_dir, model_name, dataset_name, device, bench_da
         test_split = os.path.join(split_dir, f'test_{i}.csv')
         kfold_save_dir = os.path.join(exp_save_dir, f'split{i}')
         os.makedirs(kfold_save_dir, exist_ok=True)
-        linprobe_results = predict_single_split(train_split, test_split, args, kfold_save_dir, dataset_name, model_name, device=device, bench_data_root=bench_data_root)
+        linprobe_results = predict_single_split(train_split, test_split, args, kfold_save_dir, dataset_name, model_name, device=device, bench_data_root=bench_data_root, custom_encoder=custom_encoder)
         libprobe_results_arr.append(linprobe_results)
         
         
@@ -346,7 +354,8 @@ def benchmark(args, encoder, enc_transf, precision):
             if key in args:
                 setattr(args, key, config[key])
                 
-    
+
+    logger.info(f'Saving models to {args.weights_root}...')
     snapshot_download(repo_id="MahmoodLab/hest-bench", repo_type='dataset', local_dir=args.weights_root, allow_patterns=['fm_v1/*'])
     
     logger.info(f'Fetch the bench data...')
@@ -375,7 +384,8 @@ def benchmark(args, encoder, enc_transf, precision):
     encoders = []
     weights_root = args.weights_root
     if encoder is not None:
-        custom_encoder = CustomInferenceEncoder(None, 'custom_encoder', encoder, enc_transf, precision) ('custom_encoder', weights_root=weights_root, transforms=enc_transf, model=encoder)
+        encoders.append('custom_encoder')
+        custom_encoder = CustomInferenceEncoder(None, 'custom_encoder', encoder, enc_transf, precision)
     else:
         custom_encoder = None
         
