@@ -983,11 +983,9 @@ class XeniumReader(Reader):
         load_transcripts=True,
         load_cells=True,
         load_img=True
-    ) -> XeniumHESTData:
-        
-        cur_dir = os.path.dirname(transcripts_path)   
+    ) -> XeniumHESTData: 
             
-        if load_wsi:
+        if load_img:
             print("Loading the WSI... (can be slow for large images)")
             img, pixel_size_embedded = load_wsi(img_path)
         else:
@@ -1020,7 +1018,7 @@ class XeniumReader(Reader):
             transcript_df, dict = self.__load_transcripts(transcripts_path, alignment_file_path, pixel_size_morph, dict)
                     
             print("Pooling xenium transcripts in pseudo-visium spots...")
-            adata = xenium_to_pseudo_visium(transcript_df, dict['pixel_size_um_estimated'], pixel_size_morph)
+            adata = pool_transcripts_xenium(transcript_df, dict['pixel_size_um_estimated'], pixel_size_morph)
             
             dict['spot_diameter'] = 55.
             dict['inter_spot_dist'] = 100.
@@ -1097,9 +1095,8 @@ def read_and_save(path: str, save_plots=True, pyramidal=True, bigtiff=False, plo
         st_object.save_spatial_plot(save_path)
     return st_object
         
-def xenium_to_pseudo_visium(df: pd.DataFrame, pixel_size_he: float, pixel_size_morph: float) -> sc.AnnData: # type: ignore
-    """Convert a xenium transcripts dataframe to a 10x Visium type spot grid with
-    55um diameter spots 100um apart
+def pool_transcripts_xenium(df: pd.DataFrame, pixel_size_he: float, pixel_size_morph: float, spot_size_um=100.) -> sc.AnnData: # type: ignore
+    """ Pool a xenium transcript dataframe by square spots of size 100um
 
     Args:
         df (pd.DataFrame): xenium transcipts dataframe containing columns:
@@ -1109,7 +1106,7 @@ def xenium_to_pseudo_visium(df: pd.DataFrame, pixel_size_he: float, pixel_size_m
         pixel_size_morph (float): pixel_size in um on the xenium morphology image
 
     Returns:
-        sc.AnnData: _description_
+        sc.AnnData: AnnData object, each obs represents the sum of transcripts within that bin, coordinates of the center of each bin (in pixel on WSI) are in adata.obsm['spatial']
     """
     import scanpy as sc
 
@@ -1122,8 +1119,8 @@ def xenium_to_pseudo_visium(df: pd.DataFrame, pixel_size_he: float, pixel_size_m
     x_max = df['x_location_pxl'].max()
     x_min = df['x_location_pxl'].min()
     
-    m = math.ceil((y_max - y_min) / (100 / pixel_size_he))
-    n = math.ceil((x_max - x_min) / (100 / pixel_size_he))
+    m = math.ceil((y_max - y_min) / (spot_size_um / pixel_size_he))
+    n = math.ceil((x_max - x_min) / (spot_size_um / pixel_size_he))
     
     features = df['feature_name'].unique()
     
@@ -1131,8 +1128,8 @@ def xenium_to_pseudo_visium(df: pd.DataFrame, pixel_size_he: float, pixel_size_m
     #spot_grid = pd.DataFrame(0, index=range(m * n), columns=features)
     
     # a is the row and b is the column in the pseudo visium grid
-    a = np.floor((df['x_location_pxl'] - x_min) / (100. / pixel_size_he)).astype(int)
-    b = np.floor((df['y_location_pxl'] - y_min) / (100. / pixel_size_he)).astype(int)
+    a = np.floor((df['x_location_pxl'] - x_min) / (spot_size_um / pixel_size_he)).astype(int)
+    b = np.floor((df['y_location_pxl'] - y_min) / (spot_size_um / pixel_size_he)).astype(int)
     
     c = b * n + a
     features = df['feature_name']
@@ -1151,8 +1148,8 @@ def xenium_to_pseudo_visium(df: pd.DataFrame, pixel_size_he: float, pixel_size_m
     expression_df = pd.DataFrame(spot_grid_np, columns=spot_grid.columns)
     
     coord_df = expression_df.copy()
-    coord_df['x'] = x_min + (coord_df.index % n) * (100. / pixel_size_he) + (50. / pixel_size_he)
-    coord_df['y'] = y_min + np.floor(coord_df.index / n) * (100. / pixel_size_he) + (50. / pixel_size_he)
+    coord_df['x'] = x_min + (coord_df.index % n) * (spot_size_um / pixel_size_he) + ((spot_size_um / 2) / pixel_size_he)
+    coord_df['y'] = y_min + np.floor(coord_df.index / n) * (spot_size_um / pixel_size_he) + ((spot_size_um / 2) / pixel_size_he)
     coord_df = coord_df[['x', 'y']]
     
     expression_df.index = [str(i) for i in expression_df.index]

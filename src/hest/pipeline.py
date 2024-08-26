@@ -374,9 +374,6 @@ def process_meta_df(meta_df, save_spatial_plots=True, pyramidal=True, save_img=T
             
             row_dict = row.to_dict()
 
-            if depr_seg:
-                st.save_tissue_seg_pkl('', 'TENX24')
-                st.save_tissue_seg_jpg('', 'TENX24')
             
             # remove all whitespace values
             row_dict = {k: (np.nan if isinstance(v, str) and not v.strip() else v) for k, v in row_dict.items()}
