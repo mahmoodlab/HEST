@@ -1,4 +1,4 @@
-transcript_id;Gene.name;Transcript.start..bp.;Transcript.end..bp.;Chromosome.scaffold.name
+transcript_id;Gene name;Transcript.start..bp.;Transcript.end..bp.;Chromosome.scaffold.name
 ENSMUST00000002198;Sf3a1;4160350;4182541;11
 ENSMUST00000002839;Ppp2r5d;46682991;46705002;17
 ENSMUST00000003450;Ddx23;98645134;98662889;15

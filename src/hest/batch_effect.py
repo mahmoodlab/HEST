@@ -14,6 +14,23 @@ from hest.HESTData import HESTData, load_hest, unify_gene_names
 from hest.utils import check_arg
 
 
+def filter_housekeeping(adata, species='human'):
+    adata = adata.copy()
+    check_arg(species.lower(), 'species', ['human', 'mouse'])
+    asset_dir = get_path_relative(__file__, '../../assets/')
+    
+    filename = 'MostStable_Human.csv' if species.lower() == 'human' else 'MostStable_Mouse.csv'
+    path_genes = os.path.join(asset_dir, filename)
+    
+    housekeep_genes = pd.read_csv(path_genes, sep=';')['Gene name'].values
+    missing_genes = np.setdiff1d(housekeep_genes, adata.var_names)
+    if len(missing_genes) > 0:
+        raise ValueError(f"The following housekeeping genes are missing in st.adata: {missing_genes}. Make sure {missing_genes} or one of its aliases is in st.adata.var_names")
+    common_genes = np.intersect1d(housekeep_genes, adata.var_names)
+    adata = adata[:, common_genes]
+    return adata
+
+
 def filter_stromal_housekeeping(
     st: HESTData,
     species: str, 
@@ -44,20 +61,9 @@ def filter_stromal_housekeeping(
             whole_tissue (bool, optional): whenever to keep the whole tissue or only stromal regions. Defaults to False.
     """
     
-    check_arg(species.lower(), 'species', ['human', 'mouse'])
-    
     adata = unify_gene_names(st.adata, 'human') if unify_genes else st.adata.copy()
     
-    asset_dir = get_path_relative(__file__, '../../assets/')
-    
-    filename = 'MostStable_Human.csv' if species.lower() == 'human' else 'MostStable_Mouse.csv'
-    path_genes = os.path.join(asset_dir, filename)
-    
-    housekeep_genes = pd.read_csv(path_genes, sep=';')['Gene name'].values
-    missing_genes = np.setdiff1d(housekeep_genes, adata.var_names)
-    if len(missing_genes) > 0:
-        raise ValueError(f"The following housekeeping genes are missing in st.adata: {missing_genes}. Make sure {missing_genes} or one of its aliases is in st.adata.var_names")
-    common_genes = np.intersect1d(housekeep_genes, adata.var_names)
+    adata = filter_housekeeping(adata, species)
     
     xy = adata.obsm['spatial']
     spot_centers = gpd.GeoDataFrame(geometry=gpd.points_from_xy(xy[:, 0], xy[:, 1]), index=adata.obs.index)
@@ -108,8 +114,6 @@ def filter_stromal_housekeeping(
         
         if len(adata) < min_stromal_spot:
             raise Exception(f"Detected less than {min_stromal_spot} stromal patches")
-    
-    adata = adata[:, common_genes]
 
     st.adata = adata
     
@@ -179,7 +183,13 @@ def get_silhouette_score(adata_list: List[sc.AnnData], labels, random_state=42) 
     s_score = silhouette_score(concat_arr, concat_labels, random_state=random_state)
     return s_score
 
-def plot_umap(adata_list: List[sc.AnnData], labels, plot_path, random_state=42, umap_kwargs={}, verbose=False):
+def plot_umap(
+    adata_list: List[sc.AnnData], 
+    labels, plot_path, 
+    random_state=42, 
+    umap_kwargs={}, 
+    verbose=False
+):
     """ Create UMAP plot (n=2) for `adata_list`, cluster memberships are passed in `labels` (len(labels) == len(adata_list)) """
     import matplotlib.pyplot as plt
     import umap
@@ -221,7 +231,7 @@ def plot_umap(adata_list: List[sc.AnnData], labels, plot_path, random_state=42, 
     plt.savefig(plot_path)
     
 
-def correct_batch_effect(adata_list, batch=None, method='combat'):
+def correct_batch_effect(adata_list, batch=None, method='combat', method_kwargs={}):
     import scanpy as sc
     from scanpy.pp import combat
     from scanpy.external.pp import mnn_correct, harmony_integrate
@@ -249,7 +259,7 @@ def correct_batch_effect(adata_list, batch=None, method='combat'):
         adata_list[i].obs['batch'] = batch_names[i]
     
     concat_adata = concat(adata_list)
-    batch_effect_method(concat_adata)
+    batch_effect_method(concat_adata, **method_kwargs)
     
     adata_list_res = []
     for batch_name in batch_names:
