@@ -24,6 +24,7 @@ def filter_stromal_housekeeping(
     plot_dir=None,
     name='',
     whole_tissue=False,
+    verbose=False
 ):
     """ Filter the st.adata of a HEST sample to only keep stromal regions and housekeeping genes
     
@@ -61,14 +62,16 @@ def filter_stromal_housekeeping(
     xy = adata.obsm['spatial']
     spot_centers = gpd.GeoDataFrame(geometry=gpd.points_from_xy(xy[:, 0], xy[:, 1]), index=adata.obs.index)
     
-    union_contours = st.tissue_contours.union_all()
+    simplified_contours = st.tissue_contours.simplify(10)
+    union_contours = simplified_contours.union_all()
     
     under_tissue_mask = spot_centers.geometry.within(union_contours)
     adata = adata[under_tissue_mask]
     spot_centers = spot_centers[under_tissue_mask]
     
     if not whole_tissue:
-        logger.info("Detecting stromal regions under tissue from CellViT segmentation...")
+        if verbose:
+            logger.info("Detecting stromal regions under tissue from CellViT segmentation...")
         cellvit_cells = st.get_shapes('cellvit', 'he').shapes
         cell_centers = cellvit_cells.copy()
         cell_centers['geometry'] = cellvit_cells.centroid
@@ -100,7 +103,8 @@ def filter_stromal_housekeeping(
         
         adata = adata[stromal_spots.index]
         
-        logger.info(f"Detected {len(adata)} stromal regions")
+        if verbose:
+            logger.info(f"Detected {len(adata)} stromal regions")
         
         if len(adata) < min_stromal_spot:
             raise Exception(f"Detected less than {min_stromal_spot} stromal patches")
@@ -114,7 +118,7 @@ def filter_stromal_housekeeping(
     return adata
 
 
-def filter_hest_stromal_housekeeping(meta_df: pd.DataFrame, hest_dir, whole_tissue=False, unify_genes=False) -> List[HESTData]:
+def filter_hest_stromal_housekeeping(meta_df: pd.DataFrame, hest_dir, whole_tissue=False, unify_genes=False, verbose=False) -> List[HESTData]:
     """ Filter the genes of HESTData samples, such that:
     - only stable housekeeping genes are kept (see assets/MostStable_{species}.csv).
     - only stromal regions are kept (determined from CellViT segmentation)
@@ -140,7 +144,8 @@ def filter_hest_stromal_housekeeping(meta_df: pd.DataFrame, hest_dir, whole_tiss
             species, 
             whole_tissue=whole_tissue,
             name=st.meta['id'],
-            unify_genes=unify_genes
+            unify_genes=unify_genes,
+            verbose=verbose
         )     
         adata_list.append(adata)
     return adata_list
@@ -174,7 +179,7 @@ def get_silhouette_score(adata_list: List[sc.AnnData], labels, random_state=42) 
     s_score = silhouette_score(concat_arr, concat_labels, random_state=random_state)
     return s_score
 
-def plot_umap(adata_list: List[sc.AnnData], labels, plot_path, random_state=42, umap_kwargs={}, verbose=True):
+def plot_umap(adata_list: List[sc.AnnData], labels, plot_path, random_state=42, umap_kwargs={}, verbose=False):
     """ Create UMAP plot (n=2) for `adata_list`, cluster memberships are passed in `labels` (len(labels) == len(adata_list)) """
     import matplotlib.pyplot as plt
     import umap
@@ -214,3 +219,43 @@ def plot_umap(adata_list: List[sc.AnnData], labels, plot_path, random_state=42, 
     plt.ylabel('UMAP2')
     plt.legend(scatterpoints=1, markerscale=4)
     plt.savefig(plot_path)
+    
+
+def correct_batch_effect(adata_list, batch=None, method='combat'):
+    import scanpy as sc
+    from scanpy.pp import combat
+    from scanpy.external.pp import mnn_correct, harmony_integrate
+    
+    from anndata import concat
+    
+    if batch is not None:
+        if len(batch) != len(adata_list):
+            raise ValueError('adata_list and batch must be the same length')
+        batch_names = batch
+    else:
+        batch_names = np.arange(len(adata_list))
+        
+        
+    check_arg(method, 'method', ['combat', 'mnn', 'harmony'])
+    if method == 'combat':
+        batch_effect_method = combat
+    elif method == 'mnn':
+        batch_effect_method = mnn_correct
+    elif method == 'harmony':
+        batch_effect_method = harmony_integrate
+        
+    
+    for i in range(len(adata_list)):
+        adata_list[i].obs['batch'] = batch_names[i]
+    
+    concat_adata = concat(adata_list)
+    batch_effect_method(concat_adata)
+    
+    adata_list_res = []
+    for batch_name in batch_names:
+        adata_list_res.append(concat_adata[concat_adata.obs['batch'] == batch_name])
+    
+    return adata_list_res
+    
+    
+    
