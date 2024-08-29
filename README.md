@@ -14,7 +14,7 @@ HEST-1k, HEST-Library, and HEST-Benchmark are released under the Attribution-Non
 
 #### What does this repository provide?
 - **HEST-1k:** Free access to <b>HEST-1K</b>, a dataset of 1,108 paired Spatial Transcriptomics samples with HE-stained whole-slide images 
-- **HEST-Library:** A series of helpers to assemble new ST samples (from ST, Visium, Visium HD, or Xenium) and work with HEST-1k
+- **HEST-Library:** A series of helpers to assemble new ST samples (ST, Visium, Visium HD, Xenium) and work with HEST-1k (ST analysis, batch effect viz and correction, etc.)
 - **HEST-Benchmark:** A new benchmark to assess the predictive performance of foundation models for histology in predicting gene expression from morphology 
 
 <br/>
@@ -72,6 +72,7 @@ The HEST-Library allows **assembling** new samples using HEST format and **inter
 
 - [2-Interacting-with-HEST-1k.ipynb](https://github.com/mahmoodlab/HEST/tree/main/tutorials/2-Interacting-with-HEST-1k.ipynb): Playing around with HEST data for loading patches. Includes a detailed description of each scanpy object. 
 - [3-Assembling-HEST-Data.ipynb](https://github.com/mahmoodlab/HEST/tree/main/tutorials/3-Assembling-HEST-Data.ipynb): Walkthrough to transform a Visum sample into HEST.
+- [5-Batch-effect-visualization.ipynb](https://github.com/mahmoodlab/HEST/blob/minor-release/tutorials/5-Batch-effect-visualization.ipynb): Batch effect visualization and correction (MNN, Harmony, ComBat).
 
 In addition, we provide complete [documentation](https://hest.readthedocs.io/en/latest/).
 

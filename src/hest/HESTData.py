@@ -11,6 +11,7 @@ import geopandas as gpd
 import numpy as np
 from hestcore.wsi import (WSI, CucimWarningSingleton, NumpyWSI,
                           contours_to_img, wsi_factory)
+from loguru import logger
 
 from hest.io.seg_readers import TissueContourReader
 from hest.LazyShapes import LazyShapes, convert_old_to_gpd, old_geojson_to_new
@@ -37,11 +38,9 @@ class HESTData:
     Object representing a Spatial Transcriptomics sample along with a full resolution H&E image and metadatas
     """
     
-    tissue_mask: np.ndarray = None
-    """tissue mask for that sample, will be None until segment_tissue() is called"""
-    
     shapes: List[LazyShapes] = []
-    
+    """ List of `LazyShapes`, i.e. cells, nuclei """
+
     
     def _verify_format(self, adata):
         assert 'spatial' in adata.obsm
@@ -123,17 +122,8 @@ class HESTData:
             key (str): feature to plot. Default: 'total_counts'
             pl_kwargs(Dict): arguments for sc.pl.spatial
         """
-        print("Plotting spatial plots...")
         
-        import scanpy as sc
-             
-        fig = sc.pl.spatial(self.adata, show=None, img_key="downscaled_fullres", color=[key], title=f"in_tissue spots", return_fig=True, **pl_kwargs)
-        
-        filename = f"{name}spatial_plots.png"
-        
-        # Save the figure
-        fig.savefig(os.path.join(save_path, filename), dpi=400)
-        print(f"H&E overlay spatial plots saved in {save_path}")
+        save_spatial_plot(self.adata, save_path, name, key, pl_kwargs)
     
     
     def load_wsi(self) -> None:
@@ -230,8 +220,7 @@ class HESTData:
             weights_dir (str, optional): directory containing the models, if None will be ../models relative to the src package of hestcore. None
                 
         Returns:
-            gpd.GeoDataFrame: a geodataframe of the tissue contours, contains a column `tissue_id` indicating to which tissue the contour belongs to and a 
-                `type` column to indicate if the shape corresponds to a `tissue` contour or a `hole`
+            gpd.GeoDataFrame: a geodataframe of the tissue contours, contains a column `tissue_id` indicating to which tissue the contour belongs to.
         """
         
         check_arg(method, 'method', ['deep', 'otsu'])
@@ -270,7 +259,7 @@ class HESTData:
 
     @deprecated
     def get_tissue_mask(self) -> np.ndarray:
-        """ Return existing tissue segmentation mask if it exists, raise an error if it doesn't exist
+        """ Deprecated. Return existing tissue segmentation mask if it exists, raise an error if it doesn't exist
 
         Returns:
             np.ndarray: an array with the same resolution as the WSI image, where 1 means tissue and 0 means background
@@ -358,6 +347,13 @@ class HESTData:
         if self.tissue_contours is None:
             raise Exception("No existing tissue mask for that sample, compute the tissue mask with self.segment_tissue()")        
     
+    
+    def get_shapes(self, name, coordinate_system):
+        for shape in self.shapes:
+            if shape.name == name and shape.coordinate_system == coordinate_system:
+                return shape
+        return None
+    
 
     @deprecated
     def get_tissue_contours(self) -> Dict[str, list]:
@@ -385,6 +381,7 @@ class HESTData:
     
     @property
     def tissue_contours(self) -> gpd.GeoDataFrame:
+        """ Geodataframe of tissue contours polygons also contains a tissue_id column """
         if self._tissue_contours is None:
             raise Exception("No tissue segmentation attached to this sample, segment tissue first by calling `segment_tissue()` for this object")
         return self._tissue_contours
@@ -880,57 +877,91 @@ def get_gene_db(species, cache_dir='.genes') -> pd.DataFrame:
     return annots
 
 
-def unify_gene_names(adata: sc.AnnData, species="hsapiens", cache_dir='.genes', drop=False) -> sc.AnnData: # type: ignore
+def _get_alias_to_parent_df():
+    df = pd.read_parquet('assets/gene_db.parquet')
+    df = df[['symbol', 'ensembl_gene_id', 'alias_symbol']].explode('alias_symbol')
+    none_mask = df['alias_symbol'].isna()
+    df.loc[none_mask, 'alias_symbol'] = df.loc[none_mask, 'symbol']
+    df.index = df['alias_symbol']
+    df = df[~df.index.duplicated('first')]
+    return df
+
+def unify_gene_names(adata: sc.AnnData, species="human", drop=False) -> sc.AnnData: # type: ignore
     """ unify gene names by resolving aliases
 
     Args:
         adata (sc.AnnData): scanpy anndata
-        species (str, optional): species, choose between ["hsapiens", "mmusculus"]. Defaults to "hsapiens".
-        cache_dir (str, optional): directory where biomart database will be cached. Defaults to '.genes'.
+        species (str, optional): species, choose between ["human", "mouse"]. Defaults to "human".
         drop (bool, optional): whenever to drop gene names having no alias. Defaults to False.
 
     Returns:
         sc.AnnData: anndata with unified gene names in var_names
     """
     adata = adata.copy()
-    import mygene
-        
-    mg = mygene.MyGeneInfo()
+    duplicated_genes_before = adata.var_names[adata.var_names.duplicated()]
 
-    gene_df = get_gene_db(species, cache_dir=cache_dir)
+    var_names = adata.var_names.values
+
+
+    alias_to_parent_df = _get_alias_to_parent_df()
+    parent_names = alias_to_parent_df['symbol'].values
     
+    var_names = np.unique(var_names)
     
-    std_genes = np.intersect1d(gene_df.index.dropna().values, adata.var_names.values)
-    unknown_genes = np.setdiff1d(adata.var_names.values, std_genes)
-    print(f'Found {len(unknown_genes)} unknown genes out of {len(adata.var_names)}')
+    # Conventional gene names in adata
+    adata_conv_genes = np.intersect1d(parent_names, var_names)
     
+    # Unconventional (alias) gene names in adata
+    unknown_genes = np.setdiff1d(var_names, adata_conv_genes, assume_unique=True)
+    logger.info(f'Found {len(unknown_genes)} unknown genes out of {len(var_names)}')
     
-    mg.set_caching('db')
+    parent_names = alias_to_parent_df.reindex(unknown_genes)
     
-    # look for aliases
-    res = mg.querymany(unknown_genes, scopes='alias', as_dataframe=True, fields='ensembl', verbose=False)
-    res = res.loc[~res.index.duplicated(keep='first')]
+    matched_parent = parent_names.dropna()
     
-    gene_df['gene_names'] = gene_df.index
-    res['query'] = res.index
+    # If the parent of the alias already exists, keep the alis
+    parent_already_exists = matched_parent['symbol'].isin(var_names)
+    matched_parent = matched_parent[~parent_already_exists]
     
-    # mygenes sometimes return a nan in ensembl.gene, the id then contained in 'ensembl'
-    mask_na = res['ensembl.gene'].isna() & res['ensembl'].apply(lambda x: isinstance(x, list) and len(x) > 0 and 'gene' in x[0])
-    res.loc[mask_na, 'ensembl.gene'] = res.loc[mask_na, 'ensembl'].apply(lambda x: x[0]['gene'])
+    remaining = parent_names.drop(matched_parent.index, axis=0)
     
-    # map alias name to its parent gene name
-    alias_map = res.merge(gene_df, right_on='ensembl_gene_id', left_on='ensembl.gene', how='inner').set_index('query')[['gene_names']]
+    logger.info(f"Mapped {len(matched_parent)} aliases to their parent name, {len(remaining)} remaining unknown genes")
     
-    remaining = np.setdiff1d(unknown_genes, alias_map.index.values)
+    mapped = pd.DataFrame(var_names.copy(), index=var_names)
+    mapped.loc[matched_parent.index, 0] = matched_parent['symbol'].values
     
-    print(f"Mapped {len(alias_map)} aliases to their parent name, {len(remaining)} remaining unknown genes")
+    mask = mapped.isna()[0].values
+    mapped.loc[mask, 0] = mapped.index[mask].values
+    adata.var_names =  mapped.loc[adata.var_names][0].values
     
-    mapped = pd.DataFrame(index=adata.var_names).merge(alias_map, left_index=True, right_index=True, how='left')
-    mask = mapped.isna()['gene_names']
-    mapped.loc[mask,'gene_names'] = mapped.index[mask].values
-    adata.var_names = mapped['gene_names'].values
+    duplicated_genes_after = adata.var_names[adata.var_names.duplicated()]
+    if len(duplicated_genes_after) > len(duplicated_genes_before):
+        logger.warning(f"duplicated genes increased from {len(duplicated_genes_before)} to {len(duplicated_genes_after)} after resolving aliases")
+        logger.warning('deduplicating... (can remove useful genes)')
+        mask = ~adata.var_names.duplicated(keep='first')
+        adata = adata[:, mask]
     
     if drop:
         adata = adata[:, ~remaining]
     
+    # TODO return dict map of renamed, and remaining
+    
     return adata
+
+def save_spatial_plot(adata: sc.AnnData, save_path: str, name: str='', key='total_counts', pl_kwargs={}):
+    """Save the spatial plot from that sc.AnnData
+
+    Args:
+        save_path (str): path to a directory where the spatial plot will be saved
+        name (str): save plot as {name}spatial_plots.png
+        key (str): feature to plot. Default: 'total_counts'
+        pl_kwargs(Dict): arguments for sc.pl.spatial
+    """
+    import scanpy as sc
+    
+    fig = sc.pl.spatial(adata, show=None, img_key="downscaled_fullres", color=[key], title=f"in_tissue spots", return_fig=True, **pl_kwargs)
+    
+    filename = f"{name}spatial_plots.png"
+    
+    # Save the figure
+    fig.savefig(os.path.join(save_path, filename), dpi=400)

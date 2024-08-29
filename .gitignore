@@ -10,6 +10,7 @@ Makefile
 *.parquet
 bench_data
 cell_seg
+filtered
 src/hest/bench/timm_ctp
 my_notebooks
 .gitattributes

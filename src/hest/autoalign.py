@@ -157,9 +157,9 @@ def _match_template_type(img, boxes):
     ratio = np.mean(edge_lengths) / np.mean(fid_widths)
 
 
-    template65 = SpotGridTemplate(get_path_relative(__file__, '../../spot_templates/template65.json'), '6.5mm', ratio=19./1477)
+    template65 = SpotGridTemplate(get_path_relative(__file__, '../../assets/spot_templates/template65.json'), '6.5mm', ratio=19./1477)
 
-    template11 = SpotGridTemplate(get_path_relative(__file__, '../../spot_templates/template11.json'), '11mm', ratio=20./2622)
+    template11 = SpotGridTemplate(get_path_relative(__file__, '../../assets/spot_templates/template11.json'), '11mm', ratio=20./2622)
 
     if ratio > 25:
         return template11, np.mean(edge_lengths)

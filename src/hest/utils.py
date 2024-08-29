@@ -6,6 +6,7 @@ import gzip
 import json
 import os
 import shutil
+import sys
 import warnings
 from enum import Enum
 from typing import List, Tuple, Union
@@ -14,16 +15,19 @@ import cv2
 import numpy as np
 import pandas as pd
 import tifffile
+from hestcore.wsi import WSI, NumpyWSI, WSIPatcher, wsi_factory
+from loguru import logger
 from packaging import version
 from PIL import Image
 from scipy import sparse
 from tqdm import tqdm
 
-from hestcore.wsi import WSI, NumpyWSI, WSIPatcher, wsi_factory
-
 Image.MAX_IMAGE_PIXELS = 93312000000
 ALIGNED_HE_FILENAME = 'aligned_fullres_HE.tif'
 
+
+logger.remove()
+logger.add(sys.stdout, format="<green>{time:HH:mm:ss}</green> | <level>{level}</level> | <level>{message}</level>")
 
 def deprecated(func):
     """This is a decorator which can be used to mark functions
@@ -1010,6 +1014,20 @@ def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal:
         path_cont = os.path.join(path, f'tissue_contours.geojson')
         path_dest_cont = os.path.join(dest, 'tissue_seg', f'{id}_contours.geojson')
         shutil.copy(path_cont, path_dest_cont)
+        
+        path_cont = os.path.join(path, f'tissue_seg_vis.jpg')
+        path_dest_cont = os.path.join(dest, 'tissue_seg', f'{id}_vis.jpg')
+        shutil.copy(path_cont, path_dest_cont)
+        
+    if cp_cellvit:
+        os.makedirs(os.path.join(dest, 'cellvit_seg'), exist_ok=True)
+        path_cellvit = os.path.join(path, f'cellvit_seg.zip')
+        path_dest_cellvit = os.path.join(dest, 'cellvit_seg', f'{id}_cellvit_seg.geojson.zip')
+        shutil.copy(path_cellvit, path_dest_cellvit)
+        
+        path_cellvit = os.path.join(path, f'{id}_cellvit_seg.parquet')
+        path_dest_cellvit = os.path.join(dest, 'cellvit_seg', f'{id}_cellvit_seg.parquet')
+        shutil.copy(path_cellvit, path_dest_cellvit)
         
         
             

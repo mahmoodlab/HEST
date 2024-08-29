@@ -1238,14 +1238,9 @@ def _process_cellvit(row, dest, **cellvit_kwargs):
     
     with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
         zipf.write(os.path.join(path, 'processed', f'cellvit_seg.geojson'), f'{id}_cellvit_seg.geojson')
-    os.makedirs(os.path.join(dest, 'cellvit_seg'), exist_ok=True)
-    path_cellvit = os.path.join(path, 'processed', f'cellvit_seg.zip')
-    id = row['id']
-    path_dest_cellvit = os.path.join(dest, 'cellvit_seg', f'{id}_cellvit_seg.zip')
-    shutil.copy(path_cellvit, path_dest_cellvit)
     
         
-def cellvit_meta_df(meta_df, dest, **cellvit_kwargs):
+def process_meta_df_cellvit(dest, meta_df, cellvit_kwargs={'gpu_ids': [0, 1], 'batch_size': 4}):
     for _, row in meta_df.iterrows():
         _process_cellvit(row, dest, **cellvit_kwargs)
     

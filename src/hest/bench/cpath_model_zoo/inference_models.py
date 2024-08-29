@@ -54,7 +54,7 @@ class CTransPathInferenceEncoder(InferenceEncoder):
     def _build(self, weights_path):
         from torch import nn
 
-        from .models.ctranspath.ctran import ctranspath
+        from .ctranspath.ctran import ctranspath
         
         model = ctranspath(img_size=224)
         model.head = nn.Identity()
@@ -123,7 +123,7 @@ class PlipInferenceEncoder(InferenceEncoder):
 
 class RemedisInferenceEncoder(InferenceEncoder):
     def _build(self, weights_path):
-        from .models.remedis.remedis_models import resnet152_remedis
+        from .remedis.remedis_models import resnet152_remedis
         ckpt_path = weights_path
         model = resnet152_remedis(ckpt_path=ckpt_path, pretrained=True)
         precision = torch.float32
