@@ -91,7 +91,7 @@ The HEST-Benchmark was designed to assess foundation models for pathology under 
 HEST-Benchmark was used to assess 10 publicly available models.
 Reported results are based on a Ridge Regression with PCA (256 factors). Ridge regression unfairly penalizes models with larger embedding dimensions. To ensure fair and objective comparison between models, we opted for PCA-reduction. 
 Model performance measured with Pearson correlation. Best is **bold**, second best
-is _underlined_. Models sorted by publication date. Additional results based on Random Forest and XGBoost regression are provided in the paper. 
+is _underlined_. Additional results based on Random Forest and XGBoost regression are provided in the paper. 
 
 | **Dataset**   |   **[Hoptimus0](https://github.com/bioptimus/releases/blob/main/models/h-optimus/v0/LICENSE.md)** |   **[Virchow2](https://huggingface.co/paige-ai/Virchow2)** |   **[Virchow](https://huggingface.co/paige-ai/Virchow)** |   **[UNI](https://huggingface.co/MahmoodLab/UNI)** |   **[Gigapath](https://huggingface.co/prov-gigapath/prov-gigapath)** |   **[CONCH](https://huggingface.co/MahmoodLab/CONCH)** |   **[Phikon](https://huggingface.co/owkin/phikon)** |   **[Remedis](https://arxiv.org/abs/2205.09723)** |   **[CTransPath](https://www.sciencedirect.com/science/article/abs/pii/S1361841522002043)** |   **[Resnet50](https://arxiv.org/abs/1512.03385)** |   **[Plip](https://www.nature.com/articles/s41591-023-02504-3)** |
 |:--------------|----------------:|---------------:|--------------:|-------------:|---------------:|---------------:|-------------:|--------------:|-----------------:|---------------:|-----------:|
