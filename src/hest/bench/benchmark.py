@@ -303,7 +303,7 @@ def merge_fold_results(arr):
 
 
 def benchmark_encoder(encoder: torch.nn.Module, enc_transf, precision, config_path: str) -> dict:
-    """ Launch benchmark programmatically """
+    """ Launch HEST-Benchmark """
     
     args = parser.parse_args()
 

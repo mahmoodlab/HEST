@@ -23,7 +23,7 @@
 ```
 
 ```{eval-rst}
-.. currentmodule:: hest.bench
+.. currentmodule:: hest.bench.benchmark
 
 .. autosummary::
     :toctree: generated
