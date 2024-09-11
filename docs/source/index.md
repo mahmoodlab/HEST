@@ -23,5 +23,4 @@ For the documentations of core WSI manipulations methods please visit the [hestc
     :link-type: url
 
     Concrete examples on how to use ``hest``.
-    ** Stay tuned !**
 ```

@@ -29,7 +29,7 @@ from hest.bench.st_dataset import load_adata
 from hest.bench.trainer import train_test_reg
 from hest.bench.utils.file_utils import (read_assets_from_h5, save_hdf5,
                                          save_pkl)
-from hest.bench.utils.utils import get_current_time, merge_dict
+from hest.bench.utils.utils import merge_dict, get_current_time
 
 # Generic training settings
 parser = argparse.ArgumentParser(description='Configurations for linear probing')
