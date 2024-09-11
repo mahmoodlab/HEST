@@ -19,11 +19,7 @@
 ## Run HEST-Benchmark
 
 ```{eval-rst}
-.. module:: hest
-```
-
-```{eval-rst}
-.. currentmodule:: hest.bench.benchmark
+.. module:: hest.bench
 
 .. autosummary::
     :toctree: generated
