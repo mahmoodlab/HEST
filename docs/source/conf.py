@@ -6,9 +6,6 @@
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-import sys
-import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '../../src'))
 import hest
 
 project = 'hest'
@@ -18,12 +15,27 @@ author = 'Paul Doucet'
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
-extensions = ['sphinx.ext.autodoc',
-              'sphinx.ext.napoleon',
-              'sphinx_rtd_theme',]
+extensions = [
+    'myst_nb',
+    'sphinx.ext.autodoc',
+    'sphinx.ext.napoleon',
+    'sphinx_rtd_theme',
+    'sphinx_design',
+    'sphinx.ext.autosummary',
+    'sphinx.ext.intersphinx'
+]
 
 templates_path = ['_templates']
 exclude_patterns = []
+
+
+intersphinx_mapping = {
+    "numpy": ("https://numpy.org/doc/stable/", None),
+    "anndata": ("https://anndata.readthedocs.io/en/stable/", None),
+    "geopandas": ("https://geopandas.org/en/stable/", None),
+    "shapely": ("https://shapely.readthedocs.io/en/stable", None),
+}
+intersphinx_disabled_reftypes = ["*"]
 
 
 
