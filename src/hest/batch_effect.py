@@ -231,7 +231,19 @@ def plot_umap(
     plt.savefig(plot_path)
     
 
-def correct_batch_effect(adata_list, batch=None, method='combat', method_kwargs={}):
+def correct_batch_effect(adata_list: List[sc.AnnData], batch=None, method='combat', method_kwargs={}) -> List[sc.AnnData]:
+    """ Apply a batch effect correction method to a list of Spatial Transcriptomics expressions
+
+    Args:
+        adata_list (List[sc.AnnData]): list of sc.AnnData containing gene expression
+        batch (List[int], optional): list of integers corresponding to the batch membership of each adata in adata_list. 
+        (i.e. [1, 1, 0] means that the first two adata are in the same batch and the third one is in a different batch). Defaults to None.
+        method (str, optional): bacth correction method, must be in ['combat', 'mnn', 'harmony']. Defaults to 'combat'.
+        method_kwargs (dict, optional): batch correction method kwargs. Defaults to {}.
+        
+    Returns:
+        List[sc.AnnData]: batch corrected list of gene expression
+    """
     import scanpy as sc
     from scanpy.pp import combat
     from scanpy.external.pp import mnn_correct, harmony_integrate

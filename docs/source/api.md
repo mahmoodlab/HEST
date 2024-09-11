@@ -16,6 +16,20 @@
     load_hest
 ```
 
+## Run HEST-Benchmark
+
+```{eval-rst}
+.. module:: hest
+```
+
+```{eval-rst}
+.. currentmodule:: hest.bench
+
+.. autosummary::
+    :toctree: generated
+   
+    benchmark_encoder
+```
 
 ## HESTData class
 
