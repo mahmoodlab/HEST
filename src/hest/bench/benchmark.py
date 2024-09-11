@@ -302,8 +302,18 @@ def merge_fold_results(arr):
     return {"pearson_corrs": aggr_results, "pearson_mean": np.mean(mean_per_split), "pearson_std": np.std(mean_per_split), "mean_per_split": mean_per_split}
 
 
-def benchmark_encoder(encoder: torch.nn.Module, enc_transf, precision, config_path: str) -> dict:
-    """ Launch HEST-Benchmark """
+def benchmark_encoder(encoder: torch.nn.Module, enc_transf, precision: torch.dtype, config_path: str) -> dict:
+    """ Launch HEST-Benchmark
+
+    Args:
+        encoder (torch.nn.Module): model to benchmark
+        enc_transf: evaluation transforms
+        precision (torch.dtype): inference precision
+        config_path (str): path to a hest-bench config file
+
+    Returns:
+        dict: results dictionary
+    """
     
     args = parser.parse_args()
 
