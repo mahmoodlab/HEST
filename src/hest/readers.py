@@ -39,6 +39,7 @@ if LOCAL:
 
 
 class Reader:
+    """ ST/H&E reader """
     
     def auto_read(self, path: str) -> HESTData:
         """
@@ -650,6 +651,7 @@ class VisiumReader(Reader):
     
     
 class STReader(Reader):
+    """ Legacy Spatial Transcriptomics reader """
     
     def auto_read(self, path) -> STHESTData:
         """

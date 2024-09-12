@@ -797,7 +797,7 @@ def create_splits(dest_dir, splits, K):
         
 
 def load_hest(hest_dir: str, id_list: List[str] = None) -> List[HESTData]:
-    """Read HESTData objects from a local directory
+    """Read HEST-1k samples from a local directory
 
     Args:
         hest_dir (str): hest directory containing folders: st, wsis, metadata, tissue_seg (optional)
