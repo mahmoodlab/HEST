@@ -853,8 +853,8 @@ def load_hest(hest_dir: str, id_list: List[str] = None) -> List[HESTData]:
                     warnings.warn(f'reading the cell segmentation as .geojson can be slow, download the .parquet cells for faster loading https://huggingface.co/datasets/MahmoodLab/hest')
                     warned = True
                     
-        xenium_cell_path = find_first_file_endswith(os.path.exists(os.path.join(hest_dir, 'xenium_seg'), f'{id}_xenium_cell_seg.parquet'))
-        xenium_nucleus_path = find_first_file_endswith(os.path.exists(os.path.join(hest_dir, 'xenium_seg'), f'{id}_xenium_nucleus_seg.parquet'))
+        xenium_cell_path = find_first_file_endswith(os.path.join(hest_dir, 'xenium_seg'), f'{id}_xenium_cell_seg.parquet')
+        xenium_nucleus_path = find_first_file_endswith(os.path.join(hest_dir, 'xenium_seg'), f'{id}_xenium_nucleus_seg.parquet')
                         
         st = read_HESTData(
             adata_path, 
