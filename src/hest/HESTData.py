@@ -651,7 +651,9 @@ def read_HESTData(
     mask_path_pkl: str = None, # Deprecated
     mask_path_jpg: str = None, # Deprecated
     cellvit_path: str = None,
-    tissue_contours_path: str = None
+    tissue_contours_path: str = None,
+    xenium_cell_path: str = None,
+    xenium_nucleus_path: str = None
 ) -> HESTData:
     """ Read a HEST sample from disk
 
@@ -663,8 +665,10 @@ def read_HESTData(
         metrics_path (str): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
         mask_path_pkl (str): *Deprecated* path to a .pkl file containing the tissue segmentation contours. Defaults to None.
         mask_path_jpg (str): *Deprecated* path to a .jog file containing the greyscale tissue segmentation mask. Defaults to None.
-        cellvit_path (str): path to a cell segmentation file in .geojson or .parquet. Defaults to None,
-        tissue_contours_path (str): path to a .geojson tissue contours file. Defaults to None
+        cellvit_path (str): path to a cell segmentation file in .geojson or .parquet. Defaults to None.
+        tissue_contours_path (str): path to a .geojson tissue contours file. Defaults to None.
+        xenium_cell_path (str): path to a .parquet xeniun cell segmentation file. Defaults to None.
+        xenium_nucleus_path (str): path to a .parquet xeniun nucleus segmentation file. Defaults to None.
 
 
     Returns:
@@ -705,6 +709,10 @@ def read_HESTData(
     shapes = []
     if cellvit_path is not None:
         shapes.append(LazyShapes(cellvit_path, 'cellvit', 'he'))
+    if xenium_cell_path is not None:
+        shapes.append(LazyShapes(xenium_cell_path, 'xenium_cell', 'he'))
+    if xenium_nucleus_path is not None:
+        shapes.append(LazyShapes(xenium_nucleus_path, 'xenium_nucleus', 'he'))
     
     adata = sc.read_h5ad(adata_path)
     with open(metrics_path) as metrics_f:     
@@ -844,6 +852,9 @@ def load_hest(hest_dir: str, id_list: List[str] = None) -> List[HESTData]:
                 if cellvit_path is not None and not warned:
                     warnings.warn(f'reading the cell segmentation as .geojson can be slow, download the .parquet cells for faster loading https://huggingface.co/datasets/MahmoodLab/hest')
                     warned = True
+                    
+        xenium_cell_path = find_first_file_endswith(os.path.exists(os.path.join(hest_dir, 'xenium_seg'), f'{id}_xenium_cell_seg.parquet'))
+        xenium_nucleus_path = find_first_file_endswith(os.path.exists(os.path.join(hest_dir, 'xenium_seg'), f'{id}_xenium_nucleus_seg.parquet'))
                         
         st = read_HESTData(
             adata_path, 
@@ -852,7 +863,10 @@ def load_hest(hest_dir: str, id_list: List[str] = None) -> List[HESTData]:
             masks_path_pkl, 
             masks_path_jpg, 
             cellvit_path=cellvit_path,
-            tissue_contours_path=tissue_contours_path)
+            tissue_contours_path=tissue_contours_path,
+            xenium_cell_path=xenium_cell_path,
+            xenium_nucleus_path=xenium_nucleus_path
+        )
         hestdata_list.append(st)
         
     warnings.resetwarnings()
