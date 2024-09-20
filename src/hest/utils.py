@@ -11,6 +11,7 @@ import sys
 import warnings
 from enum import Enum
 from typing import List, Tuple, Union
+import zipfile
 
 import cv2
 import numpy as np
@@ -221,6 +222,8 @@ def align_xenium_df(alignment_file_path: str, pixel_size_morph: float, df_transc
         alignment_matrix = np.linalg.inv(alignment_matrix)
     coords = np.column_stack((df_transcripts[x_key].values, df_transcripts[y_key].values, np.ones((len(df_transcripts),))))
     aligned = (alignment_matrix @ coords.T).T
+    df_transcripts['dapi_y'] = df_transcripts[y_key] / pixel_size_morph
+    df_transcripts['dapi_x'] = df_transcripts[x_key] / pixel_size_morph
     df_transcripts[y_key] = aligned[:,1]
     df_transcripts[x_key] = aligned[:,0]
     return df_transcripts, he_to_morph_matrix, alignment_matrix
@@ -1021,8 +1024,39 @@ def _sample_id_to_filename(id):
     return id + '.tif'            
 
             
-def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal: bool, cp_pixel_vis: bool, cp_adata: bool, cp_meta: bool, cp_cellvit, cp_patches, cp_contours, cp_dapi_seg):
+def _process_row(
+    dest, 
+    row, 
+    cp_downscaled: bool, 
+    cp_spatial: bool, 
+    cp_pyramidal: bool, 
+    cp_pixel_vis: bool, 
+    cp_adata: bool, 
+    cp_meta: bool, 
+    cp_cellvit, 
+    cp_patches, 
+    cp_contours, 
+    cp_dapi_seg,
+    cp_transcripts,
+    cp_he_seg
+):
     """ Internal use method, to transfer images to a `release` folder (`dest`)"""
+    
+    def cp_dst(dir_name, src_filename, dst_filename, compress=False):
+        os.makedirs(os.path.join(dest, dir_name), exist_ok=True)
+        path_src = os.path.join(path, src_filename)
+        path_dest = os.path.join(dest, dir_name, dst_filename)
+        
+        if compress:
+            zip_path_src = os.path.join(path, dst_filename + '.zip')
+            zip_hest_file(zip_path_src, path_src, dst_filename)
+            path_src = zip_path_src
+            path_dest += '.zip'
+            
+            
+        shutil.copy(path_src, path_dest)
+        
+    
     try:
         path = get_path_from_meta_row(row)
     except Exception:
@@ -1091,6 +1125,14 @@ def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal:
         path_cont = os.path.join(path, f'tissue_contours.geojson')
         path_dest_cont = os.path.join(dest, 'tissue_seg', f'{id}_contours.geojson')
         shutil.copy(path_cont, path_dest_cont)
+    if cp_transcripts:
+        cp_dst('transcripts', 'aligned_transcripts.parquet', f'{id}_transcripts.parquet')
+    if cp_he_seg:
+        cp_dst('xenium_seg', 'he_cell_seg.geojson', f'{id}_xenium_cell_seg.geojson', compress=True)
+        cp_dst('xenium_seg', 'he_nucleus_seg.geojson', f'{id}_xenium_nucleus_seg.geojson', compress=True)
+        
+        cp_dst('xenium_seg', 'he_cell_seg.parquet', f'{id}_xenium_cell_seg.parquet')
+        cp_dst('xenium_seg', 'he_nucleus_seg.parquet', f'{id}_xenium_nucleus_seg.parquet')
         
     # if cp_dapi_seg:
     #     os.makedirs(os.path.join(dest, 'dapi_seg'), exist_ok=True)
@@ -1118,12 +1160,14 @@ def copy_processed(
     cp_cellvit=True, 
     cp_patches=True, 
     cp_contours=True,
-    cp_dapi_seg=True
+    cp_dapi_seg=True,
+    cp_transcripts=False,
+    cp_he_seg=False
 ):
     """ Internal use method, to transfer images to a `release` folder (`dest`)"""
     with concurrent.futures.ThreadPoolExecutor(max_workers=n_job) as executor:
         # Submit tasks to the executor
-        future_results = [executor.submit(_process_row, dest, row, cp_downscaled, cp_spatial, cp_pyramidal, cp_pixel_vis, cp_adata, cp_meta, cp_cellvit, cp_patches, cp_contours, cp_dapi_seg) for _, row in meta_df.iterrows()]
+        future_results = [executor.submit(_process_row, dest, row, cp_downscaled, cp_spatial, cp_pyramidal, cp_pixel_vis, cp_adata, cp_meta, cp_cellvit, cp_patches, cp_contours, cp_dapi_seg, cp_transcripts, cp_he_seg) for _, row in meta_df.iterrows()]
 
         # Retrieve results as they complete
         for future in tqdm(concurrent.futures.as_completed(future_results), total=len(meta_df)):
@@ -1202,6 +1246,11 @@ def helper_mex(path: str, filename: str) -> None:
         f_out.close()
         f_in.close()
     
+    
+def zip_hest_file(archive_path, file_path, file_path_in_archive):
+    """ Zip file """
+    with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        zipf.write(file_path, file_path_in_archive)
 
 
 def load_wsi(img_path: str) -> Tuple[WSI, float]:

@@ -916,34 +916,19 @@ class XeniumReader(Reader):
         return df_transcripts, pixel_size_estimated, alignment_matrix
         
         
-    def __load_seg(self, path, type, alignment_file_path, pixel_size_morph):
-        raw_nuclei_df = pd.read_parquet(path)
-        
-        x_key = 'vertex_x'
-        y_key = 'vertex_y'
-        
-        aligned_nuclei_df, _, _ = align_xenium_df(alignment_file_path, pixel_size_morph, raw_nuclei_df, x_key=x_key, y_key=y_key)
-        
-        aligned_nuclei_df = df_morph_um_to_pxl(aligned_nuclei_df, x_key, y_key, pixel_size_morph)
-        
-        xenium_nuc_seg = read_10x_seg(aligned_nuclei_df, type)
-        
-        return xenium_nuc_seg
-        
-        
     def __load_transcripts(self, transcripts_path, alignment_file_path, pixel_size_morph, dict):
         df_transcripts = pd.read_parquet(transcripts_path)
         
         if alignment_file_path is not None:
             print('found an alignment file, aligning transcripts...')
             # change behavior, make _align_and_estimate create a new 'aligned' column instead of doing inplace
-            df_transcripts, pixel_size_estimated, _ = self._align_and_estimate_px_size(alignment_file_path, pixel_size_morph, df_transcripts)
+            df_transcripts, pixel_size_estimated, matrix = self._align_and_estimate_px_size(alignment_file_path, pixel_size_morph, df_transcripts)
             dict['pixel_size_um_estimated'] = pixel_size_estimated
         else:
+            matrix = np.eye(3, 3)
             dict['pixel_size_um_estimated'] = pixel_size_morph
             
-        transcript_df = df_transcripts
-        return transcript_df, dict
+        return df_transcripts, dict, matrix
     
     
     def __load_cells(self, feature_matrix_path, cells_path, alignment_file_path, pixel_size_morph, dict):
@@ -1002,20 +987,19 @@ class XeniumReader(Reader):
         shapes = []
         if cell_bound_path is not None:
             xenium_cell_seg = LazyShapes(cell_bound_path, 'tenx_cell', 'dapi', reader=XeniumParquetCellReader, reader_kwargs={'scaling': 1 / pixel_size_morph})
-            #self.__load_seg(cell_bound_path, 'Cell', alignment_file_path, pixel_size_morph)
                 
         if nucleus_bound_path is not None:
             xenium_nuc_seg = LazyShapes(nucleus_bound_path, 'tenx_nucleus', 'dapi', reader=XeniumParquetCellReader, reader_kwargs={'scaling': 1 / pixel_size_morph})
-        #    xenium_nuc_seg =  self.__load_seg(nucleus_bound_path, 'Nucleus', alignment_file_path, pixel_size_morph)
         
         shapes.append(xenium_cell_seg)
         shapes.append(xenium_nuc_seg)
         
         
+        dapi_he_affine = None
         if load_transcripts:
             print('Loading transcripts...')
             # TODO move transcrit dataframe to a dask array (can be more than 20GB)
-            transcript_df, dict = self.__load_transcripts(transcripts_path, alignment_file_path, pixel_size_morph, dict)
+            transcript_df, dict, dapi_he_affine = self.__load_transcripts(transcripts_path, alignment_file_path, pixel_size_morph, dict)
                     
             print("Pooling xenium transcripts in pseudo-visium spots...")
             adata = pool_transcripts_xenium(transcript_df, dict['pixel_size_um_estimated'], pixel_size_morph)
@@ -1051,7 +1035,8 @@ class XeniumReader(Reader):
             transcript_df=transcript_df,
             cell_adata=cell_adata,
             shapes=shapes,
-            dapi_path=dapi_path
+            dapi_path=dapi_path,
+            dapi_he_affine=dapi_he_affine
         )
         return st_object
     
@@ -1085,8 +1070,8 @@ def read_and_save(path: str, save_plots=True, pyramidal=True, bigtiff=False, plo
     st_object = reader.auto_read(path)
     logger.info('Loaded object:')
     print(st_object)
-    logger.info('Segment tissue')
     if segment_tissue:
+        logger.info('Segment tissue')
         st_object.segment_tissue()
     save_path = os.path.join(path, 'processed')
     os.makedirs(save_path, exist_ok=True)
@@ -1165,7 +1150,7 @@ def pool_transcripts_xenium(df: pd.DataFrame, pixel_size_he: float, pixel_size_m
     sc.pp.filter_cells(adata, min_counts=1)
     
     return adata
-        
+    
 
 def _process_cellvit(row, dest, **cellvit_kwargs):
     path = get_path_from_meta_row(row)

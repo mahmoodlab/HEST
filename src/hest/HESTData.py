@@ -604,7 +604,8 @@ class XeniumHESTData(HESTData):
         xenium_cell_seg: pd.DataFrame=None,
         cell_adata: sc.AnnData=None, # type: ignore
         transcript_df: pd.DataFrame=None,
-        dapi_path: str=None
+        dapi_path: str=None,
+        dapi_he_affine: np.ndarray=None
     ):
         """
         class representing a single ST profile + its associated WSI image
@@ -622,6 +623,7 @@ class XeniumHESTData(HESTData):
             cell_adata (sc.AnnData): ST cell data, each row in adata.obs is a cell, each row in obsm is the cell location on the H&E image in pixels
             transcript_df (pd.DataFrame): dataframe of transcripts, each row is a transcript, he_x and he_y is the transcript location on the H&E image in pixels
             dapi_path (str): path to a dapi focus image
+            dapi_he_affine (np.ndarray): affine transformation from dapi to he
         """
         super().__init__(adata=adata, img=img, pixel_size=pixel_size, meta=meta, tissue_seg=tissue_seg, tissue_contours=tissue_contours, shapes=shapes)
         
@@ -630,6 +632,7 @@ class XeniumHESTData(HESTData):
         self.cell_adata = cell_adata
         self.transcript_df = transcript_df
         self.dapi_path = dapi_path
+        self.dapi_he_affine = dapi_he_affine
         
         
     def save(self, path: str, save_img=True, pyramidal=True, bigtiff=False, plot_pxl_size=False):

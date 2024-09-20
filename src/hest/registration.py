@@ -23,8 +23,11 @@ def register_dapi_he(
     registrar_dir: str = "results/registration",
     name = None,
     max_non_rigid_registration_dim_px=10000,
-    micro_rigid=False,
-    affine=None
+    micro_rigid_registrar_cls=None,
+    micro_rigid_registrar_params={},
+    micro_reg=True,
+    check_for_reflections=False,
+    reuse_registrar=False
 ) -> str:
     """ Register the DAPI WSI to HE with a fine-grained ridig + non-rigid transform with Valis
 
@@ -60,50 +63,26 @@ def register_dapi_he(
         registrar_dir = os.path.join(registrar_dir, date)
     else:
         registrar_dir = os.path.join(registrar_dir, name)
-        
-    if affine is not None:
-        width, height = wsi_factory(dapi_path).get_dimensions()
-        corners = np.array([
-            [0, 0, 1],
-            [width, 0, 1],
-            [width, height, 1],
-            [0, height, 1]
-        ])
-        warped_corners = np.abs((np.linalg.inv(affine) @ corners.T).T)
-        left = round(warped_corners[:, 0].min())
-        right = round(warped_corners[:, 0].max())
-        top = round(warped_corners[:, 1].min())
-        bottom = round(warped_corners[:, 1].max())
-        s_width = right - left
-        s_height = bottom - top
-        
-        cropped_he = wsi_factory(he_path).read_region((left, top), 0, (s_width, s_height))
-        #cropped_he = wsi_factory(he_path).numpy()[top:bottom, left:right, :]
-        tiff_save(cropped_he, 'cropped.tif')
-        he_path = 'cropped.tif'
 
     img_list = [
         he_path,
         dapi_path
     ]
-
-    feature_detector_cls = feature_detectors.KazeFD
     
-    #affine_optimizer_cls = affine_optimizer.AffineOptimizerMattesMI
-    
-    micro_rigid_registrar_cls = MicroRigidRegistrar if micro_rigid else {}
+    registrar_path = os.path.join(registrar_dir, 'data/_registrar.pickle')
 
+    if reuse_registrar:
+        registration.init_jvm()
+        return registrar_path
     registrar = registration.Valis(
         '', 
         registrar_dir, 
         reference_img_f=he_path, 
         align_to_reference=True,
         img_list=img_list,
-        check_for_reflections=False,
-        #affine_optimizer_cls=affine_optimizer_cls,
-        #feature_detector_cls=feature_detector_cls,
-       # micro_rigid_registrar_params={'scale': 0.2},
-        #micro_rigid_registrar_cls=micro_rigid_registrar_cls
+        check_for_reflections=check_for_reflections,
+        micro_rigid_registrar_params=micro_rigid_registrar_params,
+        micro_rigid_registrar_cls=micro_rigid_registrar_cls
     )
 
     registrar.register(
@@ -114,18 +93,19 @@ def register_dapi_he(
         }
     )
 
-    # Perform micro-registration on higher resolution images, aligning *directly to* the reference image
-    registrar.register_micro(
-        max_non_rigid_registration_dim_px=max_non_rigid_registration_dim_px, 
-        align_to_reference=True, 
-        brightfield_processing_cls=preprocessing.HEDeconvolution,
-        reference_img_f=he_path
-    )
+    if micro_reg:
+        # Perform micro-registration on higher resolution images, aligning *directly to* the reference image
+        registrar.register_micro(
+            max_non_rigid_registration_dim_px=max_non_rigid_registration_dim_px, 
+            align_to_reference=True, 
+            brightfield_processing_cls=preprocessing.HEDeconvolution,
+            reference_img_f=he_path
+        )
     
-    return os.path.join(registrar_dir, 'data/_registrar.pickle')
+    return registrar_path
         
 
-def warp(
+def warp_gdf_valis(
     shapes: Union[gpd.GeoDataFrame, str],
     path_registrar: str,
     curr_slide_name: str,
@@ -164,12 +144,6 @@ def warp(
         idx = coords.index.get_level_values(0)
         points_gdf['_polygons'] = idx # keep track of polygons
         points = list(zip(points_gdf['x'], points_gdf['y']))
-        
-        #gdf['points'] = [list(polygon.exterior.coords) for polygon in gdf.geometry]
-        #gdf['_cell_id'] = np.arange(len(gdf))
-        #point_gdf = gdf.explode('points')
-        #point_gdf['points'] = point_gdf['points'].apply(lambda x: list(x))
-        #points = list(point_gdf['points'].values)
     else:
         points_gdf = gdf
         gdf['_polygons'] = np.arange(len(points_gdf))
@@ -179,14 +153,13 @@ def warp(
     logger.debug('warp with valis...')
     warped = morph.warp_xy_from_to(points, slide_obj)
     logger.debug('finished warping with valis')
-    #warped = slide_obj.warp_xy(points)
-    points_gdf['xy'] = list(zip(warped[:, 0], warped[:, 1]))
     
-    n_threads = get_n_threads(n_workers)
-    aggr_df = groupby_shape(points_gdf, '_polygons', n_threads=0)
+    if isinstance(shapes.iloc[0].geometry, Polygon):
+        points_gdf['xy'] = list(zip(warped[:, 0], warped[:, 1]))
+        aggr_df = groupby_shape(points_gdf, '_polygons', n_threads=0)
+        gdf.geometry = aggr_df.geometry
+    else:
+        gdf.geometry = gpd.points_from_xy(warped[:, 0], warped[:, 1])
     
-    gdf.geometry = aggr_df.geometry
-    
-    #registration.kill_jvm()
     return gdf
     
