@@ -474,7 +474,7 @@ class HESTData:
         from dask import delayed
         from dask.array import from_delayed
         from spatialdata import SpatialData
-        from spatialdata.models import Image2DModel, ShapesModel
+        from spatialdata.models import Image2DModel, ShapesModel, TableModel
 
         def read_hest_wsi(wsi: WSI):
             return wsi.numpy()
@@ -504,7 +504,11 @@ class HESTData:
             shape_names.append('tissue_contours')
         
         my_images = {"he": parsed_image}
-        my_tables = {"anndata": self.adata}
+        
+        self.adata.obs['instance'] = self.adata.obs.index
+        self.adata.obs['region'] = 'he'
+        parsed_adata = TableModel.parse(self.adata, instance_key='instance', region_key='region', region='he')
+        my_tables = {"anndata": parsed_adata}
         
         st = SpatialData(images=my_images, tables=my_tables, shapes=dict(zip(shape_names, shape_validated)))
 
