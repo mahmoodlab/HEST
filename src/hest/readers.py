@@ -864,6 +864,7 @@ class XeniumReader(Reader):
         for file in os.listdir(path):
             if file.endswith('imagealignment.csv'):
                 alignment_path = os.path.join(path, file)
+        alignment_path = read_kwargs.pop('alignment_path', alignment_path)
                 
         dapi_path = None
         dapi_path = find_first_file_endswith(
@@ -875,13 +876,17 @@ class XeniumReader(Reader):
                 os.path.join(path, 'morphology_focus'),
                 'morphology_focus_0000.ome.tif'
             )
+            
+        transcripts_path = os.path.join(path, 'transcripts.parquet')
+        if 'transcripts_filename' in read_kwargs:
+            transcripts_path = os.path.join(path, read_kwargs.pop('transcripts_filename'))
         
         st_object = self.read(
             img_path=os.path.join(path, img_filename),
             experiment_path=os.path.join(path, 'experiment.xenium'),
             alignment_file_path=alignment_path,
             feature_matrix_path=os.path.join(path, 'cell_feature_matrix.h5'), 
-            transcripts_path=os.path.join(path, 'transcripts.parquet'),
+            transcripts_path=transcripts_path,
             cells_path=os.path.join(path, 'cells.parquet'),
             nucleus_bound_path=os.path.join(path, 'nucleus_boundaries.parquet'),
             cell_bound_path=os.path.join(path, 'cell_boundaries.parquet'),
@@ -922,7 +927,13 @@ class XeniumReader(Reader):
         if alignment_file_path is not None:
             print('found an alignment file, aligning transcripts...')
             # change behavior, make _align_and_estimate create a new 'aligned' column instead of doing inplace
-            df_transcripts, pixel_size_estimated, matrix = self._align_and_estimate_px_size(alignment_file_path, pixel_size_morph, df_transcripts)
+            df_transcripts, pixel_size_estimated, matrix = self._align_and_estimate_px_size(
+                alignment_file_path, 
+                pixel_size_morph, 
+                df_transcripts,
+                x_key='x_location',
+                y_key='y_location'
+            )
             dict['pixel_size_um_estimated'] = pixel_size_estimated
         else:
             matrix = np.eye(3, 3)
@@ -967,7 +978,7 @@ class XeniumReader(Reader):
         dapi_path = None,
         load_transcripts=True,
         load_cells=True,
-        load_img=True
+        load_img=True,
     ) -> XeniumHESTData: 
             
         if load_img:
@@ -1002,7 +1013,12 @@ class XeniumReader(Reader):
             transcript_df, dict, dapi_he_affine = self.__load_transcripts(transcripts_path, alignment_file_path, pixel_size_morph, dict)
                     
             print("Pooling xenium transcripts in pseudo-visium spots...")
-            adata = pool_transcripts_xenium(transcript_df, dict['pixel_size_um_estimated'], pixel_size_morph)
+            adata = pool_transcripts_xenium(
+                transcript_df, 
+                dict['pixel_size_um_estimated'], 
+                key_x='he_x',
+                key_y='he_y'
+            )
             
             dict['spot_diameter'] = 55.
             dict['inter_spot_dist'] = 100.
@@ -1055,7 +1071,7 @@ def reader_factory(path: str) -> Reader:
     else:
         raise NotImplementedError('')
         
-def read_and_save(path: str, save_plots=True, pyramidal=True, bigtiff=False, plot_pxl_size=False, save_img=True, segment_tissue=False):
+def read_and_save(path: str, save_plots=True, pyramidal=True, bigtiff=False, plot_pxl_size=False, save_img=True, segment_tissue=False, read_kwargs={}):
     """For internal use, determine the appropriate reader based on the raw data path, and
     automatically process the data at that location, then the processed files are dumped
     to processed/
@@ -1067,7 +1083,7 @@ def read_and_save(path: str, save_plots=True, pyramidal=True, bigtiff=False, plo
     """
     print(f'Reading from {path}...')
     reader = reader_factory(path)
-    st_object = reader.auto_read(path)
+    st_object = reader.auto_read(path, **read_kwargs)
     logger.info('Loaded object:')
     print(st_object)
     if segment_tissue:
@@ -1080,29 +1096,34 @@ def read_and_save(path: str, save_plots=True, pyramidal=True, bigtiff=False, plo
         st_object.save_spatial_plot(save_path)
     return st_object
         
-def pool_transcripts_xenium(df: pd.DataFrame, pixel_size_he: float, pixel_size_morph: float, spot_size_um=100.) -> sc.AnnData: # type: ignore
+def pool_transcripts_xenium(
+    df: pd.DataFrame, 
+    pixel_size_he: float,
+    spot_size_um=100.,
+    key_x='he_x',
+    key_y='he_y',
+) -> sc.AnnData: # type: ignore
     """ Pool a xenium transcript dataframe by square spots of size 100um
 
     Args:
         df (pd.DataFrame): xenium transcipts dataframe containing columns:
-        - 'x_location' and 'y_location' indicating the um coordinates of each transcripts in the morphology image
+        - 'he_x' and 'he_y' indicating the pixel coordinates of each transcripts in the morphology image
         - 'feature_name' indicating the transcript name
         pixel_size_he (float): pixel_size in um on the he image
-        pixel_size_morph (float): pixel_size in um on the xenium morphology image
+        spot_size_um: pooling rectangle width in um
+        key_x: column name of pixel x coordinate of each transcript in `df`
+        key_y: column name of pixel y coordinate of each transcript in `df`
+        
 
     Returns:
         sc.AnnData: AnnData object, each obs represents the sum of transcripts within that bin, coordinates of the center of each bin (in pixel on WSI) are in adata.obsm['spatial']
     """
     import scanpy as sc
 
-    # convert transcripts position from um to pixel
-    df["x_location_pxl"] = df["x_location"] / pixel_size_morph
-    df["y_location_pxl"] = df["y_location"] / pixel_size_morph
-    
-    y_max = df['y_location_pxl'].max()
-    y_min = df['y_location_pxl'].min()
-    x_max = df['x_location_pxl'].max()
-    x_min = df['x_location_pxl'].min()
+    y_max = df[key_y].max()
+    y_min = df[key_y].min()
+    x_max = df[key_x].max()
+    x_min = df[key_x].min()
     
     m = math.ceil((y_max - y_min) / (spot_size_um / pixel_size_he))
     n = math.ceil((x_max - x_min) / (spot_size_um / pixel_size_he))
@@ -1110,11 +1131,10 @@ def pool_transcripts_xenium(df: pd.DataFrame, pixel_size_he: float, pixel_size_m
     features = df['feature_name'].unique()
     
     spot_grid = pd.DataFrame(0, index=range(m * n), columns=features)
-    #spot_grid = pd.DataFrame(0, index=range(m * n), columns=features)
     
     # a is the row and b is the column in the pseudo visium grid
-    a = np.floor((df['x_location_pxl'] - x_min) / (spot_size_um / pixel_size_he)).astype(int)
-    b = np.floor((df['y_location_pxl'] - y_min) / (spot_size_um / pixel_size_he)).astype(int)
+    a = np.floor((df[key_x] - x_min) / (spot_size_um / pixel_size_he)).astype(int)
+    b = np.floor((df[key_y] - y_min) / (spot_size_um / pixel_size_he)).astype(int)
     
     c = b * n + a
     features = df['feature_name']
@@ -1122,7 +1142,6 @@ def pool_transcripts_xenium(df: pd.DataFrame, pixel_size_he: float, pixel_size_m
     cols = spot_grid.columns.get_indexer(features)
     
     spot_grid_np = spot_grid.values.astype(np.uint16)
-    #spot_grid_np[c, cols] += 1
     np.add.at(spot_grid_np, (c, cols), 1)
     
     

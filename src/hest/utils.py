@@ -189,7 +189,16 @@ def df_morph_um_to_pxl(df, x_key, y_key, pixel_size_morph):
     return df
 
 
-def align_xenium_df(alignment_file_path: str, pixel_size_morph: float, df_transcripts, x_key, y_key, to_dapi=False):
+def align_xenium_df(
+    alignment_file_path: str, 
+    pixel_size_morph: float, 
+    df_transcripts, 
+    x_key, 
+    y_key, 
+    to_dapi=False, 
+    x_key_dist='he_x', 
+    y_key_dist='he_y'
+):
     """ Transform Xenium objects coordinates from the DAPI plane to the H&E plane
 
     Args:
@@ -224,8 +233,8 @@ def align_xenium_df(alignment_file_path: str, pixel_size_morph: float, df_transc
     aligned = (alignment_matrix @ coords.T).T
     df_transcripts['dapi_y'] = df_transcripts[y_key] / pixel_size_morph
     df_transcripts['dapi_x'] = df_transcripts[x_key] / pixel_size_morph
-    df_transcripts[y_key] = aligned[:,1]
-    df_transcripts[x_key] = aligned[:,0]
+    df_transcripts[y_key_dist] = aligned[:,1]
+    df_transcripts[x_key_dist] = aligned[:,0]
     return df_transcripts, he_to_morph_matrix, alignment_matrix
 
 

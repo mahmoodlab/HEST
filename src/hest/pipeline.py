@@ -359,7 +359,8 @@ def process_meta_df(
     preprocess=False, 
     no_except=False, 
     segment_tissue=True,
-    registration_kwargs={}
+    registration_kwargs={},
+    read_kwargs={}
 ):
     """Internal use method, process all the raw ST data in the meta_df"""
     for _, row in tqdm(meta_df.iterrows(), total=len(meta_df)):
@@ -368,7 +369,7 @@ def process_meta_df(
             
             path = get_path_from_meta_row(row)
             bigtiff = not(isinstance(row['bigtiff'], float) or row['bigtiff'] == 'FALSE')
-            st = read_and_save(path, save_plots=save_spatial_plots, pyramidal=pyramidal, bigtiff=bigtiff, plot_pxl_size=True, save_img=save_img, segment_tissue=segment_tissue)
+            st = read_and_save(path, save_plots=save_spatial_plots, pyramidal=pyramidal, bigtiff=bigtiff, plot_pxl_size=True, save_img=save_img, segment_tissue=segment_tissue, read_kwargs=read_kwargs)
             
             # TODO register segmentation for xenium and save
             if preprocess:
