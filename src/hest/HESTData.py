@@ -4,7 +4,7 @@ import json
 import os
 import shutil
 import warnings
-from typing import Dict, List, Union
+from typing import Dict, Iterator, List, Union
 
 import cv2
 import geopandas as gpd
@@ -657,7 +657,8 @@ def read_HESTData(
     cellvit_path: str = None,
     tissue_contours_path: str = None,
     xenium_cell_path: str = None,
-    xenium_nucleus_path: str = None
+    xenium_nucleus_path: str = None,
+    transcripts_path: str = None
 ) -> HESTData:
     """ Read a HEST sample from disk
 
@@ -672,7 +673,8 @@ def read_HESTData(
         cellvit_path (str): path to a cell segmentation file in .geojson or .parquet. Defaults to None.
         tissue_contours_path (str): path to a .geojson tissue contours file. Defaults to None.
         xenium_cell_path (str): path to a .parquet xeniun cell segmentation file. Defaults to None.
-        xenium_nucleus_path (str): path to a .parquet xeniun nucleus segmentation file. Defaults to None.
+        xenium_nucleus_path (str): path to a .parquet xenium nucleus segmentation file. Defaults to None.
+        transcripts_path (str): path to a .parquet transcript dataframe. Defaults to None.
 
 
     Returns:
@@ -717,11 +719,36 @@ def read_HESTData(
         shapes.append(LazyShapes(xenium_cell_path, 'xenium_cell', 'he'))
     if xenium_nucleus_path is not None:
         shapes.append(LazyShapes(xenium_nucleus_path, 'xenium_nucleus', 'he'))
+        
+    transcripts = None
+    if transcripts_path is not None:
+        transcripts = pd.read_parquet(transcripts_path)
     
     adata = sc.read_h5ad(adata_path)
     with open(metrics_path) as metrics_f:     
         metrics = json.load(metrics_f)
-    return HESTData(adata, img, metrics['pixel_size_um_estimated'], metrics, tissue_seg=tissue_seg, shapes=shapes, tissue_contours=tissue_contours)
+        
+    if transcripts is not None:
+        return XeniumHESTData(
+            adata, 
+            img, 
+            metrics['pixel_size_um_estimated'], 
+            metrics, 
+            tissue_seg=tissue_seg, 
+            shapes=shapes, 
+            tissue_contours=tissue_contours,
+            transcript_df=transcripts
+        )
+    else:  
+        return HESTData(
+            adata, 
+            img, 
+            metrics['pixel_size_um_estimated'], 
+            metrics, 
+            tissue_seg=tissue_seg, 
+            shapes=shapes, 
+            tissue_contours=tissue_contours
+        )
         
 
 def mask_and_patchify_bench(meta_df: pd.DataFrame, save_dir: str, use_mask=True, keep_largest=None):
@@ -808,6 +835,80 @@ def create_splits(dest_dir, splits, K):
         test_df.to_csv(os.path.join(dest_dir, f'test_{i}.csv'), index=False)
         
 
+class HESTIterator:
+    def __init__(self, hest_dir, id_list, **read_kwargs):
+        if id_list is not None and (not(isinstance(id_list, list) or isinstance(id_list, np.ndarray))):
+            raise ValueError('id_list must a list or a numpy array')
+        self.id_list = id_list
+        self.hest_dir = hest_dir
+        self.i = 0
+        self.read_kwargs = read_kwargs
+    
+    def __iter__(self):
+        self.i = 0
+        return self
+    
+    def __next__(self) -> HESTData:
+        if self.i < len(self):
+            x = _read_st(self.hest_dir, self.id_list[self.i], **self.read_kwargs)
+            self.i += 1
+            return x
+        else:
+            raise StopIteration
+    
+    def __len__(self):
+        return len(self.id_list)
+
+def iter_hest(hest_dir: str, id_list: List[str] = None, **read_kwargs) -> HESTIterator:
+    return HESTIterator(hest_dir, id_list, **read_kwargs)
+
+def _read_st(hest_dir, st_filename, load_transcripts=False):
+    id = st_filename.split('.')[0]
+    adata_path = os.path.join(hest_dir, 'st', f'{id}.h5ad')
+    img_path = os.path.join(hest_dir, 'wsis', f'{id}.tif')
+    meta_path = os.path.join(hest_dir, 'metadata', f'{id}.json')
+    
+    masks_path_pkl = None
+    masks_path_jpg = None
+    verify_paths([adata_path, img_path, meta_path], suffix='\nHave you downloaded the dataset? (https://huggingface.co/datasets/MahmoodLab/hest)')
+    
+    
+    if os.path.exists(os.path.join(hest_dir, 'tissue_seg')):
+        masks_path_pkl = find_first_file_endswith(os.path.join(hest_dir, 'tissue_seg'), f'{id}_mask.pkl')
+        masks_path_jpg = find_first_file_endswith(os.path.join(hest_dir, 'tissue_seg'), f'{id}_mask.jpg')
+        tissue_contours_path = find_first_file_endswith(os.path.join(hest_dir, 'tissue_seg'), f'{id}_contours.geojson')
+
+    cellvit_path = None
+    if os.path.exists(os.path.join(hest_dir, 'cellvit_seg')):
+        cellvit_path = find_first_file_endswith(os.path.join(hest_dir, 'cellvit_seg'), f'{id}_cellvit_seg.parquet')
+        if cellvit_path is None:
+            cellvit_path = find_first_file_endswith(os.path.join(hest_dir, 'cellvit_seg'), f'{id}_cellvit_seg.geojson')
+            if cellvit_path is not None:
+                warnings.warn(f'reading the cell segmentation as .geojson can be slow, download the .parquet cells for faster loading https://huggingface.co/datasets/MahmoodLab/hest')
+                
+    xenium_cell_path = find_first_file_endswith(os.path.join(hest_dir, 'xenium_seg'), f'{id}_xenium_cell_seg.parquet')
+    xenium_nucleus_path = find_first_file_endswith(os.path.join(hest_dir, 'xenium_seg'), f'{id}_xenium_nucleus_seg.parquet')
+                    
+    transcripts_path = None
+    if load_transcripts:
+        transcripts_path = find_first_file_endswith(os.path.join(hest_dir, 'transcripts'), f'{id}_transcripts.parquet')
+                    
+    st = read_HESTData(
+        adata_path, 
+        img_path, 
+        meta_path, 
+        masks_path_pkl, 
+        masks_path_jpg, 
+        cellvit_path=cellvit_path,
+        tissue_contours_path=tissue_contours_path,
+        xenium_cell_path=xenium_cell_path,
+        xenium_nucleus_path=xenium_nucleus_path,
+        transcripts_path=transcripts_path
+    )
+    return st
+    
+    
+
 def load_hest(hest_dir: str, id_list: List[str] = None) -> List[HESTData]:
     """Read HEST-1k samples from a local directory
 
@@ -833,44 +934,7 @@ def load_hest(hest_dir: str, id_list: List[str] = None) -> List[HESTData]:
         st_filenames = os.listdir(os.path.join(hest_dir, 'st'))
         
     for st_filename in tqdm(st_filenames):
-        id = st_filename.split('.')[0]
-        adata_path = os.path.join(hest_dir, 'st', f'{id}.h5ad')
-        img_path = os.path.join(hest_dir, 'wsis', f'{id}.tif')
-        meta_path = os.path.join(hest_dir, 'metadata', f'{id}.json')
-        
-        masks_path_pkl = None
-        masks_path_jpg = None
-        verify_paths([adata_path, img_path, meta_path], suffix='\nHave you downloaded the dataset? (https://huggingface.co/datasets/MahmoodLab/hest)')
-        
-        
-        if os.path.exists(os.path.join(hest_dir, 'tissue_seg')):
-            masks_path_pkl = find_first_file_endswith(os.path.join(hest_dir, 'tissue_seg'), f'{id}_mask.pkl')
-            masks_path_jpg = find_first_file_endswith(os.path.join(hest_dir, 'tissue_seg'), f'{id}_mask.jpg')
-            tissue_contours_path = find_first_file_endswith(os.path.join(hest_dir, 'tissue_seg'), f'{id}_contours.geojson')
-
-        cellvit_path = None
-        if os.path.exists(os.path.join(hest_dir, 'cellvit_seg')):
-            cellvit_path = find_first_file_endswith(os.path.join(hest_dir, 'cellvit_seg'), f'{id}_cellvit_seg.parquet')
-            if cellvit_path is None:
-                cellvit_path = find_first_file_endswith(os.path.join(hest_dir, 'cellvit_seg'), f'{id}_cellvit_seg.geojson')
-                if cellvit_path is not None and not warned:
-                    warnings.warn(f'reading the cell segmentation as .geojson can be slow, download the .parquet cells for faster loading https://huggingface.co/datasets/MahmoodLab/hest')
-                    warned = True
-                    
-        xenium_cell_path = find_first_file_endswith(os.path.join(hest_dir, 'xenium_seg'), f'{id}_xenium_cell_seg.parquet')
-        xenium_nucleus_path = find_first_file_endswith(os.path.join(hest_dir, 'xenium_seg'), f'{id}_xenium_nucleus_seg.parquet')
-                        
-        st = read_HESTData(
-            adata_path, 
-            img_path, 
-            meta_path, 
-            masks_path_pkl, 
-            masks_path_jpg, 
-            cellvit_path=cellvit_path,
-            tissue_contours_path=tissue_contours_path,
-            xenium_cell_path=xenium_cell_path,
-            xenium_nucleus_path=xenium_nucleus_path
-        )
+        st = _read_st(hest_dir, st_filename)
         hestdata_list.append(st)
         
     warnings.resetwarnings()
