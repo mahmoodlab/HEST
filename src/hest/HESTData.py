@@ -23,7 +23,7 @@ except Exception:
     print("Couldn't import openslide, verify that openslide is installed on your system, https://openslide.org/download/")
 import pandas as pd
 from hestcore.segmentation import (apply_otsu_thresholding, mask_to_gdf,
-                                   save_pkl, segment_tissue_deep)
+                                   save_pkl, segment_tissue_deep, get_path_relative)
 from PIL import Image
 from shapely import Point
 from tqdm import tqdm
@@ -965,6 +965,14 @@ def get_gene_db(species, cache_dir='.genes') -> pd.DataFrame:
 
 
 def _get_alias_to_parent_df():
+    
+    path_folder_assets = get_path_relative(__file__, '../../assets')
+    path_gene_db = os.path.join(path_folder_assets, 'human_gene_db.parquet')
+    
+    if not os.path.exists(path_gene_db):
+        from huggingface_hub import snapshot_download
+        snapshot_download(repo_id="MahmoodLab/hest", repo_type='dataset', local_dir=path_folder_assets, allow_patterns=['human_gene_db.parquet'])
+    
     df = pd.read_parquet('assets/gene_db.parquet')
     df = df[['symbol', 'ensembl_gene_id', 'alias_symbol']].explode('alias_symbol')
     none_mask = df['alias_symbol'].isna()
