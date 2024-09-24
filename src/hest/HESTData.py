@@ -886,8 +886,13 @@ def _read_st(hest_dir, st_filename, load_transcripts=False):
             if cellvit_path is not None:
                 warnings.warn(f'reading the cell segmentation as .geojson can be slow, download the .parquet cells for faster loading https://huggingface.co/datasets/MahmoodLab/hest')
                 
-    xenium_cell_path = find_first_file_endswith(os.path.join(hest_dir, 'xenium_seg'), f'{id}_xenium_cell_seg.parquet')
-    xenium_nucleus_path = find_first_file_endswith(os.path.join(hest_dir, 'xenium_seg'), f'{id}_xenium_nucleus_seg.parquet')
+    if os.path.exists(os.path.join(hest_dir, 'xenium_seg')):
+        xenium_cell_path = find_first_file_endswith(os.path.join(hest_dir, 'xenium_seg'), f'{id}_xenium_cell_seg.parquet')
+        xenium_nucleus_path = find_first_file_endswith(os.path.join(hest_dir, 'xenium_seg'), f'{id}_xenium_nucleus_seg.parquet')
+    else:
+        xenium_cell_path = None
+        xenium_nucleus_path = None
+        
                     
     transcripts_path = None
     if load_transcripts:
