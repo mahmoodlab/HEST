@@ -586,7 +586,7 @@ class VisiumReader(Reader):
 
     def _find_visium_slide_version(self, alignment_df: str, adata: sc.AnnData) -> str: # type: ignore
         highest_nb_match = -1
-        barcode_dir = get_path_relative(__file__, '../../barcode_coords/')
+        barcode_dir = get_path_relative(__file__, '../../assets/barcode_coords/')
         for barcode_path in os.listdir(barcode_dir):
             spatial_aligned = self._find_alignment_barcodes(alignment_df, os.path.join(barcode_dir, barcode_path))
             nb_match = len(pd.merge(spatial_aligned, adata.obs, left_index=True, right_index=True))

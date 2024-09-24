@@ -21,15 +21,17 @@ HEST-1k, HEST-Library, and HEST-Benchmark are released under the Attribution-Non
 
 ## Updates
 
+- **23.09.24**: 121 new samples released, including 27 Xenium and 7 Visium HD! We also make the aligned Xenium transcripts + the aligned DAPI segmented cells/nuclei public.
+
 - **30.08.24**: HEST-Benchmark results updated. Includes H-Optimus-0, Virchow 2, Virchow, and GigaPath. New COAD task based on 4 Xenium samples. HuggingFace bench data have been updated. 
 
 - **28.08.24**: New set of helpers for batch effect visualization and correction. Tutorial [here](https://github.com/mahmoodlab/HEST/blob/main/tutorials/5-Batch-effect-visualization.ipynb). 
 
-## Download/Query HEST-1k (743GB)
+## Download/Query HEST-1k (>1TB)
 
 To download/query HEST-1k, follow the tutorial [1-Downloading-HEST-1k.ipynb](https://github.com/mahmoodlab/HEST/blob/main/tutorials/1-Downloading-HEST-1k.ipynb) or follow instructions on [Hugging Face](https://huggingface.co/datasets/MahmoodLab/hest).
 
-**NOTE:** The entire dataset weighs 743 GB but you can easily download a subset by querying per id, organ, species...
+**NOTE:** The entire dataset weighs more than 1TB but you can easily download a subset by querying per id, organ, species...
 
 
 ## HEST-Library installation
@@ -63,13 +65,10 @@ pip install \
 You can then simply view the dataset as, 
 
 ```python
-from hest import load_hest
+from hest import iter_hest
 
-print('Lazy loading of hest...')
-hest_data = load_hest('hest_data') # location of the data
-print('loaded hest')
-for d in hest_data:
-    print(d)
+for st in iter_hest('../hest_data', id_list=['TENX95']):
+    print(st)
 ```
 
 ## HEST-Library API
