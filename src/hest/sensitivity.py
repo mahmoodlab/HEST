@@ -1,5 +1,7 @@
 import numpy as np
+import scanpy as sc
 from scipy.sparse import issparse
+from typing import Union
 
 def find_common_genes(adata_list):
     """ Find the common genes between multiple AnnData objects
@@ -23,52 +25,40 @@ def find_common_genes(adata_list):
                     if not any(keyword in gene for keyword in control_keywords)]
     return common_genes
 
-def filter_adata(adata, gene_list):
-    """ Filter an AnnData object by the variables listed in gene_list
-
-        Args:
-            adata (sc.AnnData): AnnData object to filter
-            gene_list (list): list of variable names
-
-        Returns:
-            adata_filtered (sc.AnnData): filtered AnnData object
+def filter_adata_by_gene_names(adata: sc.AnnData, gene_list: list) -> sc.AnnData:
     """
-    gene_indices = [i for i, gene in enumerate(adata.var_names)
-                           if gene in gene_list]
-    adata_filtered = adata[:, gene_indices]
+    Filter an AnnData object by the variables listed in gene_list.
+
+    Args:
+        adata (sc.AnnData): AnnData object to filter
+        gene_list (list): List of variable names.
+
+    Returns:
+        sc.AnnData: Filtered AnnData object.
+    """
+    gene_mask = np.isin(adata.var_names, gene_list)
+    adata_filtered = adata[:, gene_mask]
     return adata_filtered
 
-def compute_median_ignore_zeros(data, axis=0):
-    """ Compute the median of non-zero elements in a matrix along a given axis
+def compute_median_ignore_zeros(data: Union[np.ndarray, "scipy.sparse.spmatrix"], axis: int = 0) -> np.ndarray:
+    """ 
+    Compute the median of non-zero elements in a matrix along a given axis.
 
-        Args:
-            data (np.ndarray): input matrix
-            axis (int): axis along which to compute the median
+    Args:
+        data (Union[np.ndarray, scipy.sparse.spmatrix]): Input matrix (dense or sparse)
+        axis (int): Axis along which to compute the median. Must be 0 or 1.
 
-        Returns:
-            medians (np.ndarray): median of non-zero elements along the given axis
+    Returns:
+        np.ndarray: Median of non-zero elements along the given axis.
     """
     if issparse(data):
         data = np.nan_to_num(data.toarray(), nan=0.0, posinf=0.0, neginf=0.0)
-    medians = []
-    mask = data != 0
-    if axis == 0:
-        for col in range(data.shape[1]):
-            non_zero_elements = data[mask[:, col], col]
-            if len(non_zero_elements) > 0:
-                medians.append(np.median(non_zero_elements))
-            else:
-                medians.append(0)
-    elif axis == 1:
-        for row in range(data.shape[0]):
-            non_zero_elements = data[row, mask[row, :]]
-            if len(non_zero_elements) > 0:
-                medians.append(np.median(non_zero_elements))
-            else:
-                medians.append(0)
-    else:
-        raise ValueError('Axis must be 0 or 1')
-    return np.array(medians)
+
+    def median_non_zero(arr: np.ndarray) -> float:
+        non_zero_elements = arr[arr != 0]
+        return np.median(non_zero_elements) if non_zero_elements.size > 0 else 0
+
+    return np.apply_along_axis(median_non_zero, axis, data)
 
 def paired_sensitivity(adata1, adata2):
     """ Compute the per-gene sensitivity ratio between two AnnData objects
