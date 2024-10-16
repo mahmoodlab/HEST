@@ -1,21 +1,23 @@
 import numpy as np
 import scanpy as sc
+import pandas as pd
 from scipy.sparse import issparse
 from typing import Union
 
 def find_common_genes(adata_list):
-    """ Find the common genes between multiple AnnData objects
+    """ Find the common target genes across multiple AnnData objects, excluding controls.
+        ASSUMPTION: Controls are labeled with specific keywords.
 
         Args:
             adata_list (list): list of AnnData objects
         
         Returns:
-            common_genes (list): list of common genes names
+            common_genes (list): list of common gene names present in all AnnData objects
     """
     common_genes = adata_list[0].var_names
     for adata in adata_list[1:]:
         common_genes = np.intersect1d(common_genes, adata.var_names)
-    # Remove negative control genes
+    # Remove negative controls
     control_keywords = ['NegControlCodeword', 
                         'NegControlProbe', 
                         'Intergenic', 
@@ -27,16 +29,18 @@ def find_common_genes(adata_list):
 
 def filter_adata_by_gene_names(adata: sc.AnnData, gene_list: list) -> sc.AnnData:
     """
-    Filter an AnnData object by the variables listed in gene_list.
+    Filter an AnnData object to retain only the genes specified in the provided gene list.
 
     Args:
         adata (sc.AnnData): AnnData object to filter
-        gene_list (list): List of variable names.
+        gene_list (list): list of gene names (or variable names) to retain
 
     Returns:
-        sc.AnnData: Filtered AnnData object.
+        sc.AnnData: filtered AnnData object containing only the genes specified. 
     """
     gene_mask = np.isin(adata.var_names, gene_list)
+    if not np.any(gene_mask):
+        raise ValueError("None of the genes in the gene_list are present in the AnnData object.")
     adata_filtered = adata[:, gene_mask]
     return adata_filtered
 
@@ -61,14 +65,16 @@ def compute_median_ignore_zeros(data: Union[np.ndarray, "scipy.sparse.spmatrix"]
     return np.apply_along_axis(median_non_zero, axis, data)
 
 def paired_sensitivity(adata1, adata2):
-    """ Compute the per-gene sensitivity ratio between two AnnData objects
+    """ Compute the per-gene relative sensitivity between two samples. 
+        Computes the ratio of detection sensitivity between two AnnData objects 
+        for each gene and the overall ratio of the mean sensitivities across all genes.
 
         Args:
             adata1, adata2 (sc.AnnData): scanpy anndata objects
         
         Returns:
-            per_gene_ratio (np.ndarray): sensitivity ratio for each gene
-            per_sample_ratio (float): ratio of average sensitivity across all genes
+            per_gene_ratio (np.ndarray): sensitivity ratio for each gene between the two samples
+            per_sample_ratio (float): ratio of the average sensitivity across all genes between the two samples
     """
 
     if adata1.shape[1] != adata2.shape[1]:
@@ -81,136 +87,141 @@ def paired_sensitivity(adata1, adata2):
 
     return per_gene_ratio, per_sample_ratio
 
-def extract_panel_info(adata):
-    """ Extract panel information from an AnnData object
-        Assumption: All variables targeted by the panel have been detected at least once
+def get_var_names(data):
+    """ Extract the variable names (e.g., gene names, controls) from a sample.
 
         Args:
-            adata (sc.AnnData): scanpy anndata object
+        data (sc.AnnData or pd.DataFrame): can be one of the following:
+            - AnnData object containing gene expression matrix
+            - DataFrame containing raw transcript data
         
         Returns:
-            panel_info (dict): dictionary with the number of genes and controls in the panel
+        var_names (list): list of gene names and controls codewords
     """
+    if isinstance(data, sc.AnnData):
+        return data.var_names.tolist()
+    elif isinstance(data, pd.DataFrame):
+        if 'feature_name' not in data.columns:
+            raise ValueError("The dataframe must contain a 'feature_name' column")
+        return data['feature_name'].unique().tolist()
+    else:
+        raise TypeError("Input must be either an AnnData object or a DataFrame")
+
+def get_num_genes(data):
+    """ Calculate the number of target genes from the data by excluding controls.
+        ASSUMPTION: all variables targeted by the panel have been detected at least once
+        and controls are labeled with specific keywords.
+
+        Args:
+        data (sc.AnnData or pd.DataFrame): can be one of the following:
+            - AnnData object containing gene expression matrix
+            - DataFrame containing raw transcript data
+        
+        Returns:
+        num_genes (int): number of target genes
+    """
+    var_names = get_var_names(data)
     control_keywords = ['Intergenic', 
                         'UnassignedCodeword', 
                         'NegControlCodeword', 
                         'NegControlProbe', 
                         'DeprecatedCodeword']
-    panel_info = {part: sum(part in var_name for var_name in adata.var_names) for part in control_keywords}
-    control_variables = sum(panel_info.values())
-    target_genes_count = len(adata.var_names) - control_variables
-    panel_info['TargetGenes'] = target_genes_count
-    return panel_info
+    num_genes = len([var_name for var_name in var_names if not any(keyword in var_name for keyword in control_keywords)])
+    return num_genes
 
-def compute_negative_control_codeword_rate(adata):
-    """ Compute the negative control codeword rate from an AnnData object
-        adjusted by the fraction of codewords that are negative control codewords in the panel
+def get_num_controls(data):
+    """ Calculate the number of control codewords from the data.
+        Counts the occurrences of each type of control variable based on predefined keywords.
+        ASSUMPTION: all variables targeted by the panel have been detected at least once
+        and controls are labeled with specific keywords.
 
         Args:
-            adata (sc.AnnData): scanpy anndata object
+        data (sc.AnnData or pd.DataFrame): can be one of the following:
+            - AnnData object containing gene expression matrix
+            - DataFrame containing raw transcript data
         
         Returns:
-            nccr (float): negative control codeword rate
+        num_controls (dict): number of each type of control codeword
     """
+    var_names = get_var_names(data)
+    control_keywords = ['Intergenic', 
+                        'UnassignedCodeword', 
+                        'NegControlCodeword', 
+                        'NegControlProbe', 
+                        'DeprecatedCodeword']
+    num_controls = {part: sum(part in var_name for var_name in var_names) for part in control_keywords}
+    return num_controls
 
-    ncc_matrix = adata[:, adata.var_names.str.contains('NegControlCodeword')].X
-    ncc_counts = ncc_matrix.sum()
-    total_counts = adata.X.sum()
+def compute_negative_control_codeword_rate(data):
+    """ Compute the Negative Control Codeword Rate (NCCR) for a given sample. 
+        NCCR is the false positive rate of the decoding algorithm adjusted to the proportion
+        of negative control codewords in the panel.
+
+        Args:
+        data (sc.AnnData or pd.DataFrame): can be one of the following:
+            - AnnData object containing gene expression matrix
+            - DataFrame containing raw transcript data
+        
+        Returns:
+        nccr (float): Negative Control Codeword Rate
+    """
+    if isinstance(data, sc.AnnData):
+        ncc_counts = data[:, data.var_names.str.contains('NegControlCodeword')].X.sum()
+        total_counts = data.X.sum()
+        
+    elif isinstance(data, pd.DataFrame):
+        if 'feature_name' not in data.columns:
+            raise ValueError("Dataframe must contain a 'feature_name' column")
+        ncc_counts = data[data['feature_name'].str.contains('NegControlCodeword')].shape[0]
+        total_counts = data.shape[0]
+    else:
+        raise TypeError("Input must be either an AnnData object or a DataFrame")
+    
     fraction_ncc_counts = ncc_counts / total_counts if total_counts > 0 else 0
+    
+    num_genes = get_num_genes(data)
+    num_controls = get_num_controls(data)
 
-    panel_info = extract_panel_info(adata)
-    ncc_var = panel_info.get('NegControlCodeword', 0)
-    total_var = len(set(adata.var_names))
+    ncc_var = num_controls.get('NegControlCodeword', 0)
+    total_var = sum(num_controls.values()) + num_genes
     fraction_ncc_var = ncc_var / total_var if total_var > 0 else 0
 
     nccr = fraction_ncc_counts / fraction_ncc_var if fraction_ncc_var > 0 else 0
     return nccr
 
-def compute_negative_control_probe_rate(adata):
-    """ Compute the negative control probe rate from an AnnData object
-        adjusted by the fraction of probes that are negative control probes in the panel
+def compute_negative_control_probe_rate(data):
+    """ Compute the Negative Control Probe Rate (NCCR) for a given sample. 
+        NCPR is the false positive rate of the transcript signal adjusted to the proportion
+        of probes that are negative control probes in the panel.
 
         Args:
-            adata (sc.AnnData): scanpy anndata object
+        data (sc.AnnData or pd.DataFrame): can be one of the following:
+            - AnnData object containing gene expression matrix
+            - DataFrame containing raw transcript data
         
         Returns:
-            ncpr (float): negative control probe rate
+        ncpr (float): Negative Control Probe Rate
     """
-
-    ncp_matrix = adata[:, adata.var_names.str.contains('NegControlProbe')].X
-    ncp_counts = ncp_matrix.sum()
-    total_counts = adata.X.sum()
+    if isinstance(data, sc.AnnData):
+        ncp_counts = data[:, data.var_names.str.contains('NegControlProbe')].X.sum()
+        total_counts = data.X.sum()
+    elif isinstance(data, pd.DataFrame):
+        if 'feature_name' not in data.columns:
+            raise ValueError("Dataframe must contain a 'feature_name' column")
+        ncp_counts = data[data['feature_name'].str.contains('NegControlProbe')].shape[0]
+        total_counts = data.shape[0]
+    else:
+        raise TypeError("Input must be either an AnnData object or a DataFrame")
+    
     fraction_ncp_counts = ncp_counts / total_counts if total_counts > 0 else 0
 
-    panel_info = extract_panel_info(adata)
-    ncp_var = panel_info.get('NegControlProbe', 0)
-    target_genes_var = panel_info.get('TargetGenes', 0)
-    genomics_var = panel_info.get('Intergenic', 0)
-    total_var = ncp_var + target_genes_var + genomics_var
+    num_genes = get_num_genes(data)
+    num_controls = get_num_controls(data)
+
+    ncp_var = num_controls.get('NegControlProbe', 0)
+    genomics_var = num_controls.get('Intergenic', 0)
+    total_var = ncp_var + num_genes + genomics_var
     fraction_ncp_var = ncp_var / total_var if total_var > 0 else 0
 
     ncpr = fraction_ncp_counts / fraction_ncp_var if fraction_ncp_var > 0 else 0
     return ncpr
-
-def extract_panel_info_from_dataframe(transcripts_df):
-    """ Extract panel information from a dataframe
-        Assumption: All variables targeted by the panel have been detected at least once
-
-        Args:
-            transcripts_df (pd.DataFrame): transcript data containing field 'feature_name'
-        
-        Returns:
-            panel_info (dict): dictionary with the number of genes and controls in the panel
-    """
-    if 'feature_name' not in transcripts_df.columns:
-        raise ValueError("The dataframe must contain a 'feature_name' column")
-    control_keywords = ['Intergenic', 
-                        'UnassignedCodeword', 
-                        'NegControlCodeword', 
-                        'NegControlProbe', 
-                        'DeprecatedCodeword']
-    unique_variable_list = transcripts_df['feature_name'].unique()
-    panel_info = {part: sum(part in var_name for var_name in unique_variable_list) for part in control_keywords}
-    control_variables = sum(panel_info.values())
-    target_genes = len(unique_variable_list) - control_variables
-    panel_info['TargetGenes'] = target_genes
-    return panel_info
-
-def compute_false_positive_rate_metrics(transcripts_df):
-    """ Compute the false positive rate metrics from raw transcript data
-
-        Args:
-            transcripts_df (pd.DataFrame): transcript data containing field 'feature_name'
-        
-        Returns:
-            nccr (float): negative control codeword rate
-            ncpr (float): negative control probe rate
-    """
-    if 'feature_name' not in transcripts_df.columns:
-        raise ValueError("The dataframe must contain a 'feature_name' column")
-
-    panel_info = extract_panel_info_from_dataframe(transcripts_df)
-
-    # Compute NCC rate from raw transcript data
-    ncc_counts = transcripts_df[transcripts_df['feature_name'].str.contains('NegControlCodeword')].shape[0]
-    total_counts = transcripts_df.shape[0]
-    fraction_ncc_counts = ncc_counts / total_counts if total_counts > 0 else 0
-
-    ncc_var = panel_info.get('NegControlCodeword', 0)
-    total_var = sum(panel_info.values())
-    fraction_ncc_var = ncc_var / total_var if total_var > 0 else 0
-
-    nccr = fraction_ncc_counts / fraction_ncc_var if fraction_ncc_var > 0 else 0
-
-    # Compute NCP rate from raw transcript data
-    ncp_counts = transcripts_df[transcripts_df['feature_name'].str.contains('NegControlProbe')].shape[0]
-    fraction_ncp_counts = ncp_counts / total_counts if total_counts > 0 else 0
-    ncp_var = panel_info.get('NegControlProbe', 0)
-    target_genes_var = panel_info.get('TargetGenes', 0)
-    genomics_var = panel_info.get('Intergenic', 0)
-    total_var = ncp_var + target_genes_var + genomics_var
-    fraction_ncp_var = ncp_var / total_var if total_var > 0 else 0
-
-    ncpr = fraction_ncp_counts / fraction_ncp_var if fraction_ncp_var > 0 else 0
-    return nccr, ncpr
-
