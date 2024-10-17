@@ -674,7 +674,50 @@ class XeniumHESTData(HESTData):
                 gene_panel[keyword] = len([var_name for var_name in var_names if keyword in var_name])
         
         return gene_panel
+    
+    def compute_negative_control_codeword_rate(self):
+        """ Compute the Negative Control Codeword Rate (NCCR) for a Xenium sample. 
+            NCCR is the false positive rate of the decoding algorithm adjusted to the proportion
+            of negative control codewords in the panel.
+
+            Returns:
+            nccr (float): Negative Control Codeword Rate
+        """
+        ncc_counts = self.adata[:, self.adata.var_names.str.contains('NegControlCodeword')].X.sum()
+        total_counts = self.adata.X.sum()
+        fraction_ncc_counts = ncc_counts / total_counts if total_counts > 0 else 0
         
+        gene_panel = self.extract_gene_panel(with_controls=True)
+
+        ncc_var = gene_panel.get('NegControlCodeword', 0)
+        total_var = sum(gene_panel.values())
+        fraction_ncc_var = ncc_var / total_var if total_var > 0 else 0
+
+        nccr = fraction_ncc_counts / fraction_ncc_var if fraction_ncc_var > 0 else 0
+        return nccr
+    
+    def compute_negative_control_probe_rate(self):
+        """ Compute the Negative Control Probe Rate (NCCR) for a Xenium sample. 
+        NCPR is the false positive rate of the transcript signal adjusted to the proportion
+        of probes that are negative control probes in the panel.
+
+        Returns:
+        ncpr (float): Negative Control Probe Rate
+        """
+        ncp_counts = self.adata[:, self.adata.var_names.str.contains('NegControlProbe')].X.sum()
+        total_counts = self.adata.X.sum()
+        fraction_ncp_counts = ncp_counts / total_counts if total_counts > 0 else 0
+
+        gene_panel = self.extract_gene_panel(with_controls=True)
+
+        ncp_var = gene_panel.get('NegControlProbe', 0)
+        genomics_var = gene_panel.get('Intergenic', 0)
+        genes_var = gene_panel.get('genes', 0)
+        total_var = ncp_var + genes_var + genomics_var
+        fraction_ncp_var = ncp_var / total_var if total_var > 0 else 0
+
+        ncpr = fraction_ncp_counts / fraction_ncp_var if fraction_ncp_var > 0 else 0
+        return ncpr
         
 
 def read_HESTData(
