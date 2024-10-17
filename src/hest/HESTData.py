@@ -965,7 +965,7 @@ def get_gene_db(species, cache_dir='.genes') -> pd.DataFrame:
 
 
 def _get_alias_to_parent_df():
-    
+
     path_folder_assets = get_path_relative(__file__, '../../assets')
     path_gene_db = os.path.join(path_folder_assets, 'human_gene_db.parquet')
     
@@ -973,7 +973,7 @@ def _get_alias_to_parent_df():
         from huggingface_hub import snapshot_download
         snapshot_download(repo_id="MahmoodLab/hest", repo_type='dataset', local_dir=path_folder_assets, allow_patterns=['human_gene_db.parquet'])
     
-    df = pd.read_parquet('assets/gene_db.parquet')
+    df = pd.read_parquet(path_gene_db)
     df = df[['symbol', 'ensembl_gene_id', 'alias_symbol']].explode('alias_symbol')
     none_mask = df['alias_symbol'].isna()
     df.loc[none_mask, 'alias_symbol'] = df.loc[none_mask, 'symbol']
