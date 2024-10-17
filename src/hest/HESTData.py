@@ -647,7 +647,7 @@ class XeniumHESTData(HESTData):
         # TODO save segmentation
 
     def extract_gene_panel(self, with_controls=False):
-        """ Extract gene panel information from the data.
+        """ Extract gene panel information from transcript_df if available, else use adata.
             ASSUMPTION: all variables targeted by the panel have been detected at least once
             and controls are labeled with specific keywords.
         
@@ -657,8 +657,13 @@ class XeniumHESTData(HESTData):
         Returns:
             dict: Dictionary with gene and control information.
         """
-        data = self.adata
-        var_names = data.var_names.tolist()
+        if self.transcript_df is not None:
+            if 'feature_name' not in self.transcript_df.columns:
+                raise ValueError("The dataframe must contain a 'feature_name' column")
+            var_names = self.transcript_df['feature_name'].unique().tolist()
+        else:
+            var_names = self.adata.var_names.tolist()
+        
         control_keywords = ['Intergenic', 
                             'UnassignedCodeword', 
                             'NegControlCodeword', 
@@ -682,8 +687,15 @@ class XeniumHESTData(HESTData):
             Returns:
             nccr (float): Negative Control Codeword Rate
         """
-        ncc_counts = self.adata[:, self.adata.var_names.str.contains('NegControlCodeword')].X.sum()
-        total_counts = self.adata.X.sum()
+        if self.transcript_df is not None:
+            if 'feature_name' not in self.transcript_df.columns:
+                raise ValueError("The dataframe must contain a 'feature_name' column")
+            ncc_counts = self.transcript_df[self.transcript_df['feature_name'].str.contains('NegControlCodeword')].shape[0]
+            total_counts = self.transcript_df.shape[0]
+        else:
+            ncc_counts = self.adata[:, self.adata.var_names.str.contains('NegControlCodeword')].X.sum()
+            total_counts = self.adata.X.sum()
+
         fraction_ncc_counts = ncc_counts / total_counts if total_counts > 0 else 0
         
         gene_panel = self.extract_gene_panel(with_controls=True)
@@ -703,8 +715,15 @@ class XeniumHESTData(HESTData):
         Returns:
         ncpr (float): Negative Control Probe Rate
         """
-        ncp_counts = self.adata[:, self.adata.var_names.str.contains('NegControlProbe')].X.sum()
-        total_counts = self.adata.X.sum()
+        if self.transcript_df is not None:
+            if 'feature_name' not in self.transcript_df.columns:
+                raise ValueError("The dataframe must contain a 'feature_name' column")
+            ncp_counts = self.transcript_df[self.transcript_df['feature_name'].str.contains('NegControlProbe')].shape[0]
+            total_counts = self.transcript_df.shape[0]
+        else:
+            ncp_counts = self.adata[:, self.adata.var_names.str.contains('NegControlProbe')].X.sum()
+            total_counts = self.adata.X.sum()
+
         fraction_ncp_counts = ncp_counts / total_counts if total_counts > 0 else 0
 
         gene_panel = self.extract_gene_panel(with_controls=True)
