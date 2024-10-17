@@ -584,7 +584,7 @@ class XeniumHESTData(HESTData):
         xenium_nuc_seg: pd.DataFrame=None,
         xenium_cell_seg: pd.DataFrame=None,
         cell_adata: sc.AnnData=None, # type: ignore
-        transcript_df: pd.DataFrame=None
+        transcript_df: pd.DataFrame=None,
     ):
         """
         class representing a single ST profile + its associated WSI image
@@ -608,6 +608,9 @@ class XeniumHESTData(HESTData):
         self.xenium_cell_seg = xenium_cell_seg
         self.cell_adata = cell_adata
         self.transcript_df = transcript_df
+        self.gene_panel = self.extract_gene_panel(with_controls=True)
+        self.nccr = self.compute_negative_control_codeword_rate()
+        self.ncpr = self.compute_negative_control_probe_rate()
         
         
     def save(self, path: str, save_img=True, pyramidal=True, bigtiff=False, plot_pxl_size=False):
