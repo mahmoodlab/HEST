@@ -645,7 +645,36 @@ class XeniumHESTData(HESTData):
                 json.dump(self.xenium_cell_seg, f, indent=4)
             
             
-        # TODO save segmentation    
+        # TODO save segmentation
+
+    def extract_gene_panel(self, with_controls=False):
+        """ Extract gene panel information from the data.
+            ASSUMPTION: all variables targeted by the panel have been detected at least once
+            and controls are labeled with specific keywords.
+        
+        Args:
+            with_controls (bool): Whether to include control genes in the panel.
+        
+        Returns:
+            dict: Dictionary with gene and control information.
+        """
+        data = self.adata
+        var_names = data.var_names.tolist()
+        control_keywords = ['Intergenic', 
+                            'UnassignedCodeword', 
+                            'NegControlCodeword', 
+                            'NegControlProbe', 
+                            'DeprecatedCodeword']
+        num_genes = len([var_name for var_name in var_names if not any(keyword in var_name for keyword in control_keywords)])
+        gene_panel = {
+            "genes": num_genes,
+        }
+        if with_controls:
+            for keyword in control_keywords:
+                gene_panel[keyword] = len([var_name for var_name in var_names if keyword in var_name])
+        
+        return gene_panel
+        
         
 
 def read_HESTData(
