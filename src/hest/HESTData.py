@@ -585,6 +585,9 @@ class XeniumHESTData(HESTData):
         xenium_cell_seg: pd.DataFrame=None,
         cell_adata: sc.AnnData=None, # type: ignore
         transcript_df: pd.DataFrame=None,
+        gene_panel: Dict=None,
+        nccr: float=None,
+        ncpr: float=None
     ):
         """
         class representing a single ST profile + its associated WSI image
@@ -601,6 +604,9 @@ class XeniumHESTData(HESTData):
             xenium_cell_seg (pd.DataFrame): content of a xenium cell contour file as a dataframe (cell_boundaries.parquet)
             cell_adata (sc.AnnData): ST cell data, each row in adata.obs is a cell, each row in obsm is the cell location on the H&E image in pixels
             transcript_df (pd.DataFrame): dataframe of transcripts, each row is a transcript, he_x and he_y is the transcript location on the H&E image in pixels
+            gene_panel (Dict): dictionary of target genes and controls information. Number of genes and control codewords targeted by the panel.
+            nccr (float): Negative Control Codeword Rate computed from the adata object (No filtering of transcripts by Phred quality score)
+            ncpr (float): Negative Control Probe Rate computed from the adata object (No filtering of transcripts by Phred quality score)
         """
         super().__init__(adata=adata, img=img, pixel_size=pixel_size, meta=meta, tissue_seg=tissue_seg, tissue_contours=tissue_contours, shapes=shapes)
         
