@@ -4,7 +4,7 @@
 \[ [arXiv](https://arxiv.org/abs/2406.16192) | [Download](https://huggingface.co/datasets/MahmoodLab/hest) | [Documentation](https://hest.readthedocs.io/en/latest/) | [Tutorials](https://github.com/mahmoodlab/HEST/tree/main/tutorials) \]
 <!-- [ArXiv (stay tuned)]() | [Interactive Demo](http://clam.mahmoodlab.org) | [Cite](#reference) -->
 
-<img src="figures/fig1a.jpg" width="450px" align="right" />
+<img src="figures/fig1_dataset_only.jpeg" width="450px" align="right" />
 
 Welcome to the official GitHub repository of the HEST-Library introduced in *"HEST-1k: A Dataset for Spatial Transcriptomics and Histology Image Analysis", NeurIPS Spotlight, 2024*. This project was developed by the [Mahmood Lab](https://faisal.ai/) at Harvard Medical School and Brigham and Women's Hospital. 
 
