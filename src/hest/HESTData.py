@@ -12,7 +12,6 @@ import numpy as np
 from hestcore.wsi import (WSI, CucimWarningSingleton, NumpyWSI,
                           contours_to_img, wsi_factory)
 from loguru import logger
-from spatialdata import SpatialData
 
 
 
@@ -508,6 +507,7 @@ class HESTData:
         """
         
         # imports specific to spatial data conversion
+        from spatialdata import SpatialData
         import dask.array as da
         from dask import delayed
         from dask.array import from_delayed
@@ -519,13 +519,10 @@ class HESTData:
         SPATIAL = "spatial"
         SCALEFACTORS = "scalefactors"
         TISSUE_HIRES_SCALEF = "tissue_hires_scalef"
-        # TISSUE_LOWRES_SCALEF = "tissue_lowres_scalef"
         TISSUE_LOWRES_SCALEF = "tissue_downscaled_fullres_scalef"
         SPOT_DIAMETER_FULLRES = "spot_diameter_fullres"
 
         IMAGES = "images"
-        # HIRES = "hires"
-        # LOWRES = "lowres"
         HIRES = "fullres"
         LOWRES = "downscaled_fullres"
 
