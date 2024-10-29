@@ -12,11 +12,7 @@ import numpy as np
 from hestcore.wsi import (WSI, CucimWarningSingleton, NumpyWSI,
                           contours_to_img, wsi_factory)
 from loguru import logger
-from multiscale_spatial_image import to_multiscale
-from spatial_image import SpatialImage
-from spatialdata import SpatialData
-from spatialdata.models import Image2DModel, ShapesModel, TableModel
-from spatialdata.transformations import Identity, Scale
+
 
 from hest.io.seg_readers import TissueContourReader
 from hest.LazyShapes import LazyShapes, convert_old_to_gpd, old_geojson_to_new
@@ -512,6 +508,10 @@ class HESTData:
         import dask.array as da
         from dask import delayed
         from dask.array import from_delayed
+        from spatial_image import SpatialImage
+        from spatialdata import SpatialData
+        from spatialdata.models import Image2DModel, ShapesModel, TableModel
+        from spatialdata.transformations import Identity, Scale
         
         # AnnData keys
         SPATIAL = "spatial"
