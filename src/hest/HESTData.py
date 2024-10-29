@@ -5,7 +5,7 @@ import os
 import shutil
 import sys
 import warnings
-from typing import Dict, List, Union
+from typing import Dict, Iterator, List, Union
 
 import cv2
 import geopandas as gpd
@@ -13,6 +13,7 @@ import numpy as np
 from loguru import logger
 from hestcore.wsi import (WSI, CucimWarningSingleton, NumpyWSI,
                           contours_to_img, wsi_factory)
+from loguru import logger
 
 from hest.io.seg_readers import TissueContourReader
 from hest.LazyShapes import LazyShapes, convert_old_to_gpd, old_geojson_to_new
@@ -24,7 +25,7 @@ except Exception:
     print("Couldn't import openslide, verify that openslide is installed on your system, https://openslide.org/download/")
 import pandas as pd
 from hestcore.segmentation import (apply_otsu_thresholding, mask_to_gdf,
-                                   save_pkl, segment_tissue_deep)
+                                   save_pkl, segment_tissue_deep, get_path_relative)
 from PIL import Image
 from shapely import Point
 from tqdm import tqdm
@@ -39,11 +40,9 @@ class HESTData:
     Object representing a Spatial Transcriptomics sample along with a full resolution H&E image and metadatas
     """
     
-    tissue_mask: np.ndarray = None
-    """tissue mask for that sample, will be None until segment_tissue() is called"""
-    
     shapes: List[LazyShapes] = []
-    
+    """ List of `LazyShapes`, i.e. cells, nuclei """
+
     
     def _verify_format(self, adata):
         assert 'spatial' in adata.obsm
@@ -125,19 +124,8 @@ class HESTData:
             key (str): feature to plot. Default: 'total_counts'
             pl_kwargs(Dict): arguments for sc.pl.spatial
         """
-        print("Plotting spatial plots...")
         
-        import scanpy as sc
-             
-        fig = sc.pl.spatial(self.adata, show=None, img_key="downscaled_fullres", color=[key], title=f"in_tissue spots", return_fig=True, **pl_kwargs)
-        
-        filename = f"{name}spatial_plots.png"
-
-        fig.tight_layout()
-        
-        # Save the figure
-        fig.savefig(os.path.join(save_path, filename), dpi=400)
-        print(f"H&E overlay spatial plots saved in {save_path}")
+        save_spatial_plot(self.adata, save_path, name, key, pl_kwargs)
     
     
     def load_wsi(self) -> None:
@@ -234,8 +222,7 @@ class HESTData:
             weights_dir (str, optional): directory containing the models, if None will be ../models relative to the src package of hestcore. None
                 
         Returns:
-            gpd.GeoDataFrame: a geodataframe of the tissue contours, contains a column `tissue_id` indicating to which tissue the contour belongs to and a 
-                `type` column to indicate if the shape corresponds to a `tissue` contour or a `hole`
+            gpd.GeoDataFrame: a geodataframe of the tissue contours, contains a column `tissue_id` indicating to which tissue the contour belongs to.
         """
         
         check_arg(method, 'method', ['deep', 'otsu'])
@@ -274,7 +261,7 @@ class HESTData:
 
     @deprecated
     def get_tissue_mask(self) -> np.ndarray:
-        """ Return existing tissue segmentation mask if it exists, raise an error if it doesn't exist
+        """ Deprecated. Return existing tissue segmentation mask if it exists, raise an error if it doesn't exist
 
         Returns:
             np.ndarray: an array with the same resolution as the WSI image, where 1 means tissue and 0 means background
@@ -396,6 +383,7 @@ class HESTData:
     
     @property
     def tissue_contours(self) -> gpd.GeoDataFrame:
+        """ Geodataframe of tissue contours polygons also contains a tissue_id column """
         if self._tissue_contours is None:
             raise Exception("No tissue segmentation attached to this sample, segment tissue first by calling `segment_tissue()` for this object")
         return self._tissue_contours
@@ -497,7 +485,7 @@ class HESTData:
         from dask import delayed
         from dask.array import from_delayed
         from spatialdata import SpatialData
-        from spatialdata.models import Image2DModel, ShapesModel
+        from spatialdata.models import Image2DModel, ShapesModel, TableModel
 
         def read_hest_wsi(wsi: WSI):
             return wsi.numpy()
@@ -527,7 +515,11 @@ class HESTData:
             shape_names.append('tissue_contours')
         
         my_images = {"he": parsed_image}
-        my_tables = {"anndata": self.adata}
+        
+        self.adata.obs['instance'] = self.adata.obs.index
+        self.adata.obs['region'] = 'he'
+        parsed_adata = TableModel.parse(self.adata, instance_key='instance', region_key='region', region='he')
+        my_tables = {"anndata": parsed_adata}
         
         st = SpatialData(images=my_images, tables=my_tables, shapes=dict(zip(shape_names, shape_validated)))
 
@@ -673,7 +665,10 @@ def read_HESTData(
     mask_path_pkl: str = None, # Deprecated
     mask_path_jpg: str = None, # Deprecated
     cellvit_path: str = None,
-    tissue_contours_path: str = None
+    tissue_contours_path: str = None,
+    xenium_cell_path: str = None,
+    xenium_nucleus_path: str = None,
+    transcripts_path: str = None
 ) -> HESTData:
     """ Read a HEST sample from disk
 
@@ -685,8 +680,11 @@ def read_HESTData(
         metrics_path (str): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
         mask_path_pkl (str): *Deprecated* path to a .pkl file containing the tissue segmentation contours. Defaults to None.
         mask_path_jpg (str): *Deprecated* path to a .jog file containing the greyscale tissue segmentation mask. Defaults to None.
-        cellvit_path (str): path to a cell segmentation file in .geojson or .parquet. Defaults to None,
-        tissue_contours_path (str): path to a .geojson tissue contours file. Defaults to None
+        cellvit_path (str): path to a cell segmentation file in .geojson or .parquet. Defaults to None.
+        tissue_contours_path (str): path to a .geojson tissue contours file. Defaults to None.
+        xenium_cell_path (str): path to a .parquet xeniun cell segmentation file. Defaults to None.
+        xenium_nucleus_path (str): path to a .parquet xenium nucleus segmentation file. Defaults to None.
+        transcripts_path (str): path to a .parquet transcript dataframe. Defaults to None.
 
 
     Returns:
@@ -727,11 +725,40 @@ def read_HESTData(
     shapes = []
     if cellvit_path is not None:
         shapes.append(LazyShapes(cellvit_path, 'cellvit', 'he'))
+    if xenium_cell_path is not None:
+        shapes.append(LazyShapes(xenium_cell_path, 'xenium_cell', 'he'))
+    if xenium_nucleus_path is not None:
+        shapes.append(LazyShapes(xenium_nucleus_path, 'xenium_nucleus', 'he'))
+        
+    transcripts = None
+    if transcripts_path is not None:
+        transcripts = pd.read_parquet(transcripts_path)
     
     adata = sc.read_h5ad(adata_path)
     with open(metrics_path) as metrics_f:     
         metrics = json.load(metrics_f)
-    return HESTData(adata, img, metrics['pixel_size_um_estimated'], metrics, tissue_seg=tissue_seg, shapes=shapes, tissue_contours=tissue_contours)
+        
+    if transcripts is not None:
+        return XeniumHESTData(
+            adata, 
+            img, 
+            metrics['pixel_size_um_estimated'], 
+            metrics, 
+            tissue_seg=tissue_seg, 
+            shapes=shapes, 
+            tissue_contours=tissue_contours,
+            transcript_df=transcripts
+        )
+    else:  
+        return HESTData(
+            adata, 
+            img, 
+            metrics['pixel_size_um_estimated'], 
+            metrics, 
+            tissue_seg=tissue_seg, 
+            shapes=shapes, 
+            tissue_contours=tissue_contours
+        )
         
 
 def mask_and_patchify_bench(meta_df: pd.DataFrame, save_dir: str, use_mask=True, keep_largest=None):
@@ -832,8 +859,87 @@ def create_splits(dest_dir, splits, K):
         test_df.to_csv(os.path.join(dest_dir, f'test_{i}.csv'), index=False)
         
 
+class HESTIterator:
+    def __init__(self, hest_dir, id_list, **read_kwargs):
+        if id_list is not None and (not(isinstance(id_list, list) or isinstance(id_list, np.ndarray))):
+            raise ValueError('id_list must a list or a numpy array')
+        self.id_list = id_list
+        self.hest_dir = hest_dir
+        self.i = 0
+        self.read_kwargs = read_kwargs
+    
+    def __iter__(self):
+        self.i = 0
+        return self
+    
+    def __next__(self) -> HESTData:
+        if self.i < len(self):
+            x = _read_st(self.hest_dir, self.id_list[self.i], **self.read_kwargs)
+            self.i += 1
+            return x
+        else:
+            raise StopIteration
+    
+    def __len__(self):
+        return len(self.id_list)
+
+def iter_hest(hest_dir: str, id_list: List[str] = None, **read_kwargs) -> HESTIterator:
+    return HESTIterator(hest_dir, id_list, **read_kwargs)
+
+def _read_st(hest_dir, st_filename, load_transcripts=False):
+    id = st_filename.split('.')[0]
+    adata_path = os.path.join(hest_dir, 'st', f'{id}.h5ad')
+    img_path = os.path.join(hest_dir, 'wsis', f'{id}.tif')
+    meta_path = os.path.join(hest_dir, 'metadata', f'{id}.json')
+    
+    masks_path_pkl = None
+    masks_path_jpg = None
+    verify_paths([adata_path, img_path, meta_path], suffix='\nHave you downloaded the dataset? (https://huggingface.co/datasets/MahmoodLab/hest)')
+    
+    
+    if os.path.exists(os.path.join(hest_dir, 'tissue_seg')):
+        masks_path_pkl = find_first_file_endswith(os.path.join(hest_dir, 'tissue_seg'), f'{id}_mask.pkl')
+        masks_path_jpg = find_first_file_endswith(os.path.join(hest_dir, 'tissue_seg'), f'{id}_mask.jpg')
+        tissue_contours_path = find_first_file_endswith(os.path.join(hest_dir, 'tissue_seg'), f'{id}_contours.geojson')
+
+    cellvit_path = None
+    if os.path.exists(os.path.join(hest_dir, 'cellvit_seg')):
+        cellvit_path = find_first_file_endswith(os.path.join(hest_dir, 'cellvit_seg'), f'{id}_cellvit_seg.parquet')
+        if cellvit_path is None:
+            cellvit_path = find_first_file_endswith(os.path.join(hest_dir, 'cellvit_seg'), f'{id}_cellvit_seg.geojson')
+            if cellvit_path is not None:
+                warnings.warn(f'reading the cell segmentation as .geojson can be slow, download the .parquet cells for faster loading https://huggingface.co/datasets/MahmoodLab/hest')
+                
+    if os.path.exists(os.path.join(hest_dir, 'xenium_seg')):
+        xenium_cell_path = find_first_file_endswith(os.path.join(hest_dir, 'xenium_seg'), f'{id}_xenium_cell_seg.parquet')
+        xenium_nucleus_path = find_first_file_endswith(os.path.join(hest_dir, 'xenium_seg'), f'{id}_xenium_nucleus_seg.parquet')
+    else:
+        xenium_cell_path = None
+        xenium_nucleus_path = None
+        
+                    
+    transcripts_path = None
+    if load_transcripts:
+        transcripts_path = find_first_file_endswith(os.path.join(hest_dir, 'transcripts'), f'{id}_transcripts.parquet')
+                    
+    st = read_HESTData(
+        adata_path, 
+        img_path, 
+        meta_path, 
+        masks_path_pkl, 
+        masks_path_jpg, 
+        cellvit_path=cellvit_path,
+        tissue_contours_path=tissue_contours_path,
+        xenium_cell_path=xenium_cell_path,
+        xenium_nucleus_path=xenium_nucleus_path,
+        transcripts_path=transcripts_path
+    )
+    return st
+    
+    
+
 def load_hest(hest_dir: str, id_list: List[str] = None) -> List[HESTData]:
-    """Read HESTData objects from a local directory
+    """Read HEST-1k samples from a local directory
 
     Args:
         hest_dir (str): hest directory containing folders: st, wsis, metadata, tissue_seg (optional)
@@ -857,38 +963,7 @@ def load_hest(hest_dir: str, id_list: List[str] = None) -> List[HESTData]:
         st_filenames = os.listdir(os.path.join(hest_dir, 'st'))
         
     for st_filename in tqdm(st_filenames):
-        id = st_filename.split('.')[0]
-        adata_path = os.path.join(hest_dir, 'st', f'{id}.h5ad')
-        img_path = os.path.join(hest_dir, 'wsis', f'{id}.tif')
-        meta_path = os.path.join(hest_dir, 'metadata', f'{id}.json')
-        
-        masks_path_pkl = None
-        masks_path_jpg = None
-        verify_paths([adata_path, img_path, meta_path], suffix='\nHave you downloaded the dataset? (https://huggingface.co/datasets/MahmoodLab/hest)')
-        
-        
-        if os.path.exists(os.path.join(hest_dir, 'tissue_seg')):
-            masks_path_pkl = find_first_file_endswith(os.path.join(hest_dir, 'tissue_seg'), f'{id}_mask.pkl')
-            masks_path_jpg = find_first_file_endswith(os.path.join(hest_dir, 'tissue_seg'), f'{id}_mask.jpg')
-            tissue_contours_path = find_first_file_endswith(os.path.join(hest_dir, 'tissue_seg'), f'{id}_contours.geojson')
-
-        cellvit_path = None
-        if os.path.exists(os.path.join(hest_dir, 'cellvit_seg')):
-            cellvit_path = find_first_file_endswith(os.path.join(hest_dir, 'cellvit_seg'), f'{id}_cellvit_seg.parquet')
-            if cellvit_path is None:
-                cellvit_path = find_first_file_endswith(os.path.join(hest_dir, 'cellvit_seg'), f'{id}_cellvit_seg.geojson')
-                if cellvit_path is not None and not warned:
-                    warnings.warn(f'reading the cell segmentation as .geojson can be slow, download the .parquet cells for faster loading https://huggingface.co/datasets/MahmoodLab/hest')
-                    warned = True
-                        
-        st = read_HESTData(
-            adata_path, 
-            img_path, 
-            meta_path, 
-            masks_path_pkl, 
-            masks_path_jpg, 
-            cellvit_path=cellvit_path,
-            tissue_contours_path=tissue_contours_path)
+        st = _read_st(hest_dir, st_filename)
         hestdata_list.append(st)
         
     warnings.resetwarnings()
@@ -913,55 +988,77 @@ def get_gene_db(species, cache_dir='.genes') -> pd.DataFrame:
     return annots
 
 
-def unify_gene_names(adata: sc.AnnData, species="hsapiens", cache_dir='.genes', drop=False) -> sc.AnnData: # type: ignore
+def _get_alias_to_parent_df():
+    
+    path_folder_assets = get_path_relative(__file__, '../../assets')
+    path_gene_db = os.path.join(path_folder_assets, 'human_gene_db.parquet')
+    
+    if not os.path.exists(path_gene_db):
+        from huggingface_hub import snapshot_download
+        snapshot_download(repo_id="MahmoodLab/hest", repo_type='dataset', local_dir=path_folder_assets, allow_patterns=['human_gene_db.parquet'])
+    
+    df = pd.read_parquet('assets/gene_db.parquet')
+    df = df[['symbol', 'ensembl_gene_id', 'alias_symbol']].explode('alias_symbol')
+    none_mask = df['alias_symbol'].isna()
+    df.loc[none_mask, 'alias_symbol'] = df.loc[none_mask, 'symbol']
+    df.index = df['alias_symbol']
+    df = df[~df.index.duplicated('first')]
+    return df
+
+def unify_gene_names(adata: sc.AnnData, species="human", drop=False) -> sc.AnnData: # type: ignore
     """ unify gene names by resolving aliases
 
     Args:
         adata (sc.AnnData): scanpy anndata
-        species (str, optional): species, choose between ["hsapiens", "mmusculus"]. Defaults to "hsapiens".
-        cache_dir (str, optional): directory where biomart database will be cached. Defaults to '.genes'.
+        species (str, optional): species, choose between ["human", "mouse"]. Defaults to "human".
         drop (bool, optional): whenever to drop gene names having no alias. Defaults to False.
 
     Returns:
         sc.AnnData: anndata with unified gene names in var_names
     """
     adata = adata.copy()
-    import mygene
-        
-    mg = mygene.MyGeneInfo()
-
-    gene_df = get_gene_db(species, cache_dir=cache_dir)
-    
     duplicated_genes_before = adata.var_names[adata.var_names.duplicated()]
-    #print(f"{len(duplicated_genes)} duplicated genes before mapping")
+
+    var_names = adata.var_names.values
+
+
+    alias_to_parent_df = _get_alias_to_parent_df()
+    parent_names = alias_to_parent_df['symbol'].values
     
-    std_genes = np.intersect1d(gene_df.index.dropna().values, adata.var_names.values)
-    unknown_genes = np.setdiff1d(adata.var_names.values, std_genes)
-    logger.info(f'found {len(unknown_genes)} unknown genes out of {len(adata.var_names)}')
+    var_names = np.unique(var_names)
     
+    # Conventional gene names in adata
+    adata_conv_genes = np.intersect1d(parent_names, var_names)
     
-    mg.set_caching('db')
+    # Unconventional (alias) gene names in adata
+    unknown_genes = np.setdiff1d(var_names, adata_conv_genes, assume_unique=True)
+    logger.info(f'Found {len(unknown_genes)} unknown genes out of {len(var_names)}')
     
-    # look for aliases
-    res = mg.querymany(unknown_genes, scopes='alias', as_dataframe=True, fields='ensembl', verbose=False)
-    res = res.loc[~res.index.duplicated(keep='first')]
+    parent_names = alias_to_parent_df.reindex(unknown_genes)
     
-    gene_df['gene_names'] = gene_df.index
-    res['query'] = res.index
+    matched_parent = parent_names.dropna()
     
-    # mygenes sometimes return a nan in ensembl.gene, the id then contained in 'ensembl'
-    mask_na = res['ensembl.gene'].isna() & res['ensembl'].apply(lambda x: isinstance(x, list) and len(x) > 0 and 'gene' in x[0])
-    res.loc[mask_na, 'ensembl.gene'] = res.loc[mask_na, 'ensembl'].apply(lambda x: x[0]['gene'])
+    # If the parent of the alias already exists, keep the alis
+    parent_already_exists = matched_parent['symbol'].isin(var_names)
+    matched_parent = matched_parent[~parent_already_exists]
     
-    # map alias name to its parent gene name
-    alias_map = res.merge(gene_df, right_on='ensembl_gene_id', left_on='ensembl.gene', how='inner').set_index('query')[['gene_names']]
+    remaining = parent_names.drop(matched_parent.index, axis=0)
     
-    remaining = np.setdiff1d(unknown_genes, alias_map.index.values)
+    logger.info(f"Mapped {len(matched_parent)} aliases to their parent name, {len(remaining)} remaining unknown genes")
     
-    mapped = pd.DataFrame(index=adata.var_names).merge(alias_map, left_index=True, right_index=True, how='left')
-    mask = mapped.isna()['gene_names']
-    mapped.loc[mask,'gene_names'] = mapped.index[mask].values
-    adata.var_names = mapped['gene_names'].values
+    mapped = pd.DataFrame(var_names.copy(), index=var_names)
+    mapped.loc[matched_parent.index, 0] = matched_parent['symbol'].values
+    
+    mask = mapped.isna()[0].values
+    mapped.loc[mask, 0] = mapped.index[mask].values
+    adata.var_names =  mapped.loc[adata.var_names][0].values
+    
+    duplicated_genes_after = adata.var_names[adata.var_names.duplicated()]
+    if len(duplicated_genes_after) > len(duplicated_genes_before):
+        logger.warning(f"duplicated genes increased from {len(duplicated_genes_before)} to {len(duplicated_genes_after)} after resolving aliases")
+        logger.warning('deduplicating... (can remove useful genes)')
+        mask = ~adata.var_names.duplicated(keep='first')
+        adata = adata[:, mask]
     
     duplicated_genes_after = adata.var_names[adata.var_names.duplicated()]
     if len(duplicated_genes_after) > len(duplicated_genes_before):
@@ -973,4 +1070,24 @@ def unify_gene_names(adata: sc.AnnData, species="hsapiens", cache_dir='.genes', 
     if drop:
         adata = adata[:, ~remaining]
     
+    # TODO return dict map of renamed, and remaining
+    
     return adata
+
+def save_spatial_plot(adata: sc.AnnData, save_path: str, name: str='', key='total_counts', pl_kwargs={}):
+    """Save the spatial plot from that sc.AnnData
+
+    Args:
+        save_path (str): path to a directory where the spatial plot will be saved
+        name (str): save plot as {name}spatial_plots.png
+        key (str): feature to plot. Default: 'total_counts'
+        pl_kwargs(Dict): arguments for sc.pl.spatial
+    """
+    import scanpy as sc
+    
+    fig = sc.pl.spatial(adata, show=None, img_key="downscaled_fullres", color=[key], title=f"in_tissue spots", return_fig=True, **pl_kwargs)
+    
+    filename = f"{name}spatial_plots.png"
+    
+    # Save the figure
+    fig.savefig(os.path.join(save_path, filename), dpi=400)

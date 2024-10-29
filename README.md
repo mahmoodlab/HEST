@@ -12,18 +12,26 @@ HEST-1k, HEST-Library, and HEST-Benchmark are released under the Attribution-Non
 
 <br/>
 
-#### What does this repository provide?
+### What does this repository provide?
 - **HEST-1k:** Free access to <b>HEST-1K</b>, a dataset of 1,108 paired Spatial Transcriptomics samples with HE-stained whole-slide images 
-- **HEST-Library:** A series of helpers to assemble new ST samples (from ST, Visium, Visium HD, or Xenium) and work with HEST-1k
+- **HEST-Library:** A series of helpers to assemble new ST samples (ST, Visium, Visium HD, Xenium) and work with HEST-1k (ST analysis, batch effect viz and correction, etc.)
 - **HEST-Benchmark:** A new benchmark to assess the predictive performance of foundation models for histology in predicting gene expression from morphology 
 
 <br/>
 
-## Download/Query HEST-1k (743GB)
+## Updates
+
+- **23.09.24**: 121 new samples released, including 27 Xenium and 7 Visium HD! We also make the aligned Xenium transcripts + the aligned DAPI segmented cells/nuclei public.
+
+- **30.08.24**: HEST-Benchmark results updated. Includes H-Optimus-0, Virchow 2, Virchow, and GigaPath. New COAD task based on 4 Xenium samples. HuggingFace bench data have been updated. 
+
+- **28.08.24**: New set of helpers for batch effect visualization and correction. Tutorial [here](https://github.com/mahmoodlab/HEST/blob/main/tutorials/5-Batch-effect-visualization.ipynb). 
+
+## Download/Query HEST-1k (>1TB)
 
 To download/query HEST-1k, follow the tutorial [1-Downloading-HEST-1k.ipynb](https://github.com/mahmoodlab/HEST/blob/main/tutorials/1-Downloading-HEST-1k.ipynb) or follow instructions on [Hugging Face](https://huggingface.co/datasets/MahmoodLab/hest).
 
-**NOTE:** The entire dataset weighs 743 GB but you can easily download a subset by querying per id, organ, species...
+**NOTE:** The entire dataset weighs more than 1TB but you can easily download a subset by querying per id, organ, species...
 
 
 ## HEST-Library installation
@@ -57,13 +65,10 @@ pip install \
 You can then simply view the dataset as, 
 
 ```python
-from hest import load_hest
+from hest import iter_hest
 
-print('Lazy loading of hest...')
-hest_data = load_hest('hest_data') # location of the data
-print('loaded hest')
-for d in hest_data:
-    print(d)
+for st in iter_hest('../hest_data', id_list=['TENX95']):
+    print(st)
 ```
 
 ## HEST-Library API
@@ -72,6 +77,7 @@ The HEST-Library allows **assembling** new samples using HEST format and **inter
 
 - [2-Interacting-with-HEST-1k.ipynb](https://github.com/mahmoodlab/HEST/tree/main/tutorials/2-Interacting-with-HEST-1k.ipynb): Playing around with HEST data for loading patches. Includes a detailed description of each scanpy object. 
 - [3-Assembling-HEST-Data.ipynb](https://github.com/mahmoodlab/HEST/tree/main/tutorials/3-Assembling-HEST-Data.ipynb): Walkthrough to transform a Visum sample into HEST.
+- [5-Batch-effect-visualization.ipynb](https://github.com/mahmoodlab/HEST/blob/main/tutorials/5-Batch-effect-visualization.ipynb): Batch effect visualization and correction (MNN, Harmony, ComBat).
 
 In addition, we provide complete [documentation](https://hest.readthedocs.io/en/latest/).
 
@@ -79,24 +85,26 @@ In addition, we provide complete [documentation](https://hest.readthedocs.io/en/
 
 The HEST-Benchmark was designed to assess foundation models for pathology under a new, diverse, and challenging benchmark. HEST-Benchmark includes 10 tasks for gene expression prediction (50 highly variable genes) from morphology (112 x 112 um regions at 0.5 um/px) in 10 different organs and 9 cancer types. We provide a step-by-step tutorial to run HEST-Benchmark and reproduce our results in [4-Running-HEST-Benchmark.ipynb](https://github.com/mahmoodlab/HEST/tree/main/tutorials/4-Running-HEST-Benchmark.ipynb).
 
-### HEST-Benchmark results (06.24.24)
+### HEST-Benchmark results (08.30.24)
 
-HEST-Benchmark was used to assess 10 publicly available models. Reported results are based on a Random Forest regression model (70 trees). Model performance measured with Pearson correlation. Best is **bold**, second best
-is _underlined_. Models sorted by publication date. Additional results based on Ridge regression are provided in the paper. 
+HEST-Benchmark was used to assess 10 publicly available models.
+Reported results are based on a Ridge Regression with PCA (256 factors). Ridge regression unfairly penalizes models with larger embedding dimensions. To ensure fair and objective comparison between models, we opted for PCA-reduction. 
+Model performance measured with Pearson correlation. Best is **bold**, second best
+is _underlined_. Additional results based on Random Forest and XGBoost regression are provided in the paper. 
 
-|                | **[ResNet50](https://arxiv.org/abs/1512.03385)** | **[KimiaNet](https://kimialab.uwaterloo.ca/kimia/index.php/data-and-code-2/kimia-net/)** | **[Ciga](https://arxiv.org/abs/2011.13971)** | **[CTransPath](https://www.sciencedirect.com/science/article/abs/pii/S1361841522002043)** | **[Remedis](https://arxiv.org/abs/2205.09723)** | **[Phikon](https://www.medrxiv.org/content/10.1101/2023.07.21.23292757v2)** | **[PLIP](https://www.nature.com/articles/s41591-023-02504-3)** | **[UNI](https://www.nature.com/articles/s41591-024-02857-3)** | **[CONCH](https://www.nature.com/articles/s41591-024-02856-4)** | **[GigaPath](https://www.nature.com/articles/s41586-024-07441-w)** |
-|----------------|--------------|--------------|----------|----------------|-------------|------------|----------|---------|-----------|--------------|
-| **IDC**        | 0.440        | 0.420        | 0.406    | 0.454          | 0.491       | 0.430      | 0.436    | _0.502_ | **0.504** | 0.492        |
-| **PRAD**       | 0.318        | 0.328        | 0.332    | 0.346          | 0.335       | **0.377**  | 0.362    | 0.357   | _0.373_   | 0.372        |
-| **PAAD**       | 0.389        | 0.410        | 0.397    | 0.406          | **0.451**   | 0.372      | 0.392    | 0.424   | _0.431_   | 0.425        |
-| **SKCM**       | 0.446        | 0.452        | 0.484    | 0.535          | 0.577       | 0.516      | 0.461    | **0.613**| _0.582_   | 0.541        |
-| **COAD**       | 0.107        | 0.080        | 0.102    | 0.123          | 0.125       | 0.137      | 0.112    | **0.147**| 0.124     | _0.139_      |
-| **READ**       | 0.051        | 0.038        | 0.046    | 0.083          | 0.099       | 0.138      | 0.063    | **0.162**| 0.132     | _0.156_      |
-| **CCRCC**      | 0.136        | 0.136        | 0.127    | 0.171          | **0.200**   | 0.178      | 0.124    | _0.186_ | 0.149     | 0.182        |
-| **HCC**        | 0.034        | 0.028        | 0.045    | **0.060**      | _0.059_     | 0.041      | 0.038    | 0.051   | 0.040     | 0.055        |
-| **LUAD**       | 0.497        | 0.507        | 0.515    | 0.531          | **0.573**   | 0.541      | 0.533    | 0.511   | _0.569_   | 0.547        |
-| **LYMPH_IDC**  | 0.205        | 0.206        | 0.218    | 0.238          | 0.243       | 0.243      | 0.229    | 0.234   | **0.249** | _0.248_      |
-| **Average**    | 0.262        | 0.261        | 0.267    | 0.295          | 0.315       | 0.297      | 0.275    | **0.319**| 0.315     | _0.316_      |
+| **Dataset**   |   **[Hoptimus0](https://github.com/bioptimus/releases/blob/main/models/h-optimus/v0/LICENSE.md)** |   **[Virchow2](https://huggingface.co/paige-ai/Virchow2)** |   **[Virchow](https://huggingface.co/paige-ai/Virchow)** |   **[UNI](https://huggingface.co/MahmoodLab/UNI)** |   **[Gigapath](https://huggingface.co/prov-gigapath/prov-gigapath)** |   **[CONCH](https://huggingface.co/MahmoodLab/CONCH)** |   **[Phikon](https://huggingface.co/owkin/phikon)** |   **[Remedis](https://arxiv.org/abs/2205.09723)** |   **[CTransPath](https://www.sciencedirect.com/science/article/abs/pii/S1361841522002043)** |   **[Resnet50](https://arxiv.org/abs/1512.03385)** |   **[Plip](https://www.nature.com/articles/s41591-023-02504-3)** |
+|:--------------|----------------:|---------------:|--------------:|-------------:|---------------:|---------------:|-------------:|--------------:|-----------------:|---------------:|-----------:|
+| **IDC**       |          **0.5988** |         0.5903 |        0.5725 |       0.5718 |         0.5505 |         0.5363 |       0.5327 |        0.5304 |           0.511  |         0.4732 |     0.4717 |
+| **PRAD**      |          0.3768 |         0.3478 |        0.3341 |       0.3095 |         **0.3776** |         0.3548 |       0.342  |        0.3531 |           0.3427 |         0.306  |     0.2819 |
+| **PAAD**      |          **0.4936** |         0.4716 |        0.4926 |       0.478  |         0.476  |         0.4475 |       0.4441 |        0.4647 |           0.4378 |         0.386  |     0.4099 |
+| **SKCM**      |          **0.6521** |         0.613  |        0.6056 |       0.6344 |         0.5607 |         0.5784 |       0.5334 |        0.5816 |           0.5103 |         0.4825 |     0.5117 |
+| **COAD**      |          0.3054 |         0.252  |        **0.3115** |       0.2876 |         0.2595 |         0.2579 |       0.2573 |        0.2528 |           0.249  |         0.231  |     0.0518 |
+| **READ**      |          **0.2209** |         0.2109 |        0.1999 |       0.1822 |         0.1888 |         0.1617 |       0.1631 |        0.1216 |           0.1131 |         0.0842 |     0.0927 |
+| **CCRCC**     |          0.2717 |         **0.275**  |        0.2638 |       0.2402 |         0.2436 |         0.2179 |       0.2423 |        0.2643 |           0.2279 |         0.218  |     0.1902 |
+| **LUNG**      |          **0.5605** |         0.5554 |        0.5433 |       0.5499 |         0.5412 |         0.5317 |       0.5522 |        0.538  |           0.5049 |         0.4919 |     0.4838 |
+| **LYMPH_IDC** |          0.2578 |         **0.2598** |        0.2582 |       0.2537 |         0.2491 |         0.2507 |       0.2373 |        0.2465 |           0.2354 |         0.2284 |     0.2382 |
+| **AVG**       |          **0.4153** |         0.3973 |        0.3979 |       0.3897 |         0.383  |         0.3708 |       0.3672 |        0.3726 |           0.348  |         0.3224 |     0.3035 |
+
 
 ### Benchmarking your own model
 

@@ -36,3 +36,10 @@ requires-python = ">=3.9"
 [tool.setuptools.packages.find]
 # All the following settings are optional:
 where = ["src"]
+
+[project.optional-dependencies]
+docs = [
+    "myst-nb",
+    "sphinx-design",
+    "sphinx-rtd-theme == 2.0.0"
+]

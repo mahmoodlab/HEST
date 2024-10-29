@@ -3,7 +3,7 @@ __version__ = "0.0.1"
 from .utils import tiff_save, find_pixel_size_from_spot_coords, write_10X_h5, get_k_genes, SpotPacking
 from .autoalign import autoalign_visium
 from .readers import *
-from .HESTData import HESTData, read_HESTData, load_hest
+from .HESTData import HESTData, read_HESTData, load_hest, iter_hest
 from .segmentation.cell_segmenters import segment_cellvit
 
 __all__ = [

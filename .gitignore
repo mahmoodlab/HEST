@@ -10,6 +10,7 @@ Makefile
 *.parquet
 bench_data
 cell_seg
+filtered
 src/hest/bench/timm_ctp
 my_notebooks
 .gitattributes
@@ -42,6 +43,7 @@ fm_v1
 cufile.log
 int.csv
 docs/build
+docs/source/generated
 local
 hest_vis
 hest_vis2

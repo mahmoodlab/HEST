@@ -321,7 +321,7 @@ def align_her2(path, raw_count_path):
 
 
 def infer_row_col_from_barcodes(barcodes_df, adata):
-    barcode_path = './barcode_coords/visium-v1_coordinates.txt'
+    barcode_path = './assets/barcode_coords/visium-v1_coordinates.txt'
     barcode_coords = pd.read_csv(barcode_path, sep='\t', header=None)
     barcode_coords = barcode_coords.rename(columns={
         0: 'barcode',

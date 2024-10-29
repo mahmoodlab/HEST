@@ -39,6 +39,7 @@ if LOCAL:
 
 
 class Reader:
+    """ ST/H&E reader """
     
     def auto_read(self, path: str, **read_kwargs) -> HESTData:
         """
@@ -578,7 +579,7 @@ class VisiumReader(Reader):
 
     def _find_visium_slide_version(self, alignment_df: str, adata: sc.AnnData) -> str: # type: ignore
         highest_nb_match = -1
-        barcode_dir = get_path_relative(__file__, '../../barcode_coords/')
+        barcode_dir = get_path_relative(__file__, '../../assets/barcode_coords/')
         for barcode_path in os.listdir(barcode_dir):
             spatial_aligned = self._find_alignment_barcodes(alignment_df, os.path.join(barcode_dir, barcode_path))
             nb_match = len(pd.merge(spatial_aligned, adata.obs, left_index=True, right_index=True))
@@ -643,7 +644,7 @@ class VisiumReader(Reader):
     
     
 class STReader(Reader):
-
+    """ Legacy Spatial Transcriptomics reader """
     
     def _auto_read(self, path, **read_kwargs) -> STHESTData:
         packing = SpotPacking.GRID_PACKING
@@ -1190,14 +1191,9 @@ def _process_cellvit(row, dest, **cellvit_kwargs):
     
     with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
         zipf.write(os.path.join(path, 'processed', f'cellvit_seg.geojson'), f'{id}_cellvit_seg.geojson')
-    os.makedirs(os.path.join(dest, 'cellvit_seg'), exist_ok=True)
-    path_cellvit = os.path.join(path, 'processed', f'cellvit_seg.zip')
-    id = row['id']
-    path_dest_cellvit = os.path.join(dest, 'cellvit_seg', f'{id}_cellvit_seg.zip')
-    shutil.copy(path_cellvit, path_dest_cellvit)
     
         
-def cellvit_meta_df(meta_df, dest, **cellvit_kwargs):
+def process_meta_df_cellvit(dest, meta_df, cellvit_kwargs={'gpu_ids': [0, 1], 'batch_size': 4}):
     for _, row in meta_df.iterrows():
         _process_cellvit(row, dest, **cellvit_kwargs)
     
