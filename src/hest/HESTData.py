@@ -462,7 +462,7 @@ class HESTData:
         vis.save(os.path.join(save_dir, f'{name}_vis.jpg'))
 
 
-    def to_spatial_data(self, fullres: bool = False): 
+    def to_spatial_data(self, fullres: bool = False) -> SpatialData: 
         """
         Convert a HESTData sample to a scverse SpatialData object. Note that a large part of this function is based on 
         spatialdata-io's [``from_legacy_anndata``](https://spatialdata.scverse.org/projects/io/en/latest/generated/spatialdata_io.experimental.from_legacy_anndata.html) 
@@ -507,8 +507,6 @@ class HESTData:
         """
         
         # imports specific to spatial data conversion
-        from spatialdata import SpatialData
-        import dask.array as da
         from dask import delayed
         from dask.array import from_delayed
         from spatial_image import SpatialImage
