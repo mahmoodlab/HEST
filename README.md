@@ -1,25 +1,27 @@
 # HEST-Library: Bringing Spatial Transcriptomics and Histopathology together
 ## Designed for querying and assembling HEST-1k dataset 
 
-\[ [arXiv](https://arxiv.org/abs/2406.16192) | [HEST-1k](https://huggingface.co/datasets/MahmoodLab/hest) \]
+\[ [arXiv](https://arxiv.org/abs/2406.16192) | [Download](https://huggingface.co/datasets/MahmoodLab/hest) | [Documentation](https://hest.readthedocs.io/en/latest/) | [Tutorials](https://github.com/mahmoodlab/HEST/tree/main/tutorials) \]
 <!-- [ArXiv (stay tuned)]() | [Interactive Demo](http://clam.mahmoodlab.org) | [Cite](#reference) -->
 
-<img src="figures/fig1a.jpg" width="450px" align="right" />
+<img src="figures/fig1a.jpeg" width="450px" align="right" />
 
-Welcome to the official GitHub repository of the HEST-Library introduced in *"HEST-1k: A Dataset for Spatial Transcriptomics and Histology Image Analysis"*. This project was developed by the [Mahmood Lab](https://faisal.ai/) at Harvard Medical School and Brigham and Women's Hospital. 
+Welcome to the official GitHub repository of the HEST-Library introduced in *"HEST-1k: A Dataset for Spatial Transcriptomics and Histology Image Analysis", NeurIPS Spotlight, 2024*. This project was developed by the [Mahmood Lab](https://faisal.ai/) at Harvard Medical School and Brigham and Women's Hospital. 
 
 HEST-1k, HEST-Library, and HEST-Benchmark are released under the Attribution-NonCommercial-ShareAlike 4.0 International license. 
 
 <br/>
 
 ### What does this repository provide?
-- **HEST-1k:** Free access to <b>HEST-1K</b>, a dataset of 1,108 paired Spatial Transcriptomics samples with HE-stained whole-slide images 
+- **HEST-1k:** Free access to <b>HEST-1K</b>, a dataset of 1,229 paired Spatial Transcriptomics samples with HE-stained whole-slide images 
 - **HEST-Library:** A series of helpers to assemble new ST samples (ST, Visium, Visium HD, Xenium) and work with HEST-1k (ST analysis, batch effect viz and correction, etc.)
 - **HEST-Benchmark:** A new benchmark to assess the predictive performance of foundation models for histology in predicting gene expression from morphology 
 
 <br/>
 
 ## Updates
+
+- **21.10.24**: HEST has been accepted to NeurIPS 2024 as a Spotlight! We will be in Vancouver from Dec 10th to 15th. Send us a message if you wanna learn more about HEST (gjaume@bwh.harvard.edu). 
 
 - **23.09.24**: 121 new samples released, including 27 Xenium and 7 Visium HD! We also make the aligned Xenium transcripts + the aligned DAPI segmented cells/nuclei public.
 
@@ -121,15 +123,14 @@ Our tutorial in [4-Running-HEST-Benchmark.ipynb](https://github.com/mahmoodlab/H
 
 If you find our work useful in your research, please consider citing:
 ```
-@article{jaume2024hest,
-	author = {Jaume, Guillaume and Doucet, Paul and Song, Andrew H. and Lu, Ming Y. and Almagro-Perez, Cristina and Wagner, Sophia J. and Vaidya, Anurag J. and Chen, Richard J. and Williamson, Drew F. K. and Kim, Ahrong and Mahmood, Faisal},
-	title = {{HEST-1k: A Dataset for Spatial Transcriptomics and Histology Image Analysis}},
-	journal = {arXiv},
-	year = {2024},
-	month = jun,
-	eprint = {2406.16192},
-	url = {https://arxiv.org/abs/2406.16192v1}
+@inproceedings{jaume2024hest,
+    author = {Guillaume Jaume and Paul Doucet and Andrew H. Song and Ming Y. Lu and Cristina Almagro-Perez and Sophia J. Wagner and Anurag J. Vaidya and Richard J. Chen and Drew F. K. Williamson and Ahrong Kim and Faisal Mahmood},
+    title = {HEST-1k: A Dataset for Spatial Transcriptomics and Histology Image Analysis},
+    booktitle = {Advances in Neural Information Processing Systems},
+    year = {2024},
+    month = dec,
 }
+
 ```
 
 <img src=docs/joint_logo.png> 
