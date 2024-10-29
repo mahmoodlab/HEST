@@ -629,6 +629,17 @@ class HESTData:
                     scale_lowres = Scale([tissue_lowres_scalef, tissue_lowres_scalef], axes=("x", "y"))
                     shapes_transformations[f"{dataset_id}_downscaled_lowres"] = scale_lowres
 
+        # add cellvit and tissue contours
+        for it in self.shapes: 
+            shape = it.shapes
+            key = it.name
+            if len(shape) > 0 and isinstance(shape.iloc[0], Point): 
+                shape['radius'] = 1
+            val = ShapesModel.parse(shape, transformations=shapes_transformations)
+            shapes[key] = val
+        if self._tissue_contours is not None: 
+            shapes['tissue_contours'] = ShapesModel.parse(self._tissue_contours, transformations=shapes_transformations)
+
         # validate the spot_diameter_fullres value
         if len(spot_diameter_fullres_list) > 0:
             d = np.array(spot_diameter_fullres_list)
@@ -653,7 +664,6 @@ class HESTData:
         if SPATIAL in self.adata.obsm:
             xy = self.adata.obsm[SPATIAL]
             radius = spot_diameter_fullres / 2
-            # breakpoint()
             shapes[REGION] = ShapesModel.parse(xy, geometry=0, radius=radius, transformations=shapes_transformations)
 
             # link the shapes to the table
@@ -666,7 +676,7 @@ class HESTData:
             new_table = TableModel.parse(new_table, region=REGION, region_key=REGION_KEY, instance_key=INSTANCE_KEY)
         else:
             new_table = self.adata.copy()
-            
+        
         return SpatialData(tables=new_table, images=images, shapes=shapes)
     
 class VisiumHESTData(HESTData): 
