@@ -12,6 +12,8 @@ import numpy as np
 from hestcore.wsi import (WSI, CucimWarningSingleton, NumpyWSI,
                           contours_to_img, wsi_factory)
 from loguru import logger
+from spatialdata import SpatialData
+
 
 
 from hest.io.seg_readers import TissueContourReader
@@ -464,7 +466,8 @@ class HESTData:
     def to_spatial_data(self, fullres: bool = False) -> SpatialData: 
         """
         Convert a HESTData sample to a scverse SpatialData object. Note that a large part of this function is based on 
-        spatialdata-io's ``from_legacy_anndata`` function with some adjustments for ``HESTData``. 
+        spatialdata-io's [``from_legacy_anndata``](https://spatialdata.scverse.org/projects/io/en/latest/generated/spatialdata_io.experimental.from_legacy_anndata.html) 
+        function with some adjustments for ``HESTData``. 
 
         Args:
             fullres (bool, optional): Includes pyramidal full resolution whole slide image as a ``DataTree`` object for those dimensions compatible with 
@@ -509,7 +512,6 @@ class HESTData:
         from dask import delayed
         from dask.array import from_delayed
         from spatial_image import SpatialImage
-        from spatialdata import SpatialData
         from spatialdata.models import Image2DModel, ShapesModel, TableModel
         from spatialdata.transformations import Identity, Scale
         
