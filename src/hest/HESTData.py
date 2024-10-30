@@ -461,7 +461,6 @@ class HESTData:
         vis = self.get_tissue_vis()
         vis.save(os.path.join(save_dir, f'{name}_vis.jpg'))
 
-
     def to_spatial_data(self, fullres: bool = False) -> SpatialData: 
         """
         Convert a HESTData sample to a scverse SpatialData object. Note that a large part of this function is based on 
@@ -563,11 +562,11 @@ class HESTData:
                     if HIRES in image_data:
                         hires = image_data[HIRES]
                     else: 
+
                         # load wsi
                         def read_hest_wsi(wsi: WSI, width, height): 
                             return wsi.get_thumbnail(width, height)
-                        
-                        
+        
                         if fullres: 
                             full_width, full_height = self.wsi.get_dimensions()
                             fullres = from_delayed(delayed(read_hest_wsi)(self.wsi, full_width, full_height), shape=(full_height, full_width, 3), dtype=np.int8)
@@ -589,7 +588,6 @@ class HESTData:
                     hires_image = Image2DModel.parse(
                         hires, 
                         dims=("c", "y", "x"),
-                        # scale_factors=[int(ds_factor)],
                         transformations={f"{dataset_id}_downscaled_hires": Identity()}
                     )
                     hires_image = SpatialImage(hires_image, dims=("c", "y", "x"), name=f"{dataset_id}_downscaled_lowres_image")
@@ -600,10 +598,16 @@ class HESTData:
                                     
                 if fullres is not None: 
                     fullres = fullres.transpose(2, 0, 1)
+                    
+                    # compute scale factors: each scale level is relative to the previous level 
+                    scale_factors = np.array([int(l) for l in self.wsi.level_downsamples()[1:] if full_height % l == 0 and full_width % l == 0])
+                    scale_factors[1:] = scale_factors[1:] / scale_factors[:-1]
+                    scale_factors = scale_factors.tolist()
+
                     fullres_image = Image2DModel.parse(
                         fullres, 
                         dims=("c", "y", "x"),
-                        scale_factors=[int(l) for l in self.wsi.level_downsamples()[1:] if full_height % l == 0 and full_width % l == 0],
+                        scale_factors=scale_factors,
                         transformations={f"{dataset_id}_fullres": Identity()}
                     )
                     images[f"{dataset_id}_fullres_image"] = fullres_image
