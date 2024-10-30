@@ -1,12 +1,20 @@
 import os
 import unittest
 import warnings
+from datetime import datetime
 from os.path import join as _j
 
 from hestcore.segmentation import get_path_relative
 from hestcore.wsi import CucimWarningSingleton
 
+MAX_HEST_IMPORT_S = 2
+start_time = datetime.now()
 import hest
+end_time = datetime.now()
+elapsed_time = (end_time - start_time).total_seconds()
+if elapsed_time > MAX_HEST_IMPORT_S:
+    raise ImportError(f"Importing 'hest' took too long ({elapsed_time:.2f} seconds). Maximum allowed time is {MAX_HEST_IMPORT_S} seconds. Please, keep large large imports conditional")
+
 from hest.autoalign import autoalign_visium
 from hest.readers import VisiumReader
 from hest.utils import load_image
@@ -158,8 +166,8 @@ class TestHESTData(unittest.TestCase):
     def test_patching(self):
         """ Save patches as .h5 then load with H5HESTDataset """
         from hestcore.datasets import H5HESTDataset
-        from torch.utils.data import DataLoader
         from PIL import Image, ImageDraw
+        from torch.utils.data import DataLoader
         output_dir = os.path.join(self.output_dir, 'test_patching')
         
         for idx, st in enumerate(self.sts):
