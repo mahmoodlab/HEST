@@ -4,11 +4,9 @@
 \[ [arXiv](https://arxiv.org/abs/2406.16192) | [Data](https://huggingface.co/datasets/MahmoodLab/hest) | [Documentation](https://hest.readthedocs.io/en/latest/) | [Tutorials](https://github.com/mahmoodlab/HEST/tree/main/tutorials) | [Cite](https://github.com/mahmoodlab/hest?tab=readme-ov-file#citation) \]
 <!-- [ArXiv (stay tuned)]() | [Interactive Demo](http://clam.mahmoodlab.org) | [Cite](#reference) -->
 
-<img src="figures/fig1a.jpeg" width="450px" align="right" />
-
 Welcome to the official GitHub repository of the HEST-Library introduced in *"HEST-1k: A Dataset for Spatial Transcriptomics and Histology Image Analysis", NeurIPS Spotlight, 2024*. This project was developed by the [Mahmood Lab](https://faisal.ai/) at Harvard Medical School and Brigham and Women's Hospital. 
 
-HEST-1k, HEST-Library, and HEST-Benchmark are released under the Attribution-NonCommercial-ShareAlike 4.0 International license. 
+<img src="figures/fig1a.jpeg" />
 
 <br/>
 
@@ -16,6 +14,8 @@ HEST-1k, HEST-Library, and HEST-Benchmark are released under the Attribution-Non
 - **HEST-1k:** Free access to <b>HEST-1K</b>, a dataset of 1,229 paired Spatial Transcriptomics samples with HE-stained whole-slide images 
 - **HEST-Library:** A series of helpers to assemble new ST samples (ST, Visium, Visium HD, Xenium) and work with HEST-1k (ST analysis, batch effect viz and correction, etc.)
 - **HEST-Benchmark:** A new benchmark to assess the predictive performance of foundation models for histology in predicting gene expression from morphology 
+
+HEST-1k, HEST-Library, and HEST-Benchmark are released under the Attribution-NonCommercial-ShareAlike 4.0 International license. 
 
 <br/>
 
