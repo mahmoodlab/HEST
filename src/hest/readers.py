@@ -24,7 +24,7 @@ from hest.utils import (SpotPacking, align_xenium_df, check_arg,
                         find_first_file_endswith,
                         find_pixel_size_from_spot_coords,
                         get_path_from_meta_row, helper_mex, load_wsi,
-                        metric_file_do_dict, read_10x_seg,
+                        metric_file_do_dict, read_10x_seg, read_xenium_alignment,
                         register_downscale_img, verify_paths)
 
 LOCAL = False
@@ -914,36 +914,39 @@ class XeniumReader(Reader):
         return pixel_size_estimated
     
     
-    def _align_and_estimate_px_size(self, alignment_file_path, pixel_size_morph, df_transcripts, x_key='x_location', y_key='y_location'):
+    def _align_and_estimate_px_size(self, alignment_matrix, pixel_size_morph, df_transcripts, x_key='x_location', y_key='y_location'):
 
-        df_transcripts, he_to_morph_matrix, alignment_matrix = align_xenium_df(alignment_file_path, pixel_size_morph, df_transcripts, x_key, y_key)
+        df_transcripts, he_to_morph_matrix = align_xenium_df(alignment_matrix, pixel_size_morph, df_transcripts, x_key, y_key)
 
-        pixel_size_estimated = self.__xenium_estimate_pixel_size(pixel_size_morph, he_to_morph_matrix)    
-        return df_transcripts, pixel_size_estimated, alignment_matrix
+        pixel_size_estimated = self.__xenium_estimate_pixel_size(pixel_size_morph, np.linalg.inv(he_to_morph_matrix))    
+        return df_transcripts, pixel_size_estimated
         
         
-    def __load_transcripts(self, transcripts_path, alignment_file_path, pixel_size_morph, dict):
+    def __load_transcripts(self, transcripts_path, alignment_matrix, pixel_size_morph, dict):
         df_transcripts = pd.read_parquet(transcripts_path)
         
-        if alignment_file_path is not None:
-            print('found an alignment file, aligning transcripts...')
-            # change behavior, make _align_and_estimate create a new 'aligned' column instead of doing inplace
-            df_transcripts, pixel_size_estimated, matrix = self._align_and_estimate_px_size(
-                alignment_file_path, 
+        if alignment_matrix is not None:
+            df_transcripts, pixel_size_estimated = self._align_and_estimate_px_size(
+                alignment_matrix, 
                 pixel_size_morph, 
                 df_transcripts,
                 x_key='x_location',
                 y_key='y_location'
             )
+            df_transcripts['dapi_x'] = df_transcripts['x_location'] / pixel_size_morph
+            df_transcripts['dapi_y'] = df_transcripts['y_location'] / pixel_size_morph
             dict['pixel_size_um_estimated'] = pixel_size_estimated
         else:
-            matrix = np.eye(3, 3)
+            df_transcripts['he_x'] = df_transcripts['x_location'] / pixel_size_morph
+            df_transcripts['he_y'] = df_transcripts['y_location'] / pixel_size_morph
+            df_transcripts['dapi_x'] = df_transcripts['x_location'] / pixel_size_morph
+            df_transcripts['dapi_y'] = df_transcripts['y_location'] / pixel_size_morph
             dict['pixel_size_um_estimated'] = pixel_size_morph
             
-        return df_transcripts, dict, matrix
+        return df_transcripts, dict
     
     
-    def __load_cells(self, feature_matrix_path, cells_path, alignment_file_path, pixel_size_morph, dict):
+    def __load_cells(self, feature_matrix_path, cells_path, alignment_matrix, pixel_size_morph, dict):
         import scanpy as sc
         
         cell_adata = sc.read_10x_h5(feature_matrix_path)
@@ -953,9 +956,9 @@ class XeniumReader(Reader):
         
         df_cells = cell_adata.obs[["x_centroid", "y_centroid"]].copy()
         
-        if alignment_file_path is not None:
+        if alignment_matrix is not None:
             # convert cell coordinates from um in the morphology image to um in the H&E image
-            df_cells, _, _ = self._align_and_estimate_px_size(alignment_file_path, pixel_size_morph, df_cells, x_key='x_centroid', y_key='y_centroid')
+            df_cells, _ = self._align_and_estimate_px_size(alignment_matrix, pixel_size_morph, df_cells, x_key='x_centroid', y_key='y_centroid')
         df_cells['he_x'] = df_cells['x_centroid'] / pixel_size_morph
         df_cells['he_y'] = df_cells['y_centroid'] / pixel_size_morph
         
@@ -975,7 +978,6 @@ class XeniumReader(Reader):
         cells_path: str = None,
         nucleus_bound_path: str = None,
         cell_bound_path: str = None,
-        use_cache: bool = False,
         dapi_path = None,
         load_transcripts=True,
         load_cells=True,
@@ -997,21 +999,24 @@ class XeniumReader(Reader):
         dict = {**dict, **dict_exp}
         
         shapes = []
+
+
+        alignment_matrix = read_xenium_alignment(alignment_file_path) if alignment_file_path else None
         if cell_bound_path is not None:
-            xenium_cell_seg = LazyShapes(cell_bound_path, 'tenx_cell', 'dapi', reader=XeniumParquetCellReader, reader_kwargs={'scaling': 1 / pixel_size_morph})
-                
+            shapes.append(LazyShapes(cell_bound_path, 'tenx_cell', 'dapi', reader=XeniumParquetCellReader, reader_kwargs={'pixel_size_morph': pixel_size_morph}))
+            if alignment_matrix is not None:
+                shapes.append(LazyShapes(cell_bound_path, 'tenx_cell', 'he', reader=XeniumParquetCellReader, reader_kwargs={'pixel_size_morph': pixel_size_morph, 'alignment_matrix': alignment_matrix}))
+
         if nucleus_bound_path is not None:
-            xenium_nuc_seg = LazyShapes(nucleus_bound_path, 'tenx_nucleus', 'dapi', reader=XeniumParquetCellReader, reader_kwargs={'scaling': 1 / pixel_size_morph})
+            shapes.append(LazyShapes(nucleus_bound_path, 'tenx_nucleus', 'dapi', reader=XeniumParquetCellReader, reader_kwargs={'pixel_size_morph': pixel_size_morph}))
+            if alignment_matrix is not None:
+                shapes.append(LazyShapes(nucleus_bound_path, 'tenx_nucleus', 'he', reader=XeniumParquetCellReader, reader_kwargs={'pixel_size_morph': pixel_size_morph, 'alignment_matrix': alignment_matrix}))
+
         
-        shapes.append(xenium_cell_seg)
-        shapes.append(xenium_nuc_seg)
-        
-        
-        dapi_he_affine = None
         if load_transcripts:
             print('Loading transcripts...')
             # TODO move transcrit dataframe to a dask array (can be more than 20GB)
-            transcript_df, dict, dapi_he_affine = self.__load_transcripts(transcripts_path, alignment_file_path, pixel_size_morph, dict)
+            transcript_df, dict = self.__load_transcripts(transcripts_path, alignment_matrix, pixel_size_morph, dict)
                     
             print("Pooling xenium transcripts in pseudo-visium spots...")
             adata = pool_transcripts_xenium(
@@ -1041,8 +1046,8 @@ class XeniumReader(Reader):
         if load_cells:
             if feature_matrix_path is not None and cells_path is not None:
                 print('Reading cells...')
-                cell_adata, dict = self.__load_cells(feature_matrix_path, cells_path, alignment_file_path, pixel_size_morph, dict)
-        
+                cell_adata, dict = self.__load_cells(feature_matrix_path, cells_path, alignment_matrix, pixel_size_morph, dict)
+
             
         st_object = XeniumHESTData(
             adata, 
@@ -1053,7 +1058,7 @@ class XeniumReader(Reader):
             cell_adata=cell_adata,
             shapes=shapes,
             dapi_path=dapi_path,
-            dapi_he_affine=dapi_he_affine
+            alignment_file_path=alignment_file_path
         )
         return st_object
     
@@ -1072,7 +1077,7 @@ def reader_factory(path: str) -> Reader:
     else:
         raise NotImplementedError('')
         
-def read_and_save(path: str, save_plots=True, pyramidal=True, bigtiff=False, plot_pxl_size=False, save_img=True, segment_tissue=False, read_kwargs={}):
+def read_and_save(path: str, save_plots=True, pyramidal=True, bigtiff=False, plot_pxl_size=False, save_img=True, segment_tissue=False, read_kwargs={}, save_kwargs={}, segment_kwargs={}):
     """For internal use, determine the appropriate reader based on the raw data path, and
     automatically process the data at that location, then the processed files are dumped
     to processed/
@@ -1089,10 +1094,10 @@ def read_and_save(path: str, save_plots=True, pyramidal=True, bigtiff=False, plo
     print(st_object)
     if segment_tissue:
         logger.info('Segment tissue')
-        st_object.segment_tissue()
+        st_object.segment_tissue(**segment_kwargs)
     save_path = os.path.join(path, 'processed')
     os.makedirs(save_path, exist_ok=True)
-    st_object.save(save_path, pyramidal=pyramidal, bigtiff=bigtiff, plot_pxl_size=plot_pxl_size, save_img=save_img)
+    st_object.save(save_path, pyramidal=pyramidal, bigtiff=bigtiff, plot_pxl_size=plot_pxl_size, save_img=save_img, **save_kwargs)
     if save_plots:
         st_object.save_spatial_plot(save_path)
     return st_object

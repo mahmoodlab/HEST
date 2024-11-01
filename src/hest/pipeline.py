@@ -14,7 +14,6 @@ import pandas as pd
 import yaml
 from hestcore.wsi import WSI
 from loguru import logger
-from memory_profiler import profile
 from tqdm import tqdm
 
 from hest.HESTData import (VisiumHDHESTData, XeniumHESTData, load_hest,
@@ -26,10 +25,10 @@ from hest.segmentation.cell_segmenters import (bin_per_cell,
                                                cell_segmenter_factory)
 from hest.subtyping.atlas import get_atlas_from_name
 from hest.subtyping.subtyping import assign_cell_types
-from hest.utils import (ALIGNED_HE_FILENAME, check_arg,
+from hest.utils import (ALIGNED_HE_FILENAME, align_xenium_df, check_arg,
                         find_first_file_endswith, get_col_selection,
                         get_name_datetime, get_path_from_meta_row,
-                        print_resource_usage, verify_paths)
+                        print_resource_usage, verify_paths, visualize_random_crops)
 
 
 class ProcessingPipeline:
@@ -194,74 +193,58 @@ def preprocess_cells_xenium(
     dapi_transcripts: pd.DataFrame,
     reg_config: dict,
     full_exp_dir: str,
-    registration_kwargs = {},
-    affine_matrix = None
+    registration_kwargs = {}
 ) -> Tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
     """ Find non-rigid transformation from DAPI to H&E and 
     transform dapi_cells, dapi_nuclei and transcripts to the H&E coordinate system
     
     returns (warped_cells, warped_nuclei)
     """
+
+    logger.info('Registering Xenium DAPI to H&E...')
+    max_non_rigid_registration_dim_px = reg_config.get('max_non_rigid_registration_dim_px', 10000)
+    path_registrar = register_dapi_he(
+        he_wsi,
+        dapi_path,
+        registrar_dir=full_exp_dir,
+        name='registration',
+        max_non_rigid_registration_dim_px=max_non_rigid_registration_dim_px,
+        **registration_kwargs
+    )
     
-    if registration_kwargs.get('identity', False):
-        affine_matrix = np.eye(3, 3)
-    
-    if affine_matrix is not None:
-        #affine_matrix = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
-        affine_matrix[0][2] = affine_matrix[0][2] / 0.2125
-        affine_matrix[1][2] = affine_matrix[1][2] / 0.2125
-        warped_transcripts = dapi_transcripts.copy()
-        if registration_kwargs.get('identity', False):
-            warped_transcripts['dapi_x'] = warped_transcripts['x_location'] / 0.2125
-            warped_transcripts['dapi_y'] = warped_transcripts['y_location'] / 0.2125
-        appended_values = np.column_stack((warped_transcripts[['dapi_x', 'dapi_y']].values, np.ones(len(dapi_transcripts))))
-        warped_coords = (affine_matrix @ appended_values.T).T
-        warped_transcripts['he_x'] = warped_coords[:, 0]
-        warped_transcripts['he_y'] = warped_coords[:, 1]
-        
-        flat_matrix = [affine_matrix[0][0], affine_matrix[0][1], affine_matrix[1][0], affine_matrix[1][1], affine_matrix[0][2], affine_matrix[1][2]]
-        warped_cells = gpd.GeoDataFrame(geometry=dapi_cells.affine_transform(flat_matrix))
-        warped_nuclei = gpd.GeoDataFrame(geometry=dapi_nuclei.affine_transform(flat_matrix))
-        
-    else:
-        logger.info('Registering Xenium DAPI to H&E...')
-        max_non_rigid_registration_dim_px = reg_config.get('max_non_rigid_registration_dim_px', 10000)
-        path_registrar = register_dapi_he(
-            he_wsi,
-            dapi_path,
-            registrar_dir=full_exp_dir,
-            name='registration',
-            max_non_rigid_registration_dim_px=max_non_rigid_registration_dim_px,
-            **registration_kwargs
-        )
-        
-        logger.info('Warping shapes to H&E...')
-        
+    if dapi_transcripts:
         logger.info('Warping transcripts from DAPI to H&E...')
         transcripts_gdf = gpd.GeoDataFrame(dapi_transcripts, geometry=gpd.points_from_xy(dapi_transcripts['dapi_x'], dapi_transcripts['dapi_y']))
-        warped_transcripts = warp_gdf_valis( # TODO need some optimization
+        warped_transcripts = warp_gdf_valis( # TODO valis interpolation is slow
             transcripts_gdf,
             path_registrar=path_registrar,
             curr_slide_name=dapi_path
         )
-        
         warped_transcripts = warped_transcripts.drop(['_polygons'], axis=1)
         warped_transcripts['he_x'] = warped_transcripts.geometry.x
         warped_transcripts['he_y'] = warped_transcripts.geometry.y
-    
+    else:
+        warped_transcripts = None
+
+    if dapi_cells:
         logger.info('Warping cells from DAPI to H&E...')
-        warped_cells = warp_gdf_valis( # TODO need some optimization
+        warped_cells = warp_gdf_valis( # TODO valis interpolation is slow
             dapi_cells,
             path_registrar=path_registrar,
             curr_slide_name=dapi_path
         )
-        
+    else:
+        warped_cells = None
+    
+    if dapi_nuclei:
         logger.info('Warping nuclei from DAPI to H&E...')
-        warped_nuclei = warp_gdf_valis( # TODO need some optimization
+        warped_nuclei = warp_gdf_valis( # TODO valis interpolation is slow
             dapi_nuclei,
             path_registrar=path_registrar,
             curr_slide_name=dapi_path
         )
+    else:
+        warped_nuclei = None
     
     return warped_cells, warped_nuclei, warped_transcripts
     
@@ -360,7 +343,8 @@ def process_meta_df(
     no_except=False, 
     segment_tissue=True,
     registration_kwargs={},
-    read_kwargs={}
+    read_kwargs={},
+    segment_kwargs={}
 ):
     """Internal use method, process all the raw ST data in the meta_df"""
     for _, row in tqdm(meta_df.iterrows(), total=len(meta_df)):
@@ -369,8 +353,20 @@ def process_meta_df(
             
             path = get_path_from_meta_row(row)
             bigtiff = not(isinstance(row['bigtiff'], float) or row['bigtiff'] == 'FALSE')
-            st = read_and_save(path, save_plots=save_spatial_plots, pyramidal=pyramidal, bigtiff=bigtiff, plot_pxl_size=True, save_img=save_img, segment_tissue=segment_tissue, read_kwargs=read_kwargs)
-            
+            save_kwargs = {'save_cell_seg': True, 'save_nuclei_seg': True, 'save_transcripts': True} if row['st_technology'] == 'xenium' and not preprocess else {}
+            st = read_and_save(
+                path, 
+                save_plots=save_spatial_plots, 
+                pyramidal=pyramidal, 
+                bigtiff=bigtiff, 
+                plot_pxl_size=True, 
+                save_img=save_img, 
+                segment_tissue=segment_tissue, 
+                read_kwargs=read_kwargs,
+                save_kwargs=save_kwargs,
+                segment_kwargs=segment_kwargs
+            )
+
             # TODO register segmentation for xenium and save
             if preprocess:
                 
@@ -388,9 +384,9 @@ def process_meta_df(
                     print('finished reading shapes')
                     reg_config = {}
                     
-                    affine_matrix = st.dapi_he_affine if registration_kwargs.get('affine', False) else None
+                    alignment_file_path = st.alignment_file_path if registration_kwargs.get('affine', False) else None
                         
-                    warped_cells, warped_nuclei, warped_transcripts = preprocess_cells_xenium(
+                    warped_cells, warped_nuclei, st.transcript_df = preprocess_cells_xenium(
                         os.path.join(path, 'processed', ALIGNED_HE_FILENAME), 
                         st.dapi_path,
                         dapi_cells,
@@ -399,16 +395,14 @@ def process_meta_df(
                         reg_config,
                         full_exp_dir,
                         registration_kwargs=registration_kwargs,
-                        affine_matrix=affine_matrix
+                        alignment_file_path=alignment_file_path
                     )
-                    
-                    # Free up some RAM after VALIS
-                    del st.transcript_df
+
                     
                     print('Saving warped cells/nuclei...')
                     warped_cells.to_parquet(os.path.join(path, 'processed', f'he_cell_seg.parquet'))
                     warped_nuclei.to_parquet(os.path.join(path, 'processed', f'he_nucleus_seg.parquet'))
-                    warped_transcripts.to_parquet(os.path.join(path, 'processed', f'aligned_transcripts.parquet'))
+                    st.transcript_df.to_parquet(os.path.join(path, 'processed', f'aligned_transcripts.parquet'))
                     write_geojson(warped_cells, os.path.join(path, 'processed', f'he_cell_seg.geojson'), '', chunk=True)
                     write_geojson(warped_nuclei, os.path.join(path, 'processed', f'he_nucleus_seg.geojson'), '', chunk=True)
                 elif isinstance(st, VisiumHDHESTData):
@@ -428,7 +422,9 @@ def process_meta_df(
                         segment_config,
                         binning_config,
                     )
-                
+
+            if isinstance(st, XeniumHESTData):
+                visualize_random_crops(st.transcript_df, st.wsi, './', st.get_shapes('tenx_nucleus', 'he').shapes)
             
             row_dict = row.to_dict()
 

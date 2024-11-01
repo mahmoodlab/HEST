@@ -13,7 +13,7 @@ from matplotlib import pyplot as plt
 from shapely.geometry.polygon import Point, Polygon
 from tqdm import tqdm
 
-from hest.utils import get_n_threads
+from hest.utils import align_xenium_df, get_n_threads
 
 
 def _process(x, extra_props, index_key, class_name):
@@ -108,15 +108,25 @@ def groupby_shape(df, col, n_threads, col_shape='xy'):
 
 class XeniumParquetCellReader(GDFReader):
     
-    def __init__(self, scaling=None):
-        self.scaling = scaling
+    def __init__(self, pixel_size_morph=None, alignment_matrix=None):
+        self.pixel_size_morph = pixel_size_morph
+        self.alignment_matrix = alignment_matrix
     
     def read_gdf(self, path, n_workers=0) -> gpd.GeoDataFrame:
         
         df = pd.read_parquet(path)
         
-        if self.scaling is not None:
-            df['vertex_x'], df['vertex_y'] = df['vertex_x'] * self.scaling, df['vertex_y'] * self.scaling 
+        if self.alignment_matrix is not None:
+            df, _ = align_xenium_df(
+                self.alignment_matrix, 
+                self.pixel_size_morph, 
+                df, 
+                'vertex_x', 
+                'vertex_y',
+                x_key_dist='vertex_x',
+                y_key_dist='vertex_y')
+        else:
+            df['vertex_x'], df['vertex_y'] = df['vertex_x'] / self.pixel_size_morph, df['vertex_y'] / self.pixel_size_morph 
 
         df['xy'] = list(zip(df['vertex_x'], df['vertex_y']))
         df = df.drop(['vertex_x', 'vertex_y'], axis=1)   

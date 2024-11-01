@@ -192,10 +192,27 @@ def df_morph_um_to_pxl(df, x_key, y_key, pixel_size_morph):
     return df
 
 
+def read_xenium_alignment(alignment_file_path: str) -> np.ndarray:
+    """ Read a xenium alignment file and convert it to a 3x3 affine matrix """
+    alignment_file = pd.read_csv(alignment_file_path, header=None)
+    alignment_matrix = alignment_file.values
+
+    # Xenium explorer >= v2.0
+    if isinstance(alignment_matrix[0][0], str) and 'fixedX' in alignment_matrix[0]:
+        points = pd.read_csv(alignment_file_path)
+        points = points.iloc[:3]
+        my_dst_pts = points[['fixedX', 'fixedY']].values.astype(np.float32)
+        my_src_pts = points[['alignmentX', 'alignmentY']].values.astype(np.float32)
+        alignment_matrix = cv2.getAffineTransform(my_src_pts, my_dst_pts)
+        alignment_matrix = np.vstack((alignment_matrix, [0, 0, 1]))
+
+    return alignment_matrix
+
+
 def align_xenium_df(
-    alignment_file_path: str, 
+    alignment_matrix: str, 
     pixel_size_morph: float, 
-    df_transcripts, 
+    df, 
     x_key, 
     y_key, 
     to_dapi=False, 
@@ -205,40 +222,25 @@ def align_xenium_df(
     """ Transform Xenium objects coordinates from the DAPI plane to the H&E plane
 
     Args:
-        alignment_file_path (str): path to a xenium alignment file
+        alignment_matrix (np.ndarray): 3x3 affine matrix
         pixel_size_morph (float): pixel size in the morphology image in um/px
-        df_transcripts (pd.DataFrame): objects to transform (all objects coordinates must be in um in the DAPI system)
-        x_key (str): key for x coordinates of objects in df_transcripts
-        y_key (str): key for y coordinates of objects in df_transcripts
+        df (pd.DataFrame): objects to transform (all objects coordinates must be in um in the DAPI system)
+        x_key (str): key for x coordinates of objects in df
+        y_key (str): key for y coordinates of objects in df
         to_dapi (bool, optional): whenever to convert from the H&E plane coordinates to DAPI plane coordinates. Defaults to False.
 
-    """
-    
-    alignment_file = pd.read_csv(alignment_file_path, header=None)
-    alignment_matrix = alignment_file.values
-    
-    # Xenium explorer >= v2.0
-    if isinstance(alignment_matrix[0][0], str) and 'fixedX' in alignment_matrix[0]:
-        points = pd.read_csv(alignment_file_path)
-        points = points.iloc[:3]
-        my_dst_pts = points[['fixedX', 'fixedY']].values.astype(np.float32)
-        my_src_pts = points[['alignmentX', 'alignmentY']].values.astype(np.float32)
-        alignment_matrix = cv2.getAffineTransform(my_src_pts, my_dst_pts)
-        alignment_matrix = np.vstack((alignment_matrix, [0, 0, 1]))
-        
+    """  
     #convert alignment matrix from pixel to um
+    alignment_matrix = alignment_matrix.copy()
     alignment_matrix[0][2] *= pixel_size_morph
     alignment_matrix[1][2] *= pixel_size_morph
-    he_to_morph_matrix = alignment_matrix
     if not to_dapi:
         alignment_matrix = np.linalg.inv(alignment_matrix)
-    coords = np.column_stack((df_transcripts[x_key].values, df_transcripts[y_key].values, np.ones((len(df_transcripts),))))
+    coords = np.column_stack((df[x_key].values, df[y_key].values, np.ones((len(df),))))
     aligned = (alignment_matrix @ coords.T).T
-    df_transcripts['dapi_y'] = df_transcripts[y_key] / pixel_size_morph
-    df_transcripts['dapi_x'] = df_transcripts[x_key] / pixel_size_morph
-    df_transcripts[y_key_dist] = aligned[:,1]
-    df_transcripts[x_key_dist] = aligned[:,0]
-    return df_transcripts, he_to_morph_matrix, alignment_matrix
+    df[y_key_dist] = aligned[:,1] / pixel_size_morph
+    df[x_key_dist] = aligned[:,0] / pixel_size_morph
+    return df, alignment_matrix
 
 
 def chunk_sorted_df(df, nb_chunk):
@@ -446,6 +448,70 @@ def cp_right_folder(path_df: str) -> None:
             dst = os.path.join(root, row['subseries'], file)
             shutil.move(src, dst)
 
+
+def visualize_random_crops(transcript_df, wsi: WSI, plot_dir='', seg: gpd.GeoDataFrame=None):
+    """ Plot random crops of transcripts and shapes on top of a WSI """
+    import matplotlib.pyplot as plt
+    from shapely import Polygon
+    
+    K = 15
+    size_region = 1000
+    random_idx = np.random.randint(0, len(transcript_df), K)
+    ratio = 0.01
+    
+    width, height = wsi.get_dimensions()
+    thumb = Image.fromarray(wsi.get_thumbnail(round(width * 0.1), round(height * 0.1)))
+    downsampled = transcript_df.sample(5000)
+    
+    xy = downsampled[['he_x', 'he_y']].values
+    
+    fig, ax = plt.subplots()
+    ax.imshow(thumb)
+    #for geom in downsampled_cells.geometry:
+    #    ax.plot(*geom.exterior.xy, linewidth=0.2, color='red')
+    ax.scatter(xy[:, 0] * 0.1, xy[:, 1] * 0.1, s=0.5)
+    ax.axis('off')
+    os.makedirs(plot_dir, exist_ok=True)
+    fig.savefig(os.path.join(plot_dir, 'transcripts_plot.jpg'), bbox_inches='tight', dpi=200)
+    
+    for k in random_idx:
+        xy_center = transcript_df[['he_x', 'he_y']].iloc[k].values
+        left_x = round(xy_center[0]-size_region // 2)
+        right_x = xy_center[0] + size_region // 2
+        bottom_y = xy_center[1] + size_region // 2
+        top_y = round(xy_center[1]-size_region // 2)
+        region = wsi.read_region_pil((left_x, top_y), 0, (size_region, size_region))
+        sub_transcripts = transcript_df[
+            (left_x < transcript_df['he_x']) & 
+            (top_y < transcript_df['he_y']) & 
+            (transcript_df['he_x'] < right_x) & 
+            (transcript_df['he_y'] < bottom_y)
+        ]
+        
+        sub_transcripts = sub_transcripts.sample(round(ratio * len(sub_transcripts)))
+        
+        fig, ax = plt.subplots()
+        ax.imshow(region)
+        if seg is not None:
+            patch_poly = Polygon([
+                [left_x, top_y],
+                [right_x, top_y],
+                [right_x, bottom_y],
+                [left_x, bottom_y]
+            ])
+            sub_seg = seg[seg.intersects(patch_poly)]
+            sub_seg = sub_seg.translate(-left_x, -top_y)
+            for geom in sub_seg.geometry:
+                ax.plot(*geom.exterior.xy, linewidth=0.2, color='green')
+        
+        xy = sub_transcripts[['he_x', 'he_y']].values
+    
+        ax.scatter(xy[:, 0] - left_x, xy[:, 1] - top_y, s=0.5)
+        ax.axis('off')
+        
+        fig.savefig(os.path.join(plot_dir, str(k) + '_transcripts_plot.jpg'), bbox_inches='tight', dpi=200)
+
+
 def get_k_genes_from_df(meta_df: pd.DataFrame, k: int, criteria: str, save_dir: str=None) -> List[str]:
     """Get the k genes according to some criteria across common genes in all the samples in the HEST meta dataframe
 
@@ -569,7 +635,9 @@ def get_path_from_meta_row(row):
         tech = 'visium-hd'
     else:
         raise Exception(f'unknown tech {tech}')
-    path = os.path.join('/mnt/sdb1/paul/data/samples/', tech, row['dataset_title'], subseries)
+    
+    DATA_PATH = os.getenv('HEST_DATA_PATH', '/mnt/sdb1/paul/data/samples')
+    path = os.path.join(DATA_PATH, tech, row['dataset_title'], subseries)
     return path   
 
     

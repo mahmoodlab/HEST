@@ -15,7 +15,7 @@ from hestcore.wsi import (WSI, CucimWarningSingleton, NumpyWSI,
                           contours_to_img, wsi_factory)
 from loguru import logger
 
-from hest.io.seg_readers import TissueContourReader
+from hest.io.seg_readers import TissueContourReader, write_geojson
 from hest.LazyShapes import LazyShapes, convert_old_to_gpd, old_geojson_to_new
 from hest.segmentation.TissueMask import TissueMask, load_tissue_mask
 
@@ -133,7 +133,7 @@ class HESTData:
         self.wsi = NumpyWSI(self.wsi.numpy())
     
         
-    def save(self, path: str, save_img=True, pyramidal=True, bigtiff=False, plot_pxl_size=False):
+    def save(self, path: str, save_img=True, pyramidal=True, bigtiff=False, plot_pxl_size=False, **kwargs):
         """Save a HESTData object to `path` as follows:
             - aligned_adata.h5ad (contains expressions for each spots + their location on the fullres image + a downscaled version of the fullres image)
             - metrics.json (contains useful metrics)
@@ -597,7 +597,7 @@ class XeniumHESTData(HESTData):
         cell_adata: sc.AnnData=None, # type: ignore
         transcript_df: pd.DataFrame=None,
         dapi_path: str=None,
-        dapi_he_affine: np.ndarray=None
+        alignment_file_path: str=None
     ):
         """
         class representing a single ST profile + its associated WSI image
@@ -615,7 +615,7 @@ class XeniumHESTData(HESTData):
             cell_adata (sc.AnnData): ST cell data, each row in adata.obs is a cell, each row in obsm is the cell location on the H&E image in pixels
             transcript_df (pd.DataFrame): dataframe of transcripts, each row is a transcript, he_x and he_y is the transcript location on the H&E image in pixels
             dapi_path (str): path to a dapi focus image
-            dapi_he_affine (np.ndarray): affine transformation from dapi to he
+            alignment_file_path (np.ndarray): path to xenium alignment path
         """
         super().__init__(adata=adata, img=img, pixel_size=pixel_size, meta=meta, tissue_seg=tissue_seg, tissue_contours=tissue_contours, shapes=shapes)
         
@@ -624,10 +624,21 @@ class XeniumHESTData(HESTData):
         self.cell_adata = cell_adata
         self.transcript_df = transcript_df
         self.dapi_path = dapi_path
-        self.dapi_he_affine = dapi_he_affine
+        self.alignment_file_path = alignment_file_path
         
         
-    def save(self, path: str, save_img=True, pyramidal=True, bigtiff=False, plot_pxl_size=False):
+    def save(
+            self, 
+            path: str, 
+            save_img=True, 
+            pyramidal=True, 
+            bigtiff=False, 
+            plot_pxl_size=False, 
+            save_transcripts=False, 
+            save_cell_seg=False, 
+            save_nuclei_seg=False,
+            **kwargs
+        ):
         """Save a HESTData object to `path` as follows:
             - aligned_adata.h5ad (contains expressions for each spots + their location on the fullres image + a downscaled version of the fullres image)
             - metrics.json (contains useful metrics)
@@ -648,14 +659,18 @@ class XeniumHESTData(HESTData):
         if self.cell_adata is not None:
             self.cell_adata.write_h5ad(os.path.join(path, 'aligned_cells.h5ad'))
         
-        #if self.transcript_df is not None:
-        #    self.transcript_df.to_parquet(os.path.join(path, 'aligned_transcripts.parquet'))
+        if save_transcripts:
+            self.transcript_df.to_parquet(os.path.join(path, 'aligned_transcripts.parquet'))
+
+        if save_cell_seg:
+            he_cells = self.get_shapes('tenx_cell', 'he').shapes
+            he_cells.to_parquet(os.path.join(path, 'he_cell_seg.parquet'))
+            write_geojson(he_cells, os.path.join(path, f'he_cell_seg.geojson'), '', chunk=True)
             
-        # for shape in self.shapes:
-        #     if shape.name == 'tenx_cell' and shape.coordinate_system == 'dapi':
-        #         shape.shapes.to_parquet(os.path.join(path, f'cell_dapi_seg.parquet'))
-        #     elif shape.name == 'tenx_nucleus' and shape.coordinate_system == 'dapi':
-        #         shape.shapes.to_parquet(os.path.join(path, f'nuc_dapi_seg.parquet'))   
+        if save_nuclei_seg:
+            he_nuclei = self.get_shapes('tenx_nuc', 'he').shapes
+            he_nuclei.to_parquet(os.path.join(path, 'he_nucleus_seg'))
+            write_geojson(he_nuclei, os.path.join(path, f'he_nucleus_seg.geojson'), '', chunk=True)
         
 
 def read_HESTData(
