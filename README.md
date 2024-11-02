@@ -6,7 +6,7 @@
 
 Welcome to the official GitHub repository of the HEST-Library introduced in *"HEST-1k: A Dataset for Spatial Transcriptomics and Histology Image Analysis", NeurIPS Spotlight, 2024*. This project was developed by the [Mahmood Lab](https://faisal.ai/) at Harvard Medical School and Brigham and Women's Hospital. 
 
-<img src="figures/fig1a.jpeg" />
+<img src="figures/fig1.jpeg" />
 
 <br/>
 
@@ -117,7 +117,7 @@ Our tutorial in [4-Running-HEST-Benchmark.ipynb](https://github.com/mahmoodlab/H
 
 ## Issues 
 - The preferred mode of communication is via GitHub issues.
-- If GitHub issues are inappropriate, email `gjaume@bwh.harvard.edu` (and cc `pdoucet@bwh.harvard.edu`). 
+- If GitHub issues are inappropriate, email `gjaume@bwh.harvard.edu` (and cc `homedoucetpaul@gmail.com`). 
 - Immediate response to minor issues may not be available.
 
 ## Citation
