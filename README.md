@@ -117,7 +117,7 @@ Our tutorial in [4-Running-HEST-Benchmark.ipynb](https://github.com/mahmoodlab/H
 
 ## Issues 
 - The preferred mode of communication is via GitHub issues.
-- If GitHub issues are inappropriate, email `gjaume@bwh.harvard.edu` (and cc `pdoucet@bwh.harvard.edu`). 
+- If GitHub issues are inappropriate, email `gjaume@bwh.harvard.edu` (and cc `homedoucetpaul@gmail.com`). 
 - Immediate response to minor issues may not be available.
 
 ## Citation
