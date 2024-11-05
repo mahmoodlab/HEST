@@ -13,7 +13,6 @@ import pandas as pd
 from hestcore.segmentation import get_path_relative
 from loguru import logger
 
-from hest.autoalign import autoalign_visium
 from hest.custom_readers import ADT_to_adata, GSE144239_to_adata, colon_atlas_to_adata, heart_atlas_to_adata
 from hest.HESTData import (HESTData, STHESTData, VisiumHDHESTData,
                            VisiumHESTData, XeniumHESTData)
@@ -457,6 +456,7 @@ class VisiumReader(Reader):
             if (not tissue_position_exists and alignment_file_path is None):
                 print('no tissue_positions_list.csv/tissue_positions.csv or alignment file found')
             print('attempt fiducial auto alignment...')
+            from hest.autoalign import autoalign_visium
 
             os.makedirs(os.path.join(os.path.dirname(img_path), 'spatial'), exist_ok=True)
             autoalign_save_dir = None

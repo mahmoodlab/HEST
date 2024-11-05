@@ -1,7 +1,6 @@
 from collections import defaultdict
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import json
-import time
 import warnings
 from abc import abstractmethod
 
@@ -9,7 +8,6 @@ import geopandas as gpd
 from loguru import logger
 import numpy as np
 import pandas as pd
-from matplotlib import pyplot as plt
 from shapely.geometry.polygon import Point, Polygon
 from tqdm import tqdm
 
@@ -240,6 +238,7 @@ def write_geojson(gdf: gpd.GeoDataFrame, path: str, category_key: str, extra_pro
     
     
 def generate_colors(names):
+    from matplotlib import pyplot as plt
     colors = plt.get_cmap('hsv', len(names))
     color_dict = {}
     for i in range(len(names)):

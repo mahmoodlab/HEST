@@ -2,17 +2,13 @@ from __future__ import annotations
 
 import os
 import sys
-import time
 import traceback
 import warnings
 from abc import abstractmethod
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from multiprocessing import Pool, cpu_count
-from time import sleep
+from concurrent.futures import ThreadPoolExecutor
 from typing import Tuple, Union
 
 import geopandas as gpd
-import matplotlib.pyplot as plt
 import numpy as np
 import openslide
 import pandas as pd
@@ -410,6 +406,7 @@ def expand_nuclei(gdf: gpd.GeoDataFrame, pixel_size: float, exp_um=5, plot=False
     gdf_cell.geometry = gdf_cell.union(gdf.loc[~invalid_mask])
     
     if plot:
+        import matplotlib.pyplot as plt
         logger.info('Plotting...')
         _, ax = plt.subplots(figsize=(50, 50))
 
