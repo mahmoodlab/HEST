@@ -1,7 +1,6 @@
 import pickle
 from typing import List
 
-import cv2
 import numpy as np
 from PIL import Image
 
@@ -27,6 +26,8 @@ def load_tissue_mask(pkl_path: str, jpg_path: str, width: int, height: int) -> T
         with Image.open(jpg_path) as img:
             tissue_mask = np.array(img).copy()
          
+
+        import cv2
         tissue_mask = cv2.resize(tissue_mask, (width, height))
          
         mask = TissueMask(tissue_mask, contours_tissue, contours_holes)

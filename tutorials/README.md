@@ -23,6 +23,6 @@ This notebook is dedicated to visualizing batch effects within the HEST-1k datas
 
 ## Contributions
 
-External contributions are welcome! If you have ideas for improving these tutorials or would like to contribute, please feel free to reach out to [gjaume@bwh.harvard.edu](mailto:gjaume@bwh.harvard.edu).
+External contributions are welcome! If you have ideas for improving these tutorials or would like to contribute, please feel free to reach out to [gjaume@bwh.harvard.edu](mailto:gjaume@bwh.harvard.edu) (cc: [homedoucetpaul@gmail.com](mailto:homedoucetpaul@gmail.com)).
 
 If you encounter any issues, please check the GitHub Issues section, as other users might have already faced similar challenges.

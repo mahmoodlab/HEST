@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+from datetime import datetime
 import functools
 import gzip
 import json
@@ -10,6 +11,7 @@ import sys
 import warnings
 from enum import Enum
 from typing import List, Tuple, Union
+import zipfile
 
 import cv2
 import numpy as np
@@ -24,6 +26,59 @@ from tqdm import tqdm
 
 Image.MAX_IMAGE_PIXELS = 93312000000
 ALIGNED_HE_FILENAME = 'aligned_fullres_HE.tif'
+
+from loguru import logger
+
+logger.remove()
+logger.add(
+    sink=sys.stdout,
+    format="<green>{time:HH:mm:ss}</green> <level>{level}</level>: <level>{message}</level>"
+)
+
+def print_resource_usage():
+            import psutil
+            current_process = psutil.Process()
+
+            threads = current_process.threads()
+            logger.debug(f'{len(threads)} threads')
+            memory_info = current_process.memory_info()
+            logger.debug(f"Memory usage (MB): {memory_info.rss / (1024 * 1024):.2f}")
+
+
+def value_error_str(obj, name):
+    return f'Unrecognized type for argument `{name}` got {obj}'
+
+
+def get_name_datetime() -> str:
+    current_date = datetime.now()
+
+    name = current_date.strftime("%Y_%m_%d_%H_%M_%S")
+    
+    return name
+
+def deprecated(func):
+    """This is a decorator which can be used to mark functions
+    as deprecated. It will result in a warning being emitted
+    when the function is used."""
+    @functools.wraps(func)
+    def new_func(*args, **kwargs):
+        warnings.simplefilter('always', DeprecationWarning)  # turn off filter
+        warnings.warn("Call to deprecated function {}.".format(func.__name__),
+                      category=DeprecationWarning,
+                      stacklevel=2)
+        warnings.simplefilter('default', DeprecationWarning)  # reset filter
+        return func(*args, **kwargs)
+    return new_func
+
+
+def get_n_threads(n_workers):
+    return os.cpu_count() if n_workers == -1 else n_workers
+
+
+def verify_paths(paths, suffix=""):
+    for path in paths:
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"No such file or directory: {path}" + suffix)
 
 
 logger.remove()
@@ -48,78 +103,7 @@ def verify_paths(paths, suffix=""):
     for path in paths:
         if not os.path.exists(path):
             raise FileNotFoundError(f"No such file or directory: {path}" + suffix)
-
-
-def geojson_to_map(geojson: dict, width, height, color=None):
-    img = np.zeros((height, width), dtype=np.uint8)
-    
-    i = 0
-    for chunk in geojson:  
-        for my_coords in tqdm(chunk['geometry']['coordinates']):
-            contours = my_coords[0]
-            contours = (np.array(contours)).round().astype(np.int32)
-            if color is None:
-                c = (i + 1, i + 1, i + 1)
-            else:
-                c = color
-            cv2.drawContours(img, [contours], -1, color=c, thickness=cv2.FILLED)
-            i = (i + 1) % 255
-    
-    #img = cv2.resize(img, (width, height))
-    #Image.fromarray(img).save('contours.jpg')
-    #tiff_save(img, 'contours.tif', 0.5, pyramidal=True, bigtiff=False)
-    return img
-        
-
-def to_instance_map(img, cells_mask, save_dir, target_pixel_size, src_pixel_size, target_patch_size) -> None:
-    scale_factor = target_pixel_size / src_pixel_size
-    patch_size_pxl = round(target_patch_size * scale_factor)
-    
-    patch_dir = os.path.join(save_dir, 'patches')
-    mask_dir = os.path.join(save_dir, 'masks')
-    overlay_dir = os.path.join(save_dir, 'overlays')
-    os.makedirs(patch_dir, exist_ok=True)
-    os.makedirs(mask_dir, exist_ok=True)
-    os.makedirs(overlay_dir, exist_ok=True)
-    
-    wsi = wsi_factory(img)
-    patcher = WSIPatcher(wsi, patch_size_pxl)
-    
-    cells_mask = wsi_factory(cells_mask)
-    
-    cols, rows = patcher.get_cols_rows()
-    
-    print('save patches...')
-    # saves patches to temp dir
-    for row in tqdm(range(rows)):
-        for col in range(cols):
-            tile, pxl_x, pxl_y = patcher.get_tile(col, row)
-            mask = cells_mask.read_region((pxl_x, pxl_y), 0, (patch_size_pxl, patch_size_pxl))
-            mask = mask[:, :, 0]
-            mask = cv2.resize(mask, (target_patch_size, target_patch_size), interpolation=cv2.INTER_NEAREST)
             
-            tile = cv2.resize(tile, (target_patch_size, target_patch_size), interpolation=cv2.INTER_CUBIC)
-
-            Image.fromarray(tile).save(os.path.join(patch_dir, f'{pxl_x}_{pxl_y}.png'))
-            
-            
-            inst_map = mask.copy()
-            mask[mask > 0] = 1
-            
-            dict = {
-                'inst_map': inst_map,
-                'type_map': mask
-            }
-            
-            Image.fromarray(inst_map).save(os.path.join(mask_dir, f'{pxl_x}_{pxl_y}.png'))
-            np.save(os.path.join(mask_dir, f'{pxl_x}_{pxl_y}.png'), dict)
-            blended = np.zeros((target_patch_size, target_patch_size, 3), dtype=np.uint8)
-            blended[mask > 0] = [21, 237, 72]
-            blended = Image.fromarray(blended)
-            blended = Image.blend(Image.fromarray(tile), blended, 0.5)
-            blended.save(os.path.join(overlay_dir, f'{pxl_x}_{pxl_y}.png'))
-            
-
 
 def combine_meta_metrics(meta_df, metrics_path, meta_path):
     for _, row in meta_df.iterrows():
@@ -137,19 +121,55 @@ def df_morph_um_to_pxl(df, x_key, y_key, pixel_size_morph):
     return df
 
 
-def align_xenium_df(alignment_file_path, pixel_size_morph, df_transcripts, x_key, y_key):
+def read_xenium_alignment(alignment_file_path: str) -> np.ndarray:
+    """ Read a xenium alignment file and convert it to a 3x3 affine matrix """
     alignment_file = pd.read_csv(alignment_file_path, header=None)
     alignment_matrix = alignment_file.values
+
+    # Xenium explorer >= v2.0
+    if isinstance(alignment_matrix[0][0], str) and 'fixedX' in alignment_matrix[0]:
+        points = pd.read_csv(alignment_file_path)
+        points = points.iloc[:3]
+        my_dst_pts = points[['fixedX', 'fixedY']].values.astype(np.float32)
+        my_src_pts = points[['alignmentX', 'alignmentY']].values.astype(np.float32)
+        alignment_matrix = cv2.getAffineTransform(my_src_pts, my_dst_pts)
+        alignment_matrix = np.vstack((alignment_matrix, [0, 0, 1]))
+
+    return alignment_matrix
+
+
+def align_xenium_df(
+    df,
+    alignment_matrix: str, 
+    pixel_size_morph: float,  
+    x_key, 
+    y_key, 
+    to_dapi=False, 
+    x_key_dist='he_x', 
+    y_key_dist='he_y'
+):
+    """ Transform Xenium objects coordinates from the DAPI plane to the H&E plane
+
+    Args:
+        alignment_matrix (np.ndarray): 3x3 affine matrix
+        pixel_size_morph (float): pixel size in the morphology image in um/px
+        df (pd.DataFrame): objects to transform (all objects coordinates must be in um in the DAPI system)
+        x_key (str): key for x coordinates of objects in df
+        y_key (str): key for y coordinates of objects in df
+        to_dapi (bool, optional): whenever to convert from the H&E plane coordinates to DAPI plane coordinates. Defaults to False.
+
+    """  
     #convert alignment matrix from pixel to um
+    alignment_matrix = alignment_matrix.copy()
     alignment_matrix[0][2] *= pixel_size_morph
     alignment_matrix[1][2] *= pixel_size_morph
-    he_to_morph_matrix = alignment_matrix
-    alignment_matrix = np.linalg.inv(alignment_matrix)
-    coords = np.column_stack((df_transcripts[x_key].values, df_transcripts[y_key].values, np.ones((len(df_transcripts),))))
+    if not to_dapi:
+        alignment_matrix = np.linalg.inv(alignment_matrix)
+    coords = np.column_stack((df[x_key].values, df[y_key].values, np.ones((len(df),))))
     aligned = (alignment_matrix @ coords.T).T
-    df_transcripts[y_key] = aligned[:,1]
-    df_transcripts[x_key] = aligned[:,0]
-    return df_transcripts, he_to_morph_matrix, alignment_matrix
+    df[y_key_dist] = aligned[:,1] / pixel_size_morph
+    df[x_key_dist] = aligned[:,0] / pixel_size_morph
+    return df
 
 
 def chunk_sorted_df(df, nb_chunk):
@@ -357,6 +377,70 @@ def cp_right_folder(path_df: str) -> None:
             dst = os.path.join(root, row['subseries'], file)
             shutil.move(src, dst)
 
+
+def visualize_random_crops(transcript_df, wsi: WSI, plot_dir='', seg: gpd.GeoDataFrame=None):
+    """ Plot random crops of transcripts and shapes on top of a WSI """
+    import matplotlib.pyplot as plt
+    from shapely import Polygon
+    
+    K = 15
+    size_region = 1000
+    random_idx = np.random.randint(0, len(transcript_df), K)
+    ratio = 0.01
+    
+    width, height = wsi.get_dimensions()
+    thumb = Image.fromarray(wsi.get_thumbnail(round(width * 0.1), round(height * 0.1)))
+    downsampled = transcript_df.sample(5000)
+    
+    xy = downsampled[['he_x', 'he_y']].values
+    
+    fig, ax = plt.subplots()
+    ax.imshow(thumb)
+    #for geom in downsampled_cells.geometry:
+    #    ax.plot(*geom.exterior.xy, linewidth=0.2, color='red')
+    ax.scatter(xy[:, 0] * 0.1, xy[:, 1] * 0.1, s=0.5)
+    ax.axis('off')
+    os.makedirs(plot_dir, exist_ok=True)
+    fig.savefig(os.path.join(plot_dir, 'transcripts_plot.jpg'), bbox_inches='tight', dpi=200)
+    
+    for k in random_idx:
+        xy_center = transcript_df[['he_x', 'he_y']].iloc[k].values
+        left_x = round(xy_center[0]-size_region // 2)
+        right_x = xy_center[0] + size_region // 2
+        bottom_y = xy_center[1] + size_region // 2
+        top_y = round(xy_center[1]-size_region // 2)
+        region = wsi.read_region_pil((left_x, top_y), 0, (size_region, size_region))
+        sub_transcripts = transcript_df[
+            (left_x < transcript_df['he_x']) & 
+            (top_y < transcript_df['he_y']) & 
+            (transcript_df['he_x'] < right_x) & 
+            (transcript_df['he_y'] < bottom_y)
+        ]
+        
+        sub_transcripts = sub_transcripts.sample(round(ratio * len(sub_transcripts)))
+        
+        fig, ax = plt.subplots()
+        ax.imshow(region)
+        if seg is not None:
+            patch_poly = Polygon([
+                [left_x, top_y],
+                [right_x, top_y],
+                [right_x, bottom_y],
+                [left_x, bottom_y]
+            ])
+            sub_seg = seg[seg.intersects(patch_poly)]
+            sub_seg = sub_seg.translate(-left_x, -top_y)
+            for geom in sub_seg.geometry:
+                ax.plot(*geom.exterior.xy, linewidth=0.2, color='green')
+        
+        xy = sub_transcripts[['he_x', 'he_y']].values
+    
+        ax.scatter(xy[:, 0] - left_x, xy[:, 1] - top_y, s=0.5)
+        ax.axis('off')
+        
+        fig.savefig(os.path.join(plot_dir, str(k) + '_transcripts_plot.jpg'), bbox_inches='tight', dpi=200)
+
+
 def get_k_genes_from_df(meta_df: pd.DataFrame, k: int, criteria: str, save_dir: str=None) -> List[str]:
     """Get the k genes according to some criteria across common genes in all the samples in the HEST meta dataframe
 
@@ -375,8 +459,8 @@ def get_k_genes_from_df(meta_df: pd.DataFrame, k: int, criteria: str, save_dir: 
     
     adata_list = []
     for _, row in meta_df.iterrows():
-        id = row['id']
-        adata = sc.read_h5ad(f"/mnt/sdb1/paul/images/adata/{id}.h5ad")
+        path = os.path.join(get_path_from_meta_row(row), 'processed')
+        adata = sc.read_h5ad(os.path.join(path, 'aligned_adata.h5ad'))
         adata_list.append(adata)
     return get_k_genes(adata_list, k, criteria, save_dir=save_dir)
 
@@ -418,6 +502,7 @@ def get_k_genes(adata_list: List[sc.AnnData], k: int, criteria: str, save_dir: s
             
 
     common_genes = [gene for gene in common_genes if 'BLANK' not in gene and 'Control' not in gene]
+    logger.info(f"Found {len(common_genes)} common genes")
 
     for adata in adata_list:
 
@@ -445,7 +530,7 @@ def get_k_genes(adata_list: List[sc.AnnData], k: int, criteria: str, save_dir: s
         with open(save_dir, mode='w') as json_file:
             json.dump(json_dict, json_file)
 
-    print(f'selected genes {top_k}')
+    logger.info(f'selected genes {top_k}')
     return top_k
 
 
@@ -479,7 +564,9 @@ def get_path_from_meta_row(row):
         tech = 'visium-hd'
     else:
         raise Exception(f'unknown tech {tech}')
-    path = os.path.join('/mnt/sdb1/paul/data/samples/', tech, row['dataset_title'], subseries)
+    
+    DATA_PATH = os.getenv('HEST_DATA_PATH', '/mnt/sdb1/paul/data/samples')
+    path = os.path.join(DATA_PATH, tech, row['dataset_title'], subseries)
     return path   
 
     
@@ -759,6 +846,8 @@ def find_first_file_endswith(dir: str, suffix: str, exclude='', anywhere=False) 
     Returns:
         str: filename of first match
     """
+    if dir is None:
+        return None
     files_dir = os.listdir(dir)
     if anywhere:
         matching = [file for file in files_dir if suffix in file and file != exclude]
@@ -833,7 +922,7 @@ def find_biggest_img(path: str) -> str:
     Returns:
         str: filename of biggest image in `path` directory
     """
-    ACCEPTED_FORMATS = ['.tif', '.jpg', '.btf', '.png', '.tiff', '.TIF']
+    ACCEPTED_FORMATS = ['.tif', '.jpg', '.btf', '.png', '.tiff', '.TIF', 'ndpi', 'nd2']
     biggest_size = -1
     biggest_img_filename = None
     for file in os.listdir(path):
@@ -944,8 +1033,39 @@ def _sample_id_to_filename(id):
     return id + '.tif'            
 
             
-def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal: bool, cp_pixel_vis: bool, cp_adata: bool, cp_meta: bool, cp_cellvit, cp_patches, cp_contours):
+def _process_row(
+    dest, 
+    row, 
+    cp_downscaled: bool, 
+    cp_spatial: bool, 
+    cp_pyramidal: bool, 
+    cp_pixel_vis: bool, 
+    cp_adata: bool, 
+    cp_meta: bool, 
+    cp_cellvit, 
+    cp_patches, 
+    cp_contours, 
+    cp_dapi_seg,
+    cp_transcripts,
+    cp_he_seg
+):
     """ Internal use method, to transfer images to a `release` folder (`dest`)"""
+    
+    def cp_dst(dir_name, src_filename, dst_filename, compress=False):
+        os.makedirs(os.path.join(dest, dir_name), exist_ok=True)
+        path_src = os.path.join(path, src_filename)
+        path_dest = os.path.join(dest, dir_name, dst_filename)
+        
+        if compress:
+            zip_path_src = os.path.join(path, dst_filename + '.zip')
+            zip_hest_file(zip_path_src, path_src, dst_filename)
+            path_src = zip_path_src
+            path_dest += '.zip'
+            
+            
+        shutil.copy(path_src, path_dest)
+        
+    
     try:
         path = get_path_from_meta_row(row)
     except Exception:
@@ -956,19 +1076,12 @@ def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal:
         my_id = row['id']
         raise Exception(f'invalid sample id {my_id}')
     
-    path_fullres = os.path.join(path, 'aligned_fullres_HE.tif')
-    if not os.path.exists(path_fullres):
-        print(f"couldn't find {path}")
-        return
+
     if cp_pyramidal:
         src_pyramidal = os.path.join(path, 'aligned_fullres_HE.tif')
         dst_pyramidal = os.path.join(dest, 'wsis', _sample_id_to_filename(row['id']))
         os.makedirs(os.path.join(dest, 'wsis'), exist_ok=True)
         shutil.copy(src_pyramidal, dst_pyramidal)
-        #dst = os.path.join(dest, 'pyramidal', _sample_id_to_filename(row['id']))
-        #bigtiff_option = '' if isinstance(row['bigtiff'], float) or not row['bigtiff']  else '--bigtiff'
-        #vips_pyr_cmd = f'vips tiffsave "{path_fullres}" "{dst}" --pyramid --tile --tile-width=256 --tile-height=256 --compression=deflate {bigtiff_option}'
-        #subprocess.call(vips_pyr_cmd, shell=True)
         
     id = row['id']
     if cp_meta:    
@@ -1014,6 +1127,25 @@ def _process_row(dest, row, cp_downscaled: bool, cp_spatial: bool, cp_pyramidal:
         path_cont = os.path.join(path, f'tissue_contours.geojson')
         path_dest_cont = os.path.join(dest, 'tissue_seg', f'{id}_contours.geojson')
         shutil.copy(path_cont, path_dest_cont)
+    if cp_transcripts:
+        cp_dst('transcripts', 'aligned_transcripts.parquet', f'{id}_transcripts.parquet')
+    if cp_he_seg:
+        cp_dst('xenium_seg', 'he_cell_seg.geojson', f'{id}_xenium_cell_seg.geojson', compress=True)
+        cp_dst('xenium_seg', 'he_nucleus_seg.geojson', f'{id}_xenium_nucleus_seg.geojson', compress=True)
+        
+        cp_dst('xenium_seg', 'he_cell_seg.parquet', f'{id}_xenium_cell_seg.parquet')
+        cp_dst('xenium_seg', 'he_nucleus_seg.parquet', f'{id}_xenium_nucleus_seg.parquet')
+        
+    # if cp_dapi_seg:
+    #     os.makedirs(os.path.join(dest, 'dapi_seg'), exist_ok=True)
+    #     path_dapi_seg = os.path.join(path, f'cell_dapi_seg.parquet')
+    #     path_dest_dapi_seg = os.path.join(dest, 'dapi_seg', f'{id}_cell_dapi_seg.parquet')
+    #     shutil.copy(path_dapi_seg, path_dest_dapi_seg)
+        
+    #     os.makedirs(os.path.join(dest, 'dapi_seg'), exist_ok=True)
+    #     path_dapi_seg = os.path.join(path, f'nuc_dapi_seg.parquet')
+    #     path_dest_dapi_seg = os.path.join(dest, 'dapi_seg', f'{id}_nuc_dapi_seg.parquet')
+    #     shutil.copy(path_dapi_seg, path_dest_dapi_seg)
         
         path_cont = os.path.join(path, f'tissue_seg_vis.jpg')
         path_dest_cont = os.path.join(dest, 'tissue_seg', f'{id}_vis.jpg')
@@ -1043,12 +1175,15 @@ def copy_processed(
     n_job=6, 
     cp_cellvit=True, 
     cp_patches=True, 
-    cp_contours=True
+    cp_contours=True,
+    cp_dapi_seg=True,
+    cp_transcripts=False,
+    cp_he_seg=False
 ):
     """ Internal use method, to transfer images to a `release` folder (`dest`)"""
     with concurrent.futures.ThreadPoolExecutor(max_workers=n_job) as executor:
         # Submit tasks to the executor
-        future_results = [executor.submit(_process_row, dest, row, cp_downscaled, cp_spatial, cp_pyramidal, cp_pixel_vis, cp_adata, cp_meta, cp_cellvit, cp_patches, cp_contours) for _, row in meta_df.iterrows()]
+        future_results = [executor.submit(_process_row, dest, row, cp_downscaled, cp_spatial, cp_pyramidal, cp_pixel_vis, cp_adata, cp_meta, cp_cellvit, cp_patches, cp_contours, cp_dapi_seg, cp_transcripts, cp_he_seg) for _, row in meta_df.iterrows()]
 
         # Retrieve results as they complete
         for future in tqdm(concurrent.futures.as_completed(future_results), total=len(meta_df)):
@@ -1109,29 +1244,33 @@ def write_10X_h5(adata, file):
 
 def check_arg(arg, arg_name, values):
     if arg not in values:
-       raise ValueError(f"{arg_name}={arg} must be one of {values}")
+       raise ValueError(f"{arg_name} can only be one of these: {values}, found {arg}")
         
 
 def helper_mex(path: str, filename: str) -> None:
     """If filename doesn't exist in directory `path`, find similar filename in same directory and zip it to patch filename"""
+    zipped_file = find_first_file_endswith(path, filename)
+    if zipped_file.split('/')[-1] != filename:
+        shutil.move(zipped_file, os.path.join(path, filename))
+    
+    unzipped_file = find_first_file_endswith(path, filename.strip('.gz'))
     # zip if needed
-    file = find_first_file_endswith(path, filename.strip('.gz'))
-    #dst = os.path.join(path, filename)
-    src = find_first_file_endswith(path, filename)
-    if file is not None and src is None:
-        f_in = open(file, 'rb')
+    if unzipped_file is not None and zipped_file is None:
+        f_in = open(unzipped_file, 'rb')
         f_out = gzip.open(os.path.join(os.path.join(path), filename), 'wb')
         f_out.writelines(f_in)
         f_out.close()
         f_in.close()
     
-    #if not os.path.exists(dst) and \
-    #        src is not None:
-    #    shutil.copy(src, dst)
+    
+def zip_hest_file(archive_path, file_path, file_path_in_archive):
+    """ Zip file """
+    with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        zipf.write(file_path, file_path_in_archive)
 
 
 def load_wsi(img_path: str) -> Tuple[WSI, float]:
-    """Load WSI from path and its corresponding embedded pixel size in um/px
+    """Load full WSI in memory from path and its corresponding embedded pixel size in um/px
     
     the embedded pixel size is only determined in tiff/tif/btf/TIF images and
     only if the tags 'XResolution' and 'YResolution' are set
@@ -1151,8 +1290,12 @@ def load_wsi(img_path: str) -> Tuple[WSI, float]:
     }
     pixel_size_embedded = None
     
-    img = tifffile.imread(img_path)
-
+    if img_path.endswith('.nd2'):
+        import nd2
+        img = nd2.imread(img_path)
+    else:
+        img = tifffile.imread(img_path)
+        
     if img_path.endswith('tiff') or img_path.endswith('tif') or img_path.endswith('btf') or img_path.endswith('TIF'):
             
         my_img = tifffile.TiffFile(img_path)
@@ -1162,17 +1305,17 @@ def load_wsi(img_path: str) -> Tuple[WSI, float]:
             factor = unit_to_micrometers[my_img.pages[0].tags['ResolutionUnit'].value]
             pixel_size_embedded = (my_img.pages[0].tags['XResolution'].value[1] / my_img.pages[0].tags['XResolution'].value[0]) * factor
     
-    # sometimes the RGB axis are inverted
-    if img.shape[0] == 3:
-        img = np.transpose(img, axes=(1, 2, 0))
-    elif img.shape[2] == 4: # RGBA to RGB
-        img = img[:,:,:3]
-    if np.max(img) > 1000:
-        img = img.astype(np.float32)
-        img /= 2**8
-        img = img.astype(np.uint8)
-        
-    wsi = NumpyWSI(img)
+        # sometimes the RGB axis are inverted
+        if img.shape[0] == 3 or img.shape[0] == 4:
+            img = np.transpose(img, axes=(1, 2, 0))
+        if img.shape[2] == 4: # RGBA to RGB
+            img = img[:,:,:3]
+        if np.max(img) > 1000:
+            img = img.astype(np.float32)
+            img /= 2**8
+            img = img.astype(np.uint8)
+            
+        wsi = NumpyWSI(img)
     
     return wsi, pixel_size_embedded
 

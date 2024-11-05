@@ -1,13 +1,17 @@
+from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import json
 import warnings
 from abc import abstractmethod
 
 import geopandas as gpd
+from loguru import logger
 import numpy as np
 import pandas as pd
-from matplotlib import pyplot as plt
 from shapely.geometry.polygon import Point, Polygon
 from tqdm import tqdm
+
+from hest.utils import align_xenium_df, get_n_threads
 
 
 def _process(x, extra_props, index_key, class_name):
@@ -60,25 +64,77 @@ class GDFReader:
     @abstractmethod
     def read_gdf(self, path) -> gpd.GeoDataFrame:
         pass
+   
+def fn(block, i):
+    logger.debug(f'start fn block {i}')
+    groups = defaultdict(lambda: [])
+    [groups[row[0]].append(row[1]) for row in block]
+    g = np.array([Polygon(value) for _, value in groups.items()])
+    key = np.array([key for key, _ in groups.items()])
+    logger.debug(f'finish fn block {i}')
+    return np.column_stack((key, g))
     
+def groupby_shape(df, col, n_threads, col_shape='xy'):
+    n_chunks = n_threads
+    
+    if n_threads >= 1:
+        l = len(df) // n_chunks
+        start = 0
+        chunk_lens = []
+        while start < len(df):
+            end = min(start + l, len(df))
+            while end < len(df) and df.iloc[end][col] == df.iloc[end - 1][col]:
+                end += 1
+            chunk_lens.append((start, end))
+            start = end 
+        
+        dfs = []
+        with ProcessPoolExecutor(max_workers=n_threads) as executor:
+            future_results = [executor.submit(fn, df[[col, col_shape]].iloc[start:end].values, start) for start, end in chunk_lens]
+
+            for future in as_completed(future_results):
+                dfs.append(future.result()) 
+        
+        concat = np.concatenate(dfs)
+    else:
+        concat = fn(df[[col, col_shape]].values, 0)
+
+    gdf = gpd.GeoDataFrame(geometry=concat[:, 1])
+    gdf.index = concat[:, 0]
+    
+    return gdf
 
 class XeniumParquetCellReader(GDFReader):
     
-    def read_gdf(self, path) -> gpd.GeoDataFrame:    
+    def __init__(self, pixel_size_morph=None, alignment_matrix=None):
+        self.pixel_size_morph = pixel_size_morph
+        self.alignment_matrix = alignment_matrix
+    
+    def read_gdf(self, path, n_workers=0) -> gpd.GeoDataFrame:
         
         df = pd.read_parquet(path)
-        
-        df['xy'] = list(zip(df['vertex_x'], df['vertex_y']))
-        df = df.drop(['vertex_x', 'vertex_y'], axis=1)
-        
-        df = df.groupby('cell_id').agg({
-            'xy': Polygon
-        }).reset_index()
-        
-        gdf = gpd.GeoDataFrame(df, geometry=df['xy'])
-        gdf = gdf.drop(['xy'], axis=1)
-        return gdf
 
+        
+        
+        if self.alignment_matrix is not None:
+            df = align_xenium_df(
+                df,
+                self.alignment_matrix, 
+                self.pixel_size_morph,  
+                'vertex_x', 
+                'vertex_y',
+                x_key_dist='vertex_x',
+                y_key_dist='vertex_y')
+        else:
+            df['vertex_x'], df['vertex_y'] = df['vertex_x'] / self.pixel_size_morph, df['vertex_y'] / self.pixel_size_morph 
+
+        df['xy'] = list(zip(df['vertex_x'], df['vertex_y']))
+        df = df.drop(['vertex_x', 'vertex_y'], axis=1)   
+        
+        n_threads = get_n_threads(n_workers)
+        
+        gdf = groupby_shape(df, 'cell_id', n_threads)
+        return gdf
 
 class GDFParquetCellReader(GDFReader):
     
@@ -102,7 +158,7 @@ class TissueContourReader(GDFReader):
         return gdf
     
 
-def write_geojson(gdf: gpd.GeoDataFrame, path: str, category_key: str, extra_prop=False, uniform_prop=True, index_key: str=None) -> None:
+def write_geojson(gdf: gpd.GeoDataFrame, path: str, category_key: str, extra_prop=False, uniform_prop=True, index_key: str=None, chunk=False) -> None:
         
     if isinstance(gdf.geometry.iloc[0], Point):
         geometry = 'MultiPoint'
@@ -110,6 +166,19 @@ def write_geojson(gdf: gpd.GeoDataFrame, path: str, category_key: str, extra_pro
         geometry = 'MultiPolygon'
     else:
         raise ValueError(f"gdf.geometry[0] must be of type Point or Polygon, got {type(gdf.geometry.iloc[0])}")
+    
+    
+    if chunk:
+        n = 10
+        l = (len(gdf) // n) + 1
+        s = []
+        for i in range(n):
+            s.append(np.repeat(i, l))
+        cls = np.concatenate(s)
+        
+        gdf['_chunked'] = cls[:len(gdf)]
+        category_key = '_chunked'
+    
     
     groups = np.unique(gdf[category_key])
     colors = generate_colors(groups)
@@ -169,6 +238,7 @@ def write_geojson(gdf: gpd.GeoDataFrame, path: str, category_key: str, extra_pro
     
     
 def generate_colors(names):
+    from matplotlib import pyplot as plt
     colors = plt.get_cmap('hsv', len(names))
     color_dict = {}
     for i in range(len(names)):
@@ -192,19 +262,19 @@ def read_parquet_schema_df(path: str) -> pd.DataFrame:
     return schema
     
     
-def cell_reader_factory(path) -> GDFReader:
+def cell_reader_factory(path, reader_kwargs={}) -> GDFReader:
     if path.endswith('.geojson'):
-        return GeojsonCellReader()
+        return GeojsonCellReader(**reader_kwargs)
     elif path.endswith('.parquet'):
         schema = read_parquet_schema_df(path)
         if 'geometry' in schema['column'].values:
-            return GDFParquetCellReader()
+            return GDFParquetCellReader(**reader_kwargs)
         else:
-            return XeniumParquetCellReader()
+            return XeniumParquetCellReader(**reader_kwargs)
     else:
         ext = path.split('.')[-1]
         raise ValueError(f'Unknown file extension {ext} for a cell segmentation file, needs to be .geojson or .parquet')
     
     
-def read_gdf(path) -> gpd.GeoDataFrame:
-    return cell_reader_factory(path).read_gdf(path)
+def read_gdf(path, reader_kwargs={}) -> gpd.GeoDataFrame:
+    return cell_reader_factory(path, reader_kwargs).read_gdf(path)

@@ -19,12 +19,6 @@ from hest.autoalign import autoalign_visium
 from hest.readers import VisiumReader
 from hest.utils import load_image
 
-try:
-    from cucim import CuImage
-except ImportError:
-    CuImage = None
-    CucimWarningSingleton.warn()
-
 
 class TestHESTReader(unittest.TestCase):
     

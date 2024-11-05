@@ -2,7 +2,7 @@ import geopandas as gpd
 import pandas as pd
 from shapely import Polygon
 
-from hest.io.seg_readers import read_gdf
+from hest.io.seg_readers import GDFReader, read_gdf
 from hest.utils import verify_paths
 
 
@@ -10,16 +10,22 @@ class LazyShapes:
     
     path: str = None
     
-    def __init__(self, path: str, name: str, coordinate_system: str):
+    def __init__(self, path: str, name: str, coordinate_system: str, reader: GDFReader=None, reader_kwargs = {}):
         verify_paths([path])
         self.path = path
         self.name = name
         self.coordinate_system = coordinate_system
         self._shapes = None
+        self.reader_kwargs = reader_kwargs
+        self.reader = reader
         
     def compute(self) -> None:
         if self._shapes is None:
-            self._shapes = read_gdf(self.path)
+            if self.reader is None:
+                self._shapes = read_gdf(self.path, self.reader_kwargs)
+            else:
+                self._shapes = self.reader(**self.reader_kwargs).read_gdf(self.path)
+                
             
     @property
     def shapes(self) -> gpd.GeoDataFrame:

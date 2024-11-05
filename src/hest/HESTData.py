@@ -4,18 +4,17 @@ import json
 import os
 import shutil
 import warnings
-from typing import Dict, Iterator, List, Union
+from typing import Dict, List, Union
 
 import cv2
 import geopandas as gpd
 import numpy as np
+from loguru import logger
 from hestcore.wsi import (WSI, CucimWarningSingleton, NumpyWSI,
                           contours_to_img, wsi_factory)
 from loguru import logger
 
-
-
-from hest.io.seg_readers import TissueContourReader
+from hest.io.seg_readers import TissueContourReader, write_geojson
 from hest.LazyShapes import LazyShapes, convert_old_to_gpd, old_geojson_to_new
 from hest.segmentation.TissueMask import TissueMask, load_tissue_mask
 
@@ -31,7 +30,7 @@ from shapely import Point
 from tqdm import tqdm
 
 from .utils import (ALIGNED_HE_FILENAME, check_arg, deprecated,
-                    find_first_file_endswith, get_path_from_meta_row,
+                    find_first_file_endswith, get_k_genes_from_df, get_path_from_meta_row,
                     plot_verify_pixel_size, tiff_save, verify_paths)
 
 
@@ -100,7 +99,7 @@ class HESTData:
         else:
             self._tissue_contours = tissue_contours
         
-        if 'total_counts' not in self.adata.var_names:
+        if 'total_counts' not in self.adata.var_names and len(self.adata) > 0:
             sc.pp.calculate_qc_metrics(self.adata, inplace=True)
         
         
@@ -133,7 +132,7 @@ class HESTData:
         self.wsi = NumpyWSI(self.wsi.numpy())
     
         
-    def save(self, path: str, save_img=True, pyramidal=True, bigtiff=False, plot_pxl_size=False):
+    def save(self, path: str, save_img=True, pyramidal=True, bigtiff=False, plot_pxl_size=False, **kwargs):
         """Save a HESTData object to `path` as follows:
             - aligned_adata.h5ad (contains expressions for each spots + their location on the fullres image + a downscaled version of the fullres image)
             - metrics.json (contains useful metrics)
@@ -155,6 +154,8 @@ class HESTData:
             self.adata.write(os.path.join(path, 'aligned_adata.h5ad'))
         except:
             # workaround from https://github.com/theislab/scvelo/issues/255
+            import traceback
+            traceback.print_exc()
             self.adata.__dict__['_raw'].__dict__['_var'] = self.adata.__dict__['_raw'].__dict__['_var'].rename(columns={'_index': 'features'})
             self.adata.write(os.path.join(path, 'aligned_adata.h5ad'))
         
@@ -172,7 +173,8 @@ class HESTData:
         downscaled_img = self.adata.uns['spatial']['ST']['images']['downscaled_fullres']
         down_fact = self.adata.uns['spatial']['ST']['scalefactors']['tissue_downscaled_fullres_scalef']
         down_img = Image.fromarray(downscaled_img)
-        down_img.save(os.path.join(path, 'downscaled_fullres.jpeg'))
+        if len(downscaled_img) > 0:
+            down_img.save(os.path.join(path, 'downscaled_fullres.jpeg'))
         
         
         if plot_pxl_size:
@@ -748,7 +750,9 @@ class XeniumHESTData(HESTData):
         xenium_nuc_seg: pd.DataFrame=None,
         xenium_cell_seg: pd.DataFrame=None,
         cell_adata: sc.AnnData=None, # type: ignore
-        transcript_df: pd.DataFrame=None
+        transcript_df: pd.DataFrame=None,
+        dapi_path: str=None,
+        alignment_file_path: str=None
     ):
         """
         class representing a single ST profile + its associated WSI image
@@ -765,6 +769,8 @@ class XeniumHESTData(HESTData):
             xenium_cell_seg (pd.DataFrame): content of a xenium cell contour file as a dataframe (cell_boundaries.parquet)
             cell_adata (sc.AnnData): ST cell data, each row in adata.obs is a cell, each row in obsm is the cell location on the H&E image in pixels
             transcript_df (pd.DataFrame): dataframe of transcripts, each row is a transcript, he_x and he_y is the transcript location on the H&E image in pixels
+            dapi_path (str): path to a dapi focus image
+            alignment_file_path (np.ndarray): path to xenium alignment path
         """
         super().__init__(adata=adata, img=img, pixel_size=pixel_size, meta=meta, tissue_seg=tissue_seg, tissue_contours=tissue_contours, shapes=shapes)
         
@@ -772,9 +778,22 @@ class XeniumHESTData(HESTData):
         self.xenium_cell_seg = xenium_cell_seg
         self.cell_adata = cell_adata
         self.transcript_df = transcript_df
+        self.dapi_path = dapi_path
+        self.alignment_file_path = alignment_file_path
         
         
-    def save(self, path: str, save_img=True, pyramidal=True, bigtiff=False, plot_pxl_size=False):
+    def save(
+            self, 
+            path: str, 
+            save_img=True, 
+            pyramidal=True, 
+            bigtiff=False, 
+            plot_pxl_size=False, 
+            save_transcripts=False, 
+            save_cell_seg=False, 
+            save_nuclei_seg=False,
+            **kwargs
+        ):
         """Save a HESTData object to `path` as follows:
             - aligned_adata.h5ad (contains expressions for each spots + their location on the fullres image + a downscaled version of the fullres image)
             - metrics.json (contains useful metrics)
@@ -795,21 +814,18 @@ class XeniumHESTData(HESTData):
         if self.cell_adata is not None:
             self.cell_adata.write_h5ad(os.path.join(path, 'aligned_cells.h5ad'))
         
-        if self.transcript_df is not None:
+        if save_transcripts and self.transcript_df is not None:
             self.transcript_df.to_parquet(os.path.join(path, 'aligned_transcripts.parquet'))
+
+        if save_cell_seg:
+            he_cells = self.get_shapes('tenx_cell', 'he').shapes
+            he_cells.to_parquet(os.path.join(path, 'he_cell_seg.parquet'))
+            write_geojson(he_cells, os.path.join(path, f'he_cell_seg.geojson'), '', chunk=True)
             
-        if self.xenium_nuc_seg is not None:
-            print('Saving Xenium nucleus boundaries... (can be slow)')
-            with open(os.path.join(path, 'nuclei_xenium.geojson'), 'w') as f:
-                json.dump(self.xenium_nuc_seg, f, indent=4)
-                
-        if self.xenium_cell_seg is not None:
-            print('Saving Xenium cells boundaries... (can be slow)')
-            with open(os.path.join(path, 'cells_xenium.geojson'), 'w') as f:
-                json.dump(self.xenium_cell_seg, f, indent=4)
-            
-            
-        # TODO save segmentation    
+        if save_nuclei_seg:
+            he_nuclei = self.get_shapes('tenx_nucleus', 'he').shapes
+            he_nuclei.to_parquet(os.path.join(path, 'he_nucleus_seg.parquet'))
+            write_geojson(he_nuclei, os.path.join(path, f'he_nucleus_seg.geojson'), '', chunk=True)
         
 
 def read_HESTData(
@@ -936,19 +952,33 @@ def mask_and_patchify_bench(meta_df: pd.DataFrame, save_dir: str, use_mask=True,
         i += 1
         
 
-def create_benchmark_data(meta_df, save_dir:str, K, adata_folder, use_mask, keep_largest=None):
+def create_benchmark_data(meta_df, save_dir:str, K):
     os.makedirs(save_dir, exist_ok=True)
-    if K is not None:
-        splits = meta_df.groupby('patient')['id'].agg(list).to_dict()
-        create_splits(os.path.join(save_dir, 'splits'), splits, K=K)
+    
+    meta_df['patient'] = meta_df['patient'].fillna('Patient 1')
+    
+    get_k_genes_from_df(meta_df, 50, 'var', os.path.join(save_dir, 'var_50genes.json'))
+    
+    splits = meta_df.groupby(['dataset_title', 'patient'])['id'].agg(list).to_dict()
+    create_splits(os.path.join(save_dir, 'splits'), splits, K=K)
     
     os.makedirs(os.path.join(save_dir, 'patches'), exist_ok=True)
-    mask_and_patchify_bench(meta_df, os.path.join(save_dir, 'patches'), use_mask=use_mask, keep_largest=keep_largest)
+    #mask_and_patchify_bench(meta_df, os.path.join(save_dir, 'patches'), use_mask=use_mask, keep_largest=keep_largest)
     
+    os.makedirs(os.path.join(save_dir, 'patches_vis'), exist_ok=True)
     os.makedirs(os.path.join(save_dir, 'adata'), exist_ok=True)
-    for index, row in meta_df.iterrows():
+    for _, row in meta_df.iterrows():
         id = row['id']
-        src_adata = os.path.join(adata_folder, id + '.h5ad')
+        path = os.path.join(get_path_from_meta_row(row), 'processed')
+        src_patch = os.path.join(path, 'patches.h5')
+        dst_patch = os.path.join(save_dir, 'patches', id + '.h5')
+        shutil.copy(src_patch, dst_patch)
+        
+        src_vis = os.path.join(path, 'patches_patch_vis.png')
+        dst_vis = os.path.join(save_dir, 'patches_vis', id + '.png')
+        shutil.copy(src_vis, dst_vis)
+        
+        src_adata = os.path.join(path, 'aligned_adata.h5ad')
         dst_adata = os.path.join(save_dir, 'adata', id + '.h5ad')
         shutil.copy(src_adata, dst_adata)
         
@@ -1199,6 +1229,13 @@ def unify_gene_names(adata: sc.AnnData, species="human", drop=False) -> sc.AnnDa
         logger.warning('deduplicating... (can remove useful genes)')
         mask = ~adata.var_names.duplicated(keep='first')
         adata = adata[:, mask]
+    
+    duplicated_genes_after = adata.var_names[adata.var_names.duplicated()]
+    if len(duplicated_genes_after) > len(duplicated_genes_before):
+        logger.warning(f"duplicated genes increased from {len(duplicated_genes_before)} to {len(duplicated_genes_after)} after resolving aliases")
+    logger.info('deduplicating...')
+    mask = ~adata.var_names.duplicated(keep='first')
+    adata = adata[:, mask]
     
     if drop:
         adata = adata[:, ~remaining]

@@ -10,6 +10,22 @@ from .utils import (find_first_file_endswith, split_join_adata_by_col,
                     write_10X_h5)
 
 
+def colon_atlas_to_adata(path):
+    h5_path = find_first_file_endswith(path, 'filtered.h5ad')
+    custom_adata = sc.read_h5ad(h5_path)
+    #custom_adata.obs['pxl_col_in_fullres'] = custom_adata.obsm['spatial'][:, 0]
+    #custom_adata.obs['pxl_row_in_fullres'] = custom_adata.obsm['spatial'][:, 1]
+    custom_adata = custom_adata[custom_adata.obs['in_tissue'] == 1]
+    return custom_adata
+
+def heart_atlas_to_adata(path):
+    h5_path = find_first_file_endswith(path, '.raw.h5ad')
+    custom_data = sc.read_h5ad(h5_path)
+    custom_data.obs['pxl_col_in_fullres'] = custom_data.obsm['spatial'][:, 0]
+    custom_data.obs['pxl_row_in_fullres'] = custom_data.obsm['spatial'][:, 1]
+    custom_data.obs.index = [idx.split('_')[1] for idx in custom_data.obs.index]
+    return custom_data
+
 def GSE238145_to_adata(path):
     counts_path = find_first_file_endswith(path, 'counts.txt')
     coords_path = find_first_file_endswith(path, 'coords.txt')
@@ -426,4 +442,44 @@ def raw_count_to_adata(raw_count_path):
 
     adata = sc.AnnData(matrix)
 
+    return adata
+
+
+def GSE144239_to_adata(raw_counts_path, spot_coord_path):
+    import scanpy as sc
+    
+    raw_counts = pd.read_csv(raw_counts_path, sep='\t', index_col=0)
+    spot_coord = pd.read_csv(spot_coord_path, sep='\t')
+    spot_coord.index = spot_coord['x'].astype(str) + ['x' for _ in range(len(spot_coord))] + spot_coord['y'].astype(str)
+    merged = pd.merge(spot_coord, raw_counts, left_index=True, right_index=True)
+    raw_counts = raw_counts.reindex(merged.index)
+    adata = sc.AnnData(raw_counts)
+    col1 = merged['pixel_x'].values
+    col2 = merged['pixel_y'].values
+    matrix = (np.vstack((col1, col2))).T
+    adata.obsm['spatial'] = matrix
+    return adata
+
+
+def ADT_to_adata(img_path, raw_counts_path):
+    import scanpy as sc
+    
+    basedir = os.path.dirname(img_path)
+    # combine spot coordinates into a single dataframe
+    pre_adt_path= find_first_file_endswith(basedir, 'pre-ADT.tsv')
+    post_adt_path = find_first_file_endswith(basedir, 'postADT.tsv')
+    if post_adt_path is None:
+        post_adt_path = find_first_file_endswith(basedir, 'post-ADT.tsv')
+    counts = pd.read_csv(raw_counts_path, index_col=0, sep='\t')
+    pre_adt = pd.read_csv(pre_adt_path, sep='\t')
+    post_adt = pd.read_csv(post_adt_path, sep='\t')
+    merged_coords = pd.concat([pre_adt, post_adt], ignore_index=True)
+    merged_coords.index = [str(x) + 'x' + str(y) for x, y in zip(merged_coords['x'], merged_coords['y'])]
+    merged = pd.merge(merged_coords, counts, left_index=True, right_index=True, how='inner')
+    counts = counts.reindex(merged.index)
+    adata = sc.AnnData(counts)
+    col1 = merged['pixel_x'].values
+    col2 = merged['pixel_y'].values
+    matrix = (np.vstack((col1, col2))).T
+    adata.obsm['spatial'] = matrix
     return adata

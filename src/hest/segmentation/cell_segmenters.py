@@ -5,11 +5,10 @@ import sys
 import traceback
 import warnings
 from abc import abstractmethod
-from multiprocessing import Pool, cpu_count
-from typing import Union
+from concurrent.futures import ThreadPoolExecutor
+from typing import Tuple, Union
 
 import geopandas as gpd
-import matplotlib.pyplot as plt
 import numpy as np
 import openslide
 import pandas as pd
@@ -21,6 +20,8 @@ from shapely.affinity import translate
 from tqdm import tqdm
 
 from hest.io.seg_readers import GeojsonCellReader
+from hest.utils import deprecated, get_n_threads, verify_paths
+from hestcore.wsi import wsi_factory
 from hest.utils import verify_paths
 
 
@@ -49,9 +50,30 @@ class HoverFastSegmenter():
         
         hoverfast.main()
         
+        
+class CellSegmenter:
+    
+    def segment_cells(
+        self, 
+        wsi_path: str, 
+        name: str,
+        pixel_size: str,
+        **kwargs
+    ): 
+        return self._segment_cells_imp(wsi_path, name, pixel_size, **kwargs)
+    
+    @abstractmethod
+    def _segment_cells_imp(
+        self, 
+        wsi_path: str, 
+        name: str,
+        pixel_size,
+        **kwargs
+    ):
+        pass
     
     
-class CellViTSegmenter():
+class CellViTSegmenter(CellSegmenter):
     models = {
         'CellViT-SAM-H-x40.pth': 'https://drive.google.com/uc?id=1tVYAapUo1Xt8QgCN22Ne1urbbCZkah8q',
         'CellViT-SAM-H-x20.pth': 'https://drive.google.com/uc?id=1wP4WhHLNwyJv97AK42pWK8kPoWlrqi30'
@@ -115,11 +137,11 @@ class CellViTSegmenter():
             print(f'Found model at {model_path}')
         
     
-    def segment_cells(
+    def _segment_cells_imp(
         self, 
         wsi_path: str, 
         name: str, 
-        src_pixel_size: float=None, 
+        pixel_size: float, 
         dst_pixel_size: float=0.25, 
         batch_size=2, 
         gpu_ids=[], 
@@ -143,7 +165,7 @@ class CellViTSegmenter():
             if not os.path.exits(model_path):
                 raise Exception("Can't find model weights {model_path}, only 'CellViT-SAM-H-x40.pth' can be downloaded automatically")
         
-        preprocess_path = self._preprocess(wsi_path, name, src_pixel_size, dst_pixel_size, save_dir)
+        preprocess_path = self._preprocess(wsi_path, name, pixel_size, dst_pixel_size, save_dir)
         
         original_argv = sys.argv
         
@@ -174,7 +196,17 @@ class CellViTSegmenter():
         folder_name = [f for f in os.listdir(preprocess_path) if os.path.isdir(os.path.join(preprocess_path, f))][0]
         
         cell_seg_path = os.path.join(preprocess_path, folder_name, 'cell_detection', 'cells.geojson')
+        
         return cell_seg_path
+
+
+def cell_segmenter_factory(method: str) -> CellSegmenter:
+    if method == 'cellvit':
+        return CellViTSegmenter()
+    elif method == 'hoverfast':
+        return HoverFastSegmenter()
+    else:
+        raise ValueError(f"cell segmenter should be one of the following: ['cellvit', 'hoverfast']")
 
 
 def segment_cellvit(
@@ -204,11 +236,11 @@ def segment_cellvit(
         wsi_path, 
         name, 
         src_pixel_size, 
-        dst_pixel_size, 
-        batch_size, 
-        gpu_ids, 
-        save_dir,
-        model
+        dst_pixel_size=dst_pixel_size, 
+        batch_size=batch_size, 
+        gpu_ids=gpu_ids, 
+        save_dir=save_dir,
+        model=model
     )
     
 
@@ -244,145 +276,147 @@ def read_adata(adata) -> sc.AnnData: # type: ignore
         ValueError("cells must be either a path (str) or a sc.AnnData, not ", type(adata))
     
     
-def assign_to_cell(cell_gdf, point_gdf):
+def _sjoin(chunk, cell_gdf):
+    return gpd.sjoin(chunk, cell_gdf, how='left', predicate='within')
+    
+def assign_spot_to_cell(cell_gdf, point_gdf, n_workers=-1):
+    """ Return a spot index to cell_id assigment as a pd.Series """
     import geopandas as gpd
     from shapely.geometry import Point
     from shapely.geometry.polygon import Polygon
 
-    # shard points dataframe
-    n = 1000
-    l = round(np.ceil(len(point_gdf) / n))
-    logger.info('matching spots to cells... (can take a few minutes)')
+    logger.info('matching spots to cells...')
     assignments = np.zeros(len(point_gdf), dtype=int)
-    for i in tqdm(range(n)):
-        start = l * i
-        end = min(l * (i + 1), len(point_gdf))
+        
+    n_threads = get_n_threads(n_workers)
+    with ThreadPoolExecutor(max_workers=n_threads) as executor:
+        chunk_size = len(point_gdf) // n_threads
+        
+        chunks = [point_gdf.iloc[i:i+chunk_size] for i in range(0, len(point_gdf), chunk_size)]
+        
+        futures = [executor.submit(_sjoin, chunk, cell_gdf) for chunk in chunks]
+        i = 0
+        for future in futures:
+            spatial_join = future.result()
+            spatial_join = spatial_join[~spatial_join.index.duplicated(keep='first')]
+            spot_assignment = spatial_join['index_right']
+            spot_assignment = spot_assignment.fillna(-1).round().astype(int)
+            assignments[i:i+len(spot_assignment)] = spot_assignment
+            i += len(spot_assignment)
         
         
-        gdf_points_shard = point_gdf[start:end]
-        
+    matched = assignments != -1
+    point_gdf = point_gdf.iloc[matched].copy()
+    point_gdf['cell_id'] = cell_gdf['cell_id'].iloc[assignments[assignments != -1]].values
     
-        spatial_join = gpd.sjoin(gdf_points_shard, cell_gdf, how='left', predicate='within')
-        spatial_join = spatial_join[~spatial_join.index.duplicated(keep='first')]
-        spot_assignment = spatial_join['index_right']
-        spot_assignment = spot_assignment.fillna(-1).round().astype(int)
-        assignments[start:end] = spot_assignment
-        
-    point_gdf['index_right'] = assignments
-    # Match index to cell_id
-    point_gdf['cell_id'] = point_gdf.merge(cell_gdf, left_on='index_right', right_index=True, how='left')['cell_id']
     
-    point_gdf = point_gdf.dropna(subset=['cell_id'])
-    point_gdf['cell_id'] = point_gdf['cell_id'].astype(int)
+    return point_gdf['cell_id']
+
+
+def _buffer(block, exp_pixel):
+    return block.buffer(exp_pixel)
+
+
+def expand_nuclei(gdf: gpd.GeoDataFrame, pixel_size: float, exp_um=5, plot=False, n_workers=-1) -> gpd.GeoDataFrame:
+    """ Expand the nuclei in every direction by `exp_um` um (derived using `pixel_size`)
+
+    Args:
+        gdf (gpd.GeoDataFrame): geodataframe of nuclei as polygons
+        pixel_size (float): pixel size in um/px for the coordinate system of gdf
+        exp_um (int, optional): expansion in um. Defaults to 5.
+        plot (bool, optional): whenever to plot the results (will be slow for >1000 nuclei). Defaults to False.
+        n_workers (int, optional): number of threads (-1 to use all cpu cores). Defaults to -1.
+
+    Returns:
+        gpd.GeoDataFrame: expanded nucleis
+    """
     
-    return point_gdf
-
-
-def _buffer(geom, exp_pixel):
-    centroids = [poly.centroid.coords[0] for poly in geom['geometry']]
-    return [geom.buffer(exp_pixel), centroids]
-
-
-def _rm_invalid(geom, box):
-    geom = geom['geometry']
-    invalid = [geo.buffer(0) for geo in geom if not geo.is_valid]
-    
-    geom = geom.apply(lambda geom: geom.buffer(0) if not geom.is_valid else geom)
-    geom = gpd.GeoDataFrame(geometry=[geo.intersection(box) for geo in geom])
-    return [geom, len(invalid)]
-    
-
-
-def expand_nuclei(gdf, pixel_size, exp_um, plot=False):
-    from scipy.spatial import Voronoi, voronoi_plot_2d
+    from scipy.spatial import Voronoi
     from shapely.geometry import Point, Polygon
     
-    gdf = gdf[:len(gdf)]
-    
     exp_pixel = exp_um / pixel_size
-    logger.info('Expand nuclei... (can take a few minutes)')
     gdf_cell = gdf.copy()
     
-    with Pool(cpu_count()) as pool:
-        chunk_size = len(gdf) // cpu_count()
-        chunks = [gdf.iloc[i:i+chunk_size] for i in range(0, len(gdf), chunk_size)]
+    centroids = gdf_cell.centroid
     
-        res = pool.starmap(_buffer, [(geom, exp_pixel) for geom in chunks])
-        results, centroids = [i[0] for i in res], [i[1] for i in res]
+    logger.info('Expand nuclei... (can take a few minutes)')
+    
+    max_workers = get_n_threads(n_workers)
+    
+    # Use multithreading here because geopandas.buffer releases the GIL
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        chunk_size = len(gdf) // max_workers
         
-    gdf_cell = gpd.GeoDataFrame(pd.concat(results, ignore_index=True))
+        chunks = [gdf.iloc[i:i+chunk_size].geometry for i in range(0, len(gdf), chunk_size)]
+        
+        futures = [executor.submit(_buffer, geom, exp_pixel) for geom in chunks]
+        results = [future.result() for future in futures]
     
-    points = np.concatenate(centroids)
+        
+    gdf_cell.geometry = pd.concat(results)
     
-    ghost_points = [Point(0, 0), Point(0, 20000), Point(20000, 20000), Point(20000, 0)]
+    min_x, min_y, max_x, max_y = centroids.total_bounds
+    offset = 250
+    ghost_points = np.array(
+        [
+            Point([min_x - offset, min_y - offset]), 
+            Point([min_x - offset, max_y + offset]), 
+            Point([max_x + offset, max_y + offset]), 
+            Point([max_x + offset, min_y - offset])
+        ]
+    )
     
-    points = np.concatenate((points, ghost_points))
+    points = np.concatenate((centroids.values, ghost_points))
     
     logger.info('Create Voronoi diagram...')
     
-    vor = Voronoi(points)
-    
-    #voronoi_plot_2d(vor, ax=ax, show_vertices=False, line_colors='orange', line_width=2, line_alpha=0.6, point_size=2)
+    points_series = gpd.GeoSeries(points)
+    x = points_series.x
+    y = points_series.y
+    xy = np.column_stack((x, y))
+    vor = Voronoi(xy)
     
     logger.info('Convert Voronoi regions to polygons...')
     
-    voronoi_poly = [Polygon([vor.vertices[i] for i in region]) for region in vor.regions]
-    voronoi_poly = np.array(voronoi_poly)[vor.point_region]
-    
-    
+    voronoi_poly = np.array([Polygon([vor.vertices[i] for i in region]) for region in vor.regions])[vor.point_region][:-len(ghost_points)]
     gdf_vor = gpd.GeoDataFrame(geometry=voronoi_poly)
+    gdf_vor.index = gdf_cell.index
+    
+    # Geopandas voronoi_polygons doesnt return polygons in order, use shapely.vornoi_polygons instead
+    # TODO ordered will be added in shapely 2.1, uncomment when released
+    # Note that the scipy implementation might still offer better results but it will be slower
+    # voronoi_poly = gpd.GeoSeries(voronoi_polygons(MultiPoint(points), ordered=True))
+    # gdf_vor = gpd.GeoDataFrame(geometry=voronoi_poly).explode().iloc[:-len(ghost_points)]
+    # gdf_vor.index = gdf_cell.index
     
     logger.info('Filter invalid polygons...')
-
     
-    fig, ax = plt.subplots(figsize=(50, 50))
-    
-    #invalid = gpd.GeoDataFrame(geometry=invalid)
-    
-    min_x = min(points[:, 0])
-    min_y = min(points[:, 1])
-    max_x = max(points[:, 0])
-    max_y = max(points[:, 1])
-    
-    offset = 200
-    
-    box = Polygon([
-        (min_x - offset, min_y - offset), 
-        (min_x - offset, max_y + offset), 
-        (max_x + offset, max_y + offset), 
-        (max_x + offset, min_y - offset)
-    ])
-    
-
-    with Pool(cpu_count()) as pool:
-        chunk_size = len(gdf_vor) // cpu_count()
-        chunks = [gdf_vor.iloc[i:i+chunk_size] for i in range(0, len(gdf_vor), chunk_size)]
-    
-        res = pool.starmap(_rm_invalid, [(geom, box) for geom in chunks])
-        
-    gdf_vor = gpd.GeoDataFrame(pd.concat([i[0] for i in res], ignore_index=True))
-    invalid_nb = np.array([i[1] for i in res]).sum()
+    invalid_mask = ~gdf_vor.is_valid
+    gdf.loc[~invalid_mask, 'geometry'] = gdf.loc[~invalid_mask, 'geometry'].buffer(0)
+    invalid_nb = invalid_mask.sum()
     if invalid_nb > 0:
-        logger.warning(f'Found {invalid_nb} invalid shapes')
+       logger.warning(f'Found {invalid_nb} invalid shapes during nuclei expansion')
     
     logger.info('Intersect Voronoi regions with buffered nuclei...')
     
-    gdf_cell = gdf_cell.set_geometry(0)
     inter = gdf_vor.intersection(gdf_cell)
     
-    inter = inter[:-len(ghost_points)]
-    gdf_cell = gdf.copy()
-    gdf_cell.geometry = inter.geometry
+    gdf_cell.geometry = inter
+    
+    gdf_cell.geometry = gdf_cell.union(gdf.loc[~invalid_mask])
     
     if plot:
+        import matplotlib.pyplot as plt
         logger.info('Plotting...')
+        _, ax = plt.subplots(figsize=(50, 50))
 
-        inter.plot(ax=ax, color='blue', alpha=0.5, edgecolor='black', label='Polygons1')
-        gdf.plot(ax=ax, color='green', alpha=0.5, edgecolor='black', label='Polygons2')
+        #gdf_vor.geometry.plot(ax=ax, color='green', alpha=0.5, edgecolor='black', label='Polygons2')
+        gdf_cell.plot(ax=ax, color='red', alpha=0.5, edgecolor='black', label='Polygons1')
+        gdf.plot(ax=ax, color='grey', alpha=0.5, edgecolor='black', label='Polygons1')
 
         plt.legend()
         plt.gca().set_aspect('equal')
-        plt.savefig('poly.jpg')
+        plt.savefig('poly2.jpg')
         
     return gdf_cell
 
@@ -396,8 +430,8 @@ def bin_per_cell(
     name = '',
     exp_um = 5, 
     exp_nuclei: bool = True
-) -> sc.AnnData:
-    verify_paths_exist(paths=[nuc_seg, bc_matrix, path_bins_pos])
+) -> Tuple[sc.AnnData, gpd.GeoDataFrame]:
+    verify_paths([bc_matrix, path_bins_pos])
     
     nuclei_gdf = read_seg(nuc_seg)
     
@@ -409,19 +443,20 @@ def bin_per_cell(
     logger.info('Read bin positions...')
     points_gdf = read_spots_gdf(path_bins_pos)
     
-    assignment = assign_to_cell(cell_gdf, points_gdf)
+    assignment = assign_spot_to_cell(cell_gdf, points_gdf)
     
     adata = read_adata(bc_matrix)
     
     cell_adata = sum_per_cell(adata, assignment)
     
     if save_dir is not None:
-        cell_adata.write_h5ad(os.path.join(save_dir, name + 'cell_bin.h5ad'))
+        cell_adata.write_h5ad(os.path.join(save_dir, 'aligned_cells.h5ad'))
     
-    return cell_adata
+    return cell_adata, cell_gdf
 
 
 def sum_per_cell(adata: sc.AnnData, assignment: gpd.GeoDataFrame):
+    import scanpy as sc
 
     logger.info('filter cells...')
     obs = pd.DataFrame(adata.obs_names, columns=['obs_name'])
@@ -539,66 +574,7 @@ def refine_alignment_reg(
 def refine_alignment(centroids, polygons, class_key='class', method='seg') -> gpd.GeoDataFrame:
     return alignment_refiner_factory(method).refine(centroids, polygons, class_key=class_key)
 
-
-def warp_gdf_old(gdf: gpd.GeoDataFrame, displacement_field, field_factor, pad_src) -> gpd.GeoDataFrame:
-    pad_src_top = pad_src[0][0]
-    pad_src_bottom = pad_src[0][1]
-    pad_src_left = pad_src[1][0]
-    pad_src_right = pad_src[1][1]
-    dis_height = displacement_field.shape[0]
-    dis_width = displacement_field.shape[1]
-    
-    def swap(yx):
-        return yx[1], yx[0]
-    
-    def warp_polygon(polygon):
-        try:
-            return Polygon(
-                [
-                    list(swap(displacement_field[pad_src_top + round(y / 5), pad_src_left + round(x / 5)] * 5 + np.array([y, x])))
-                    for x, y in polygon.exterior.coords 
-                ]
-            )
-        except Exception:
-            print('skip')
-            return float('NaN')
-    
-    gdf.geometry = [warp_polygon(polygon) for polygon in tqdm(gdf.geometry)]
-    return gdf
-
-
-def warp_gdf(gdf: gpd.GeoDataFrame, slide_obj, slide_obj_target) -> gpd.GeoDataFrame:
-    
-    def warp_polygon(polygon):
-        try:
-            return Polygon(
-                [
-                    slide_obj.warp_xy([[x, y]])
-                    for x, y in polygon.exterior.coords 
-                ]
-            )
-        except Exception:
-            print('skip')
-            return float('NaN')
-        
-    gdf['points'] = [list(polygon.exterior.coords) for polygon in gdf.geometry]
-    point_gdf = gdf.explode('points')
-    point_gdf['points'] = point_gdf['points'].apply(lambda x: list(x))
-    warped = slide_obj.warp_xy_from_to(list(point_gdf['points'].values), to_slide_obj=slide_obj_target)
-    point_gdf['warped'] = warped.tolist()
-
-    aggr_df = point_gdf.groupby('cell_id').agg({
-        'warped': list
-        }
-    )
-    
-    polygons = [Polygon(x) for x in aggr_df['warped']]
-    
-    
-    gdf.geometry = polygons
-    return gdf
-
-
+@deprecated
 def refine_with_anchor(
     gdf: gpd.GeoDataFrame, 
     anchor_gdf: gpd.GeoDataFrame, 
