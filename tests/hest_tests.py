@@ -17,7 +17,7 @@ if elapsed_time > MAX_HEST_IMPORT_S:
 
 from hest.autoalign import autoalign_visium
 from hest.readers import VisiumReader
-from hest.utils import get_path_relative, load_image
+from hest.utils import load_image
 
 
 class TestHESTReader(unittest.TestCase):
