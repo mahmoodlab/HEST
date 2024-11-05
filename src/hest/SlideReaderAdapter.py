@@ -1,3 +1,4 @@
+# Slide Adapter class for Valis compatibility
 import os
 
 import numpy as np

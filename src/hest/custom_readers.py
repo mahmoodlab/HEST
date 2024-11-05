@@ -443,3 +443,43 @@ def raw_count_to_adata(raw_count_path):
     adata = sc.AnnData(matrix)
 
     return adata
+
+
+def GSE144239_to_adata(raw_counts_path, spot_coord_path):
+    import scanpy as sc
+    
+    raw_counts = pd.read_csv(raw_counts_path, sep='\t', index_col=0)
+    spot_coord = pd.read_csv(spot_coord_path, sep='\t')
+    spot_coord.index = spot_coord['x'].astype(str) + ['x' for _ in range(len(spot_coord))] + spot_coord['y'].astype(str)
+    merged = pd.merge(spot_coord, raw_counts, left_index=True, right_index=True)
+    raw_counts = raw_counts.reindex(merged.index)
+    adata = sc.AnnData(raw_counts)
+    col1 = merged['pixel_x'].values
+    col2 = merged['pixel_y'].values
+    matrix = (np.vstack((col1, col2))).T
+    adata.obsm['spatial'] = matrix
+    return adata
+
+
+def ADT_to_adata(img_path, raw_counts_path):
+    import scanpy as sc
+    
+    basedir = os.path.dirname(img_path)
+    # combine spot coordinates into a single dataframe
+    pre_adt_path= find_first_file_endswith(basedir, 'pre-ADT.tsv')
+    post_adt_path = find_first_file_endswith(basedir, 'postADT.tsv')
+    if post_adt_path is None:
+        post_adt_path = find_first_file_endswith(basedir, 'post-ADT.tsv')
+    counts = pd.read_csv(raw_counts_path, index_col=0, sep='\t')
+    pre_adt = pd.read_csv(pre_adt_path, sep='\t')
+    post_adt = pd.read_csv(post_adt_path, sep='\t')
+    merged_coords = pd.concat([pre_adt, post_adt], ignore_index=True)
+    merged_coords.index = [str(x) + 'x' + str(y) for x, y in zip(merged_coords['x'], merged_coords['y'])]
+    merged = pd.merge(merged_coords, counts, left_index=True, right_index=True, how='inner')
+    counts = counts.reindex(merged.index)
+    adata = sc.AnnData(counts)
+    col1 = merged['pixel_x'].values
+    col2 = merged['pixel_y'].values
+    matrix = (np.vstack((col1, col2))).T
+    adata.obsm['spatial'] = matrix
+    return adata

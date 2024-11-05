@@ -3,9 +3,8 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import sys
 import warnings
-from typing import Dict, Iterator, List, Union
+from typing import Dict, List, Union
 
 import cv2
 import geopandas as gpd
@@ -451,16 +450,6 @@ class HESTData:
     @deprecated
     def save_vis(self, save_dir, name) -> None:
         """ *Deprecated* use save_tissue_vis instead"""
-        vis = self.get_tissue_vis()
-        vis.save(os.path.join(save_dir, f'{name}_vis.jpg'))
-        
-    def save_tissue_vis(self, save_dir: str, name: str) -> None:
-        """ Save a visualization of the tissue segmentation on top of the downscaled H&E
-
-        Args:
-            save_dir (str): directory where the visualization will be saved
-            name (str): file is saved as {save_dir}/{name}_vis.jpg
-        """
         vis = self.get_tissue_vis()
         vis.save(os.path.join(save_dir, f'{name}_vis.jpg'))
         

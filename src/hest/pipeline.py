@@ -16,19 +16,17 @@ from hestcore.wsi import WSI
 from loguru import logger
 from tqdm import tqdm
 
-from hest.HESTData import (VisiumHDHESTData, XeniumHESTData, load_hest,
-                           read_HESTData)
+from hest.HESTData import (VisiumHDHESTData, XeniumHESTData)
 from hest.io.seg_readers import GeojsonCellReader, read_gdf, write_geojson
 from hest.readers import VisiumHDReader, XeniumReader, read_and_save
 from hest.registration import register_dapi_he, warp_gdf_valis
 from hest.segmentation.cell_segmenters import (bin_per_cell,
                                                cell_segmenter_factory)
-from hest.subtyping.atlas import get_atlas_from_name
 from hest.subtyping.subtyping import assign_cell_types
-from hest.utils import (ALIGNED_HE_FILENAME, align_xenium_df, check_arg,
+from hest.utils import (ALIGNED_HE_FILENAME, check_arg,
                         find_first_file_endswith, get_col_selection,
-                        get_name_datetime, get_path_from_meta_row,
-                        print_resource_usage, verify_paths, visualize_random_crops)
+                        get_path_from_meta_row,
+                        print_resource_usage, visualize_random_crops)
 
 
 class ProcessingPipeline:

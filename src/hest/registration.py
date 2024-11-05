@@ -1,20 +1,17 @@
 from __future__ import annotations
 
 import os
-import tempfile
 from typing import Union
 
 import geopandas as gpd
 import numpy as np
 from loguru import logger
-from PIL import Image
 from shapely import Polygon
-from tqdm import tqdm
 
 from hest.io.seg_readers import groupby_shape, read_gdf
-from hest.utils import (get_n_threads, get_name_datetime, tiff_save,
+from hest.utils import (get_name_datetime,
                         value_error_str, verify_paths)
-from hestcore.wsi import WSI, wsi_factory
+from hestcore.wsi import WSI
 
 
 def register_dapi_he(

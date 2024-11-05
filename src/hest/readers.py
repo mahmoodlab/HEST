@@ -14,18 +14,18 @@ from hestcore.segmentation import get_path_relative
 from loguru import logger
 
 from hest.autoalign import autoalign_visium
-from hest.custom_readers import colon_atlas_to_adata, heart_atlas_to_adata
+from hest.custom_readers import ADT_to_adata, GSE144239_to_adata, colon_atlas_to_adata, heart_atlas_to_adata
 from hest.HESTData import (HESTData, STHESTData, VisiumHDHESTData,
                            VisiumHESTData, XeniumHESTData)
 from hest.io.seg_readers import XeniumParquetCellReader, read_gdf
 from hest.LazyShapes import LazyShapes
 from hest.segmentation.cell_segmenters import segment_cellvit
 from hest.utils import (SpotPacking, align_xenium_df, check_arg,
-                        df_morph_um_to_pxl, find_biggest_img,
+                        find_biggest_img,
                         find_first_file_endswith,
                         find_pixel_size_from_spot_coords,
                         get_path_from_meta_row, helper_mex, load_wsi,
-                        metric_file_do_dict, read_10x_seg, read_xenium_alignment,
+                        metric_file_do_dict, read_xenium_alignment,
                         register_downscale_img, verify_paths)
 
 LOCAL = False
@@ -679,17 +679,13 @@ class STReader(Reader):
                 break
             
         if "Prostate needle biopsies pre- and post-ADT: Count matrices, histological-, and Androgen receptor immunohistochemistry images" in path:
-            custom_adata = self._ADT_to_adata(os.path.join(path, img_path), raw_counts_path)
+            custom_adata = ADT_to_adata(os.path.join(path, img_path), raw_counts_path)
             
         if "Single Cell and Spatial Analysis of Human Squamous Cell Carcinoma [ST]" in path:
-            custom_adata = self._GSE144239_to_adata(raw_counts_path, spot_coord_path)
+            custom_adata = GSE144239_to_adata(raw_counts_path, spot_coord_path)
             packing = SpotPacking.GRID_PACKING
             inter_spot_dist = 110.
             spot_diameter = 150.
-
-        #if 'Spatial Transcriptomics of human fetal liver' in path:
-        #    GSE167096_count_path = find_first_file_endswith(path, 'table_symbol.txt')
-        #    custom_adata = GSE167096_to_h5(GSE167096_count_path)
             
             
         if 'A spatiotemporal organ-wide gene expression and cell atlas of the developing human heart' in path:
@@ -720,46 +716,6 @@ class STReader(Reader):
             **read_kwargs)
         
         return st_object
-    
-    
-    def _GSE144239_to_adata(self, raw_counts_path, spot_coord_path):
-        import scanpy as sc
-        
-        raw_counts = pd.read_csv(raw_counts_path, sep='\t', index_col=0)
-        spot_coord = pd.read_csv(spot_coord_path, sep='\t')
-        spot_coord.index = spot_coord['x'].astype(str) + ['x' for _ in range(len(spot_coord))] + spot_coord['y'].astype(str)
-        merged = pd.merge(spot_coord, raw_counts, left_index=True, right_index=True)
-        raw_counts = raw_counts.reindex(merged.index)
-        adata = sc.AnnData(raw_counts)
-        col1 = merged['pixel_x'].values
-        col2 = merged['pixel_y'].values
-        matrix = (np.vstack((col1, col2))).T
-        adata.obsm['spatial'] = matrix
-        return adata
-    
-    
-    def _ADT_to_adata(self, img_path, raw_counts_path):
-        import scanpy as sc
-        
-        basedir = os.path.dirname(img_path)
-        # combine spot coordinates into a single dataframe
-        pre_adt_path= find_first_file_endswith(basedir, 'pre-ADT.tsv')
-        post_adt_path = find_first_file_endswith(basedir, 'postADT.tsv')
-        if post_adt_path is None:
-            post_adt_path = find_first_file_endswith(basedir, 'post-ADT.tsv')
-        counts = pd.read_csv(raw_counts_path, index_col=0, sep='\t')
-        pre_adt = pd.read_csv(pre_adt_path, sep='\t')
-        post_adt = pd.read_csv(post_adt_path, sep='\t')
-        merged_coords = pd.concat([pre_adt, post_adt], ignore_index=True)
-        merged_coords.index = [str(x) + 'x' + str(y) for x, y in zip(merged_coords['x'], merged_coords['y'])]
-        merged = pd.merge(merged_coords, counts, left_index=True, right_index=True, how='inner')
-        counts = counts.reindex(merged.index)
-        adata = sc.AnnData(counts)
-        col1 = merged['pixel_x'].values
-        col2 = merged['pixel_y'].values
-        matrix = (np.vstack((col1, col2))).T
-        adata.obsm['spatial'] = matrix
-        return adata
     
     
     def read(
