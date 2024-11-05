@@ -210,9 +210,9 @@ def read_xenium_alignment(alignment_file_path: str) -> np.ndarray:
 
 
 def align_xenium_df(
+    df,
     alignment_matrix: str, 
-    pixel_size_morph: float, 
-    df, 
+    pixel_size_morph: float,  
     x_key, 
     y_key, 
     to_dapi=False, 
@@ -240,7 +240,7 @@ def align_xenium_df(
     aligned = (alignment_matrix @ coords.T).T
     df[y_key_dist] = aligned[:,1] / pixel_size_morph
     df[x_key_dist] = aligned[:,0] / pixel_size_morph
-    return df, alignment_matrix
+    return df
 
 
 def chunk_sorted_df(df, nb_chunk):
@@ -1147,19 +1147,12 @@ def _process_row(
         my_id = row['id']
         raise Exception(f'invalid sample id {my_id}')
     
-    path_fullres = os.path.join(path, 'aligned_fullres_HE.tif')
-    if not os.path.exists(path_fullres):
-        print(f"couldn't find {path}")
-        return
+
     if cp_pyramidal:
         src_pyramidal = os.path.join(path, 'aligned_fullres_HE.tif')
         dst_pyramidal = os.path.join(dest, 'wsis', _sample_id_to_filename(row['id']))
         os.makedirs(os.path.join(dest, 'wsis'), exist_ok=True)
         shutil.copy(src_pyramidal, dst_pyramidal)
-        #dst = os.path.join(dest, 'pyramidal', _sample_id_to_filename(row['id']))
-        #bigtiff_option = '' if isinstance(row['bigtiff'], float) or not row['bigtiff']  else '--bigtiff'
-        #vips_pyr_cmd = f'vips tiffsave "{path_fullres}" "{dst}" --pyramid --tile --tile-width=256 --tile-height=256 --compression=deflate {bigtiff_option}'
-        #subprocess.call(vips_pyr_cmd, shell=True)
         
     id = row['id']
     if cp_meta:    
@@ -1383,17 +1376,17 @@ def load_wsi(img_path: str) -> Tuple[WSI, float]:
             factor = unit_to_micrometers[my_img.pages[0].tags['ResolutionUnit'].value]
             pixel_size_embedded = (my_img.pages[0].tags['XResolution'].value[1] / my_img.pages[0].tags['XResolution'].value[0]) * factor
     
-    # sometimes the RGB axis are inverted
-    if img.shape[0] == 3 or img.shape[0] == 4:
-        img = np.transpose(img, axes=(1, 2, 0))
-    if img.shape[2] == 4: # RGBA to RGB
-        img = img[:,:,:3]
-    if np.max(img) > 1000:
-        img = img.astype(np.float32)
-        img /= 2**8
-        img = img.astype(np.uint8)
-        
-    wsi = NumpyWSI(img)
+        # sometimes the RGB axis are inverted
+        if img.shape[0] == 3 or img.shape[0] == 4:
+            img = np.transpose(img, axes=(1, 2, 0))
+        if img.shape[2] == 4: # RGBA to RGB
+            img = img[:,:,:3]
+        if np.max(img) > 1000:
+            img = img.astype(np.float32)
+            img /= 2**8
+            img = img.astype(np.uint8)
+            
+        wsi = NumpyWSI(img)
     
     return wsi, pixel_size_embedded
 

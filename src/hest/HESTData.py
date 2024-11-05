@@ -155,6 +155,8 @@ class HESTData:
             self.adata.write(os.path.join(path, 'aligned_adata.h5ad'))
         except:
             # workaround from https://github.com/theislab/scvelo/issues/255
+            import traceback
+            traceback.print_exc()
             self.adata.__dict__['_raw'].__dict__['_var'] = self.adata.__dict__['_raw'].__dict__['_var'].rename(columns={'_index': 'features'})
             self.adata.write(os.path.join(path, 'aligned_adata.h5ad'))
         
@@ -172,7 +174,8 @@ class HESTData:
         downscaled_img = self.adata.uns['spatial']['ST']['images']['downscaled_fullres']
         down_fact = self.adata.uns['spatial']['ST']['scalefactors']['tissue_downscaled_fullres_scalef']
         down_img = Image.fromarray(downscaled_img)
-        down_img.save(os.path.join(path, 'downscaled_fullres.jpeg'))
+        if len(downscaled_img) > 0:
+            down_img.save(os.path.join(path, 'downscaled_fullres.jpeg'))
         
         
         if plot_pxl_size:
@@ -659,7 +662,7 @@ class XeniumHESTData(HESTData):
         if self.cell_adata is not None:
             self.cell_adata.write_h5ad(os.path.join(path, 'aligned_cells.h5ad'))
         
-        if save_transcripts:
+        if save_transcripts and self.transcript_df is not None:
             self.transcript_df.to_parquet(os.path.join(path, 'aligned_transcripts.parquet'))
 
         if save_cell_seg:
@@ -668,8 +671,8 @@ class XeniumHESTData(HESTData):
             write_geojson(he_cells, os.path.join(path, f'he_cell_seg.geojson'), '', chunk=True)
             
         if save_nuclei_seg:
-            he_nuclei = self.get_shapes('tenx_nuc', 'he').shapes
-            he_nuclei.to_parquet(os.path.join(path, 'he_nucleus_seg'))
+            he_nuclei = self.get_shapes('tenx_nucleus', 'he').shapes
+            he_nuclei.to_parquet(os.path.join(path, 'he_nucleus_seg.parquet'))
             write_geojson(he_nuclei, os.path.join(path, f'he_nucleus_seg.geojson'), '', chunk=True)
         
 

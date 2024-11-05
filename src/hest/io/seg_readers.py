@@ -115,12 +115,14 @@ class XeniumParquetCellReader(GDFReader):
     def read_gdf(self, path, n_workers=0) -> gpd.GeoDataFrame:
         
         df = pd.read_parquet(path)
+
+        
         
         if self.alignment_matrix is not None:
-            df, _ = align_xenium_df(
+            df = align_xenium_df(
+                df,
                 self.alignment_matrix, 
-                self.pixel_size_morph, 
-                df, 
+                self.pixel_size_morph,  
                 'vertex_x', 
                 'vertex_y',
                 x_key_dist='vertex_x',

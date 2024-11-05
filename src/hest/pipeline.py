@@ -55,7 +55,7 @@ class XeniumProcessingPipeline(ProcessingPipeline):
         if cell_adata is None:
             import scanpy as sc
             data_dir = self.config.get('data_dir')
-            st = XeniumReader().auto_read(data_dir, load_img=False, load_transcripts=False, load_cells=False)
+            st = XeniumReader().auto_read(data_dir, load_img=False)
             cell_adata = sc.read_h5ad(st.cell_adata_path)
         return cell_adata, nuc_gdf
     
@@ -353,7 +353,7 @@ def process_meta_df(
             
             path = get_path_from_meta_row(row)
             bigtiff = not(isinstance(row['bigtiff'], float) or row['bigtiff'] == 'FALSE')
-            save_kwargs = {'save_cell_seg': True, 'save_nuclei_seg': True, 'save_transcripts': True} if row['st_technology'] == 'xenium' and not preprocess else {}
+            save_kwargs = {'save_cell_seg': True, 'save_nuclei_seg': True, 'save_transcripts': True} if row['st_technology'].lower() == 'xenium' and not preprocess else {}
             st = read_and_save(
                 path, 
                 save_plots=save_spatial_plots, 
@@ -370,7 +370,7 @@ def process_meta_df(
             # TODO register segmentation for xenium and save
             if preprocess:
                 
-                full_exp_dir = os.path.join('results/preprocessing', row['id'])
+                full_exp_dir = os.path.join('results', 'preprocessing', row['id'])
                 if isinstance(st, XeniumHESTData):
                     
                     print('read shapes')

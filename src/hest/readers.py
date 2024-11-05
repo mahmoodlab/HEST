@@ -4,6 +4,7 @@ import json
 import math
 import os
 import shutil
+from typing import Union
 import zipfile
 from abc import abstractmethod
 
@@ -898,7 +899,7 @@ class XeniumReader(Reader):
         return st_object
     
     
-    def __xenium_estimate_pixel_size(self, pixel_size_morph, he_to_morph_matrix):
+    def __xenium_estimate_pixel_size(self, pixel_size_morph, he_to_morph_matrix) -> float:
         # define a line by two points in space and get the scale of the line after transformation
         # to determine the pixel size in the H&E image
         two_points = np.array([[0., 0., 1.], [0., 1., 1.]])
@@ -912,38 +913,40 @@ class XeniumReader(Reader):
         
         pixel_size_estimated = pixel_size_morph * cart_dist
         return pixel_size_estimated
-    
-    
-    def _align_and_estimate_px_size(self, alignment_matrix, pixel_size_morph, df_transcripts, x_key='x_location', y_key='y_location'):
-
-        df_transcripts, he_to_morph_matrix = align_xenium_df(alignment_matrix, pixel_size_morph, df_transcripts, x_key, y_key)
-
-        pixel_size_estimated = self.__xenium_estimate_pixel_size(pixel_size_morph, np.linalg.inv(he_to_morph_matrix))    
-        return df_transcripts, pixel_size_estimated
         
         
-    def __load_transcripts(self, transcripts_path, alignment_matrix, pixel_size_morph, dict):
-        df_transcripts = pd.read_parquet(transcripts_path)
+    def __load_transcripts(self, transcripts_path, alignment_matrix, pixel_size_morph, use_dask):
+
+        if use_dask:
+            import dask.dataframe as dd
+            import pyarrow.parquet as pq
+
+            parquet_file = pq.ParquetFile(transcripts_path)
+            total_row_groups = parquet_file.num_row_groups
+            row_groups_per_partition = max(1, total_row_groups // 30)
+            df_transcripts = dd.read_parquet(transcripts_path, split_row_groups=row_groups_per_partition)
+        else:
+            df_transcripts = pd.read_parquet(transcripts_path)
         
         if alignment_matrix is not None:
-            df_transcripts, pixel_size_estimated = self._align_and_estimate_px_size(
+            df_transcripts['he_x'] = 0.
+            df_transcripts['he_y'] = 0.
+            df_transcripts = df_transcripts.map_partitions(align_xenium_df,
                 alignment_matrix, 
                 pixel_size_morph, 
-                df_transcripts,
-                x_key='x_location',
-                y_key='y_location'
+                'x_location',
+                'y_location',
+                meta=df_transcripts._meta,
             )
             df_transcripts['dapi_x'] = df_transcripts['x_location'] / pixel_size_morph
             df_transcripts['dapi_y'] = df_transcripts['y_location'] / pixel_size_morph
-            dict['pixel_size_um_estimated'] = pixel_size_estimated
         else:
             df_transcripts['he_x'] = df_transcripts['x_location'] / pixel_size_morph
             df_transcripts['he_y'] = df_transcripts['y_location'] / pixel_size_morph
             df_transcripts['dapi_x'] = df_transcripts['x_location'] / pixel_size_morph
             df_transcripts['dapi_y'] = df_transcripts['y_location'] / pixel_size_morph
-            dict['pixel_size_um_estimated'] = pixel_size_morph
             
-        return df_transcripts, dict
+        return df_transcripts
     
     
     def __load_cells(self, feature_matrix_path, cells_path, alignment_matrix, pixel_size_morph, dict):
@@ -958,7 +961,7 @@ class XeniumReader(Reader):
         
         if alignment_matrix is not None:
             # convert cell coordinates from um in the morphology image to um in the H&E image
-            df_cells, _ = self._align_and_estimate_px_size(alignment_matrix, pixel_size_morph, df_cells, x_key='x_centroid', y_key='y_centroid')
+            df_cells = align_xenium_df(df_cells, alignment_matrix, pixel_size_morph, x_key='x_centroid', y_key='y_centroid')
         df_cells['he_x'] = df_cells['x_centroid'] / pixel_size_morph
         df_cells['he_y'] = df_cells['y_centroid'] / pixel_size_morph
         
@@ -979,10 +982,27 @@ class XeniumReader(Reader):
         nucleus_bound_path: str = None,
         cell_bound_path: str = None,
         dapi_path = None,
-        load_transcripts=True,
-        load_cells=True,
         load_img=True,
-    ) -> XeniumHESTData: 
+        use_dask=False
+    ) -> XeniumHESTData:
+        """ Read a Xenium sample
+
+        Args:
+            img_path (str): path to the WSI
+            experiment_path (str): path to a `experiment.xenium` file
+            alignment_file_path (str, optional): path to a DAPI->H&E alignment file, None if the H&E is already aligned with the DAPI. Defaults to None.
+            feature_matrix_path (str, optional): path to a `cell_feature_matrix.h5`. Defaults to None.
+            transcripts_path (str, optional): path to a transcripts.parquet, None to not load the transcripts. Defaults to None.
+            cells_path (str, optional): path to a `cells.parquet` file, None to not load the cells. Defaults to None.
+            nucleus_bound_path (str, optional): path to a `nucleus_boundaries.parquet` file. Defaults to None.
+            cell_bound_path (str, optional): path to a `cell_boundaries` file. Defaults to None.
+            dapi_path (_type_, optional): path to a `morphology_focus_0000.ome.tif`/`morphology_focus.ome.tif` file. Defaults to None.
+            load_img (bool, optional): whenever to load the WSI. Defaults to True.
+            use_dask (bool, optional): whenever to load the transcript dataframe with DASK (recommended if the transcript dataframe does not fit into the RAM). Defaults to False.
+
+        Returns:
+            XeniumHESTData: Xenium sample
+        """
             
         if load_img:
             print("Loading the WSI... (can be slow for large images)")
@@ -1002,6 +1022,7 @@ class XeniumReader(Reader):
 
 
         alignment_matrix = read_xenium_alignment(alignment_file_path) if alignment_file_path else None
+        dict['pixel_size_um_estimated'] = self.__xenium_estimate_pixel_size(pixel_size_morph, alignment_matrix)
         if cell_bound_path is not None:
             shapes.append(LazyShapes(cell_bound_path, 'tenx_cell', 'dapi', reader=XeniumParquetCellReader, reader_kwargs={'pixel_size_morph': pixel_size_morph}))
             if alignment_matrix is not None:
@@ -1013,10 +1034,9 @@ class XeniumReader(Reader):
                 shapes.append(LazyShapes(nucleus_bound_path, 'tenx_nucleus', 'he', reader=XeniumParquetCellReader, reader_kwargs={'pixel_size_morph': pixel_size_morph, 'alignment_matrix': alignment_matrix}))
 
         
-        if load_transcripts:
+        if transcripts_path is not None:
             print('Loading transcripts...')
-            # TODO move transcrit dataframe to a dask array (can be more than 20GB)
-            transcript_df, dict = self.__load_transcripts(transcripts_path, alignment_matrix, pixel_size_morph, dict)
+            transcript_df = self.__load_transcripts(transcripts_path, alignment_matrix, pixel_size_morph, use_dask)
                     
             print("Pooling xenium transcripts in pseudo-visium spots...")
             adata = pool_transcripts_xenium(
@@ -1030,23 +1050,18 @@ class XeniumReader(Reader):
             dict['inter_spot_dist'] = 100.
             dict['spots_under_tissue'] = len(adata.obs)
             
-            register_downscale_img(adata, img, dict['pixel_size_um_estimated'])
         else:
             import scanpy as sc
             adata = sc.AnnData()
             adata.obsm['spatial'] = np.array([])
-            adata.uns['spatial'] = {}
-            adata.uns['spatial']['ST'] = {}
-            adata.uns['spatial']['ST']['images'] = {}
-            adata.uns['spatial']['ST']['images']['downscaled_fullres'] = np.array([])
             transcript_df = None
-            dict['pixel_size_um_estimated'] = None
+
+        register_downscale_img(adata, img, dict['pixel_size_um_estimated'])
             
         cell_adata = None
-        if load_cells:
-            if feature_matrix_path is not None and cells_path is not None:
-                print('Reading cells...')
-                cell_adata, dict = self.__load_cells(feature_matrix_path, cells_path, alignment_matrix, pixel_size_morph, dict)
+        if feature_matrix_path is not None and cells_path is not None:
+            print('Reading cells...')
+            cell_adata, dict = self.__load_cells(feature_matrix_path, cells_path, alignment_matrix, pixel_size_morph, dict)
 
             
         st_object = XeniumHESTData(
@@ -1103,7 +1118,7 @@ def read_and_save(path: str, save_plots=True, pyramidal=True, bigtiff=False, plo
     return st_object
         
 def pool_transcripts_xenium(
-    df: pd.DataFrame, 
+    df: Union[pd.DataFrame, dd.DataFrame], 
     pixel_size_he: float,
     spot_size_um=100.,
     key_x='he_x',
@@ -1125,19 +1140,30 @@ def pool_transcripts_xenium(
         sc.AnnData: AnnData object, each obs represents the sum of transcripts within that bin, coordinates of the center of each bin (in pixel on WSI) are in adata.obsm['spatial']
     """
     import scanpy as sc
+    import dask.dataframe as dd
 
     y_max = df[key_y].max()
     y_min = df[key_y].min()
     x_max = df[key_x].max()
     x_min = df[key_x].min()
     
-    m = math.ceil((y_max - y_min) / (spot_size_um / pixel_size_he))
-    n = math.ceil((x_max - x_min) / (spot_size_um / pixel_size_he))
+    m = ((y_max - y_min) / (spot_size_um / pixel_size_he))
+    n = ((x_max - x_min) / (spot_size_um / pixel_size_he))
+
+    if isinstance(df, dd.DataFrame):
+        m = m.compute()
+        n = n.compute()
+
+    m = math.ceil(m)
+    n = math.ceil(n)
     
     features = df['feature_name'].unique()
+    if isinstance(df, dd.DataFrame):
+        features = features.compute()
     
     spot_grid = pd.DataFrame(0, index=range(m * n), columns=features)
     
+
     # a is the row and b is the column in the pseudo visium grid
     a = np.floor((df[key_x] - x_min) / (spot_size_um / pixel_size_he)).astype(int)
     b = np.floor((df[key_y] - y_min) / (spot_size_um / pixel_size_he)).astype(int)
@@ -1147,6 +1173,7 @@ def pool_transcripts_xenium(
     
     cols = spot_grid.columns.get_indexer(features)
     
+    ## use dask for this parts
     spot_grid_np = spot_grid.values.astype(np.uint16)
     np.add.at(spot_grid_np, (c, cols), 1)
     
@@ -1158,6 +1185,10 @@ def pool_transcripts_xenium(
     expression_df = pd.DataFrame(spot_grid_np, columns=spot_grid.columns)
     
     coord_df = expression_df.copy()
+    if isinstance(df, dd.DataFrame):
+        x_min = x_min.compute()
+        y_min = y_min.compute()
+
     coord_df['x'] = x_min + (coord_df.index % n) * (spot_size_um / pixel_size_he) + ((spot_size_um / 2) / pixel_size_he)
     coord_df['y'] = y_min + np.floor(coord_df.index / n) * (spot_size_um / pixel_size_he) + ((spot_size_um / 2) / pixel_size_he)
     coord_df = coord_df[['x', 'y']]
@@ -1165,6 +1196,7 @@ def pool_transcripts_xenium(
     expression_df.index = [str(i) for i in expression_df.index]
     
     adata = sc.AnnData(expression_df)
+    adata.var_names = adata.var_names.astype(str)
     adata.obsm['spatial'] = coord_df[['x', 'y']].values
     adata.obs['in_tissue'] = True
     adata.obs['pxl_col_in_fullres'] = coord_df['x'].values
