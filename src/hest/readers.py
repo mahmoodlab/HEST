@@ -13,7 +13,6 @@ import pandas as pd
 from hestcore.segmentation import get_path_relative
 from loguru import logger
 
-from hest.custom_readers import ADT_to_adata, GSE144239_to_adata, colon_atlas_to_adata, heart_atlas_to_adata
 from hest.HESTData import (HESTData, STHESTData, VisiumHDHESTData,
                            VisiumHESTData, XeniumHESTData)
 from hest.io.seg_readers import XeniumParquetCellReader, read_gdf
@@ -35,7 +34,8 @@ if LOCAL:
                                  align_dev_human_heart,
                                  align_eval_qual_dataset, align_her2,
                                  align_ST_counts_with_transform,
-                                 raw_count_to_adata, raw_counts_to_pixel)
+                                 raw_count_to_adata, raw_counts_to_pixel, ADT_to_adata, 
+                                 GSE144239_to_adata, colon_atlas_to_adata, heart_atlas_to_adata)
 
 
 class Reader:

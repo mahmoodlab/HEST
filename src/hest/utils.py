@@ -103,78 +103,7 @@ def verify_paths(paths, suffix=""):
     for path in paths:
         if not os.path.exists(path):
             raise FileNotFoundError(f"No such file or directory: {path}" + suffix)
-
-
-def geojson_to_map(geojson: dict, width, height, color=None):
-    img = np.zeros((height, width), dtype=np.uint8)
-    
-    i = 0
-    for chunk in geojson:  
-        for my_coords in tqdm(chunk['geometry']['coordinates']):
-            contours = my_coords[0]
-            contours = (np.array(contours)).round().astype(np.int32)
-            if color is None:
-                c = (i + 1, i + 1, i + 1)
-            else:
-                c = color
-            cv2.drawContours(img, [contours], -1, color=c, thickness=cv2.FILLED)
-            i = (i + 1) % 255
-    
-    #img = cv2.resize(img, (width, height))
-    #Image.fromarray(img).save('contours.jpg')
-    #tiff_save(img, 'contours.tif', 0.5, pyramidal=True, bigtiff=False)
-    return img
-        
-
-def to_instance_map(img, cells_mask, save_dir, target_pixel_size, src_pixel_size, target_patch_size) -> None:
-    scale_factor = target_pixel_size / src_pixel_size
-    patch_size_pxl = round(target_patch_size * scale_factor)
-    
-    patch_dir = os.path.join(save_dir, 'patches')
-    mask_dir = os.path.join(save_dir, 'masks')
-    overlay_dir = os.path.join(save_dir, 'overlays')
-    os.makedirs(patch_dir, exist_ok=True)
-    os.makedirs(mask_dir, exist_ok=True)
-    os.makedirs(overlay_dir, exist_ok=True)
-    
-    wsi = wsi_factory(img)
-    patcher = WSIPatcher(wsi, patch_size_pxl)
-    
-    cells_mask = wsi_factory(cells_mask)
-    
-    cols, rows = patcher.get_cols_rows()
-    
-    print('save patches...')
-    # saves patches to temp dir
-    for row in tqdm(range(rows)):
-        for col in range(cols):
-            tile, pxl_x, pxl_y = patcher.get_tile(col, row)
-            mask = cells_mask.read_region((pxl_x, pxl_y), 0, (patch_size_pxl, patch_size_pxl))
-            mask = mask[:, :, 0]
-            mask = cv2.resize(mask, (target_patch_size, target_patch_size), interpolation=cv2.INTER_NEAREST)
             
-            tile = cv2.resize(tile, (target_patch_size, target_patch_size), interpolation=cv2.INTER_CUBIC)
-
-            Image.fromarray(tile).save(os.path.join(patch_dir, f'{pxl_x}_{pxl_y}.png'))
-            
-            
-            inst_map = mask.copy()
-            mask[mask > 0] = 1
-            
-            dict = {
-                'inst_map': inst_map,
-                'type_map': mask
-            }
-            
-            Image.fromarray(inst_map).save(os.path.join(mask_dir, f'{pxl_x}_{pxl_y}.png'))
-            np.save(os.path.join(mask_dir, f'{pxl_x}_{pxl_y}.png'), dict)
-            blended = np.zeros((target_patch_size, target_patch_size, 3), dtype=np.uint8)
-            blended[mask > 0] = [21, 237, 72]
-            blended = Image.fromarray(blended)
-            blended = Image.blend(Image.fromarray(tile), blended, 0.5)
-            blended.save(os.path.join(overlay_dir, f'{pxl_x}_{pxl_y}.png'))
-            
-
 
 def combine_meta_metrics(meta_df, metrics_path, meta_path):
     for _, row in meta_df.iterrows():
