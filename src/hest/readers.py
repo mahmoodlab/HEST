@@ -1095,6 +1095,18 @@ def pool_transcripts_xenium(
 
 
 def pool_bins_visiumhd(adata: sc.AnnData, pixel_size: float, dst_bin_size_um=128, src_bin_size_um=16, chunk_len=50000) -> sc.AnnData: # type: ignore
+    """ Pool visium hd bins
+
+    Args:
+        adata (sc.AnnData): adata containing spot center coordiniates in `pxl_row_in_fullres` and `pxl_col_in_fullres`
+        pixel_size (float): pixel size of the WSI in um/px
+        dst_bin_size_um (int, optional): target bin size in um. Defaults to 128.
+        src_bin_size_um (int, optional): bin size of `adata` in um. Defaults to 16.
+        chunk_len (int, optional): chunk size when binning a larger than RAM `adata` (this is for RAM optimization only). Defaults to 50000.
+
+    Returns:
+        sc.AnnData: adata with pooled bins
+    """
     import scanpy as sc
 
     if src_bin_size_um >= dst_bin_size_um:
@@ -1159,7 +1171,7 @@ def pool_bins_visiumhd(adata: sc.AnnData, pixel_size: float, dst_bin_size_um=128
 
     
 
-def _process_cellvit(row, dest, **cellvit_kwargs):
+def _process_cellvit(row, **cellvit_kwargs):
     path = get_path_from_meta_row(row)
     wsi_path = os.path.join(path, 'processed', 'aligned_fullres_HE.tif')
     with open(os.path.join(path, 'processed', 'metrics.json')) as f:
@@ -1180,7 +1192,7 @@ def _process_cellvit(row, dest, **cellvit_kwargs):
         zipf.write(os.path.join(path, 'processed', f'cellvit_seg.geojson'), f'{id}_cellvit_seg.geojson')
     
         
-def process_meta_df_cellvit(dest, meta_df, cellvit_kwargs={'gpu_ids': [0, 1], 'batch_size': 4}):
+def process_meta_df_cellvit(meta_df, cellvit_kwargs={'gpu_ids': [0, 1], 'batch_size': 4}):
     for _, row in meta_df.iterrows():
-        _process_cellvit(row, dest, **cellvit_kwargs)
+        _process_cellvit(row, **cellvit_kwargs)
     

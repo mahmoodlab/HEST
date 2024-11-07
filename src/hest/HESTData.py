@@ -1255,7 +1255,7 @@ def save_spatial_plot(adata: sc.AnnData, save_path: str, name: str='', key='tota
     """
     import scanpy as sc
     
-    fig = sc.pl.spatial(adata, show=None, img_key="downscaled_fullres", color=[key], title=f"in_tissue spots", return_fig=True, **pl_kwargs)
+    fig = sc.pl.spatial(adata, show=False, img_key="downscaled_fullres", color=[key], title=f"in_tissue spots", return_fig=True, **pl_kwargs)
     
     filename = f"{name}spatial_plots.png"
     
