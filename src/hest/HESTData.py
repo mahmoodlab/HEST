@@ -1244,6 +1244,33 @@ def unify_gene_names(adata: sc.AnnData, species="human", drop=False) -> sc.AnnDa
     
     return adata
 
+def ensembleID_to_gene(st: HESTData) -> HESTData:
+    """
+    Converts ensemble gene IDs of a HESTData object using Biomart annosations
+    
+    Args: 
+        st (HESTData): HESTData object
+    
+    Returns: 
+        HESTData: HESTData object with gene names instead of ensemble gene IDs
+    """
+    import scanpy as sc
+    species = st.meta['species']
+    org = "hsapiens" if species == "Homo sapiens" else "mmusculus"
+    
+    annotations = sc.queries.biomart_annotations(org=org,attrs=['ensembl_gene_id', 'external_gene_name'], use_cache=True)
+    ensembl_to_gene_name = dict(zip(annotations['ensembl_gene_id'], annotations['external_gene_name']))
+    st.adata.var['gene_name'] = st.adata.var_names.map(ensembl_to_gene_name)
+    
+
+    # Filter out genes where the conversion returned NaN       
+    st.adata.var_names = st.adata.var['gene_name'].fillna('')
+    valid_genes = st.adata.var['gene_name'].notna()
+    st.adata = st.adata[:, valid_genes]
+
+    return st
+
+
 def save_spatial_plot(adata: sc.AnnData, save_path: str, name: str='', key='total_counts', pl_kwargs={}):
     """Save the spatial plot from that sc.AnnData
 
