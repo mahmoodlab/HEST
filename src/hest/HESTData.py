@@ -1244,7 +1244,7 @@ def unify_gene_names(adata: sc.AnnData, species="human", drop=False) -> sc.AnnDa
     
     return adata
 
-def ensembleID_to_gene(st: HESTData) -> HESTData:
+def ensembleID_to_gene(st: HESTData, filter_na: bool = False) -> HESTData:
     """
     Converts ensemble gene IDs of a HESTData object using Biomart annosations
     
@@ -1260,11 +1260,15 @@ def ensembleID_to_gene(st: HESTData) -> HESTData:
     
     annotations = sc.queries.biomart_annotations(org=org,attrs=['ensembl_gene_id', 'external_gene_name'], use_cache=True)
     ensembl_to_gene_name = dict(zip(annotations['ensembl_gene_id'], annotations['external_gene_name']))
-    st.adata.var['gene_name'] = st.adata.var_names.map(ensembl_to_gene_name)
-    
 
-    # Filter out genes where the conversion returned NaN       
-    st.adata.var_names = st.adata.var['gene_name'].fillna('')
+        
+    st.adata.var['gene_name'] = st.adata.var_names.map(ensembl_to_gene_name, na_action=None)
+    
+    if filter_na: 
+        st.adata.var_names = st.adata.var['gene_name'].fillna('')
+    else: 
+        st.adata.var['gene_name'] = st.adata.var['gene_name'].where(st.adata.var['gene_name'].notna(), st.adata.var_names)
+        
     valid_genes = st.adata.var['gene_name'].notna()
     st.adata = st.adata[:, valid_genes]
 
