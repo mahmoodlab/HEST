@@ -296,7 +296,6 @@ def enc_results_to_table(path) -> str:
         'ctranspath': 'CTransPath',
         'remedis': 'Remedis',
         'phikon': 'Phikon',
-        'plip': 'PLIP',
         'uni_v1': 'UNI',
         'conch_v1': 'CONCH',
         'gigapath': 'gigapath'

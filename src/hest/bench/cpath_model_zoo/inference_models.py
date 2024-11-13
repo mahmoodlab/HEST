@@ -102,25 +102,6 @@ class PhikonInferenceEncoder(InferenceEncoder):
         return out
     
 
-class PlipInferenceEncoder(InferenceEncoder):
-    def _build(self, _):
-        from transformers import CLIPImageProcessor, CLIPVisionModel
-
-        model_name = "vinid/plip"
-        img_transforms_clip = CLIPImageProcessor.from_pretrained(model_name)
-        model = CLIPVisionModel.from_pretrained(
-            model_name)  # Use for feature extraction
-        def _eval_transform(img): return img_transforms_clip(
-            img, return_tensors='pt')['pixel_values'].squeeze(0)
-        eval_transform = _eval_transform
-        precision = torch.float32
-        
-        return model, eval_transform, precision
-    
-    def forward(self, x):
-        return self.model(x).pooler_output
-    
-
 class RemedisInferenceEncoder(InferenceEncoder):
     def _build(self, weights_path):
         from .remedis.remedis_models import resnet152_remedis
@@ -317,8 +298,6 @@ def inf_encoder_factory(enc_name):
         return CTransPathInferenceEncoder
     elif enc_name == 'phikon':
         return PhikonInferenceEncoder
-    elif enc_name == 'plip':
-        return PlipInferenceEncoder
     elif enc_name == 'remedis':
         return RemedisInferenceEncoder
     elif enc_name == 'resnet50':
