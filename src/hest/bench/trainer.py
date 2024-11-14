@@ -50,7 +50,8 @@ def train_test_reg(X_train, X_test, y_train, y_test,
             colsample_bytree=0.8,
             gamma=0,
             reg_alpha=0,
-            reg_lambda=1
+            reg_lambda=1,
+            random_state=random_state
         )
         reg.fit(X_train, y_train)
         preds_all = reg.predict(X_test)

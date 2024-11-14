@@ -261,21 +261,21 @@ def predict_single_split(train_split, test_split, args, save_dir, dataset_name, 
         from sklearn.decomposition import PCA
         
         print('perform PCA dim reduction')
-        pipe = Pipeline([('scaler', StandardScaler()), (f'PCA', PCA(n_components=args.latent_dim))])
+        pipe = Pipeline([('scaler', StandardScaler()), (f'PCA', PCA(n_components=args.latent_dim, random_state=args.seed))])
         X_train, X_test = torch.Tensor(pipe.fit_transform(X_train)), torch.Tensor(pipe.transform(X_test))
     
     
-    linprobe_results, linprobe_dump = train_test_reg(X_train, X_test, y_train, y_test, random_state=args.seed, genes=genes, method=args.method)
-    linprobe_summary = {}
-    linprobe_summary.update({'n_train': len(y_train), 'n_test': len(y_test)})
-    linprobe_summary.update({key: val for key, val in linprobe_results.items()})
-    logger.info(linprobe_summary)
+    probe_results, linprobe_dump = train_test_reg(X_train, X_test, y_train, y_test, random_state=args.seed, genes=genes, method=args.method)
+    probe_summary = {}
+    probe_summary.update({'n_train': len(y_train), 'n_test': len(y_test)})
+    probe_summary.update({key: val for key, val in probe_results.items()})
+    logger.info(probe_summary)
     with open(os.path.join(save_dir, f'results.json'), 'w') as f:
-        json.dump(linprobe_results, f, sort_keys=True, indent=4)
+        json.dump(probe_results, f, sort_keys=True, indent=4)
     with open(os.path.join(save_dir, f'summary.json'), 'w') as f:
-        json.dump(linprobe_summary, f, sort_keys=True, indent=4)
+        json.dump(probe_summary, f, sort_keys=True, indent=4)
     save_pkl(os.path.join(save_dir, f'inference_dump.pkl'), linprobe_dump)
-    return linprobe_results
+    return probe_results
 
 
 def merge_fold_results(arr):
@@ -351,7 +351,13 @@ def predict_folds(args, exp_save_dir, model_name, dataset_name, device, bench_da
         json.dump(kfold_results, f, sort_keys=True, indent=4)
         
     return kfold_results
-            
+
+
+def set_seed(seed):
+    import random
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
 
 
 def benchmark(args, encoder, enc_transf, precision):
@@ -364,6 +370,7 @@ def benchmark(args, encoder, enc_transf, precision):
             if key in args:
                 setattr(args, key, config[key])
                 
+    set_seed(args.seed)
 
     logger.info(f'Saving models to {args.weights_root}...')
     snapshot_download(repo_id="MahmoodLab/hest-bench", repo_type='dataset', local_dir=args.weights_root, allow_patterns=['fm_v1/*'])
