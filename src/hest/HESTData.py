@@ -681,6 +681,10 @@ class HESTData:
         
         return SpatialData(tables=new_table, images=images, shapes=shapes)
     
+    def ensembleID_to_gene(self):
+        ensembleID_to_gene(self, inplace=True)
+
+    
 class VisiumHESTData(HESTData): 
     def __init__(self, 
         adata: sc.AnnData, # type: ignore
@@ -1239,10 +1243,47 @@ def unify_gene_names(adata: sc.AnnData, species="human", drop=False) -> sc.AnnDa
     
     if drop:
         adata = adata[:, ~remaining]
-    
+ 
     # TODO return dict map of renamed, and remaining
-    
     return adata
+
+def ensembleID_to_gene(st: HESTData, inplace=False, filter_na = False) -> HESTData:
+    """
+    Converts ensemble gene IDs of a HESTData object using Biomart annotations and filter out genes with no matching Ensembl ID
+    
+    Args: 
+        st (HESTData): HESTData object
+        inplace (bool): whenever to perform the changes in placce. Defaults to True.
+        filter_na (bool): whenever to filter genes that are not valid ensemble IDs. Defaults to False.
+    
+    Returns: 
+        HESTData: HESTData object with gene names instead of ensemble gene IDs
+    """
+    import scanpy as sc
+    if not inplace:
+        st = st.copy()
+
+    import scanpy as sc
+    species = st.meta['species']
+    org = "hsapiens" if species == "Homo sapiens" else "mmusculus"
+    
+    annotations = sc.queries.biomart_annotations(org=org,attrs=['ensembl_gene_id', 'external_gene_name'], use_cache=True)
+    ensembl_to_gene_name = dict(zip(annotations['ensembl_gene_id'], annotations['external_gene_name']))
+
+        
+    st.adata.var['gene_name'] = st.adata.var_names.map(ensembl_to_gene_name, na_action=None)
+    
+    if filter_na: 
+        st.adata.var_names = st.adata.var['gene_name'].fillna('')
+    else: 
+        st.adata.var['gene_name'] = st.adata.var['gene_name'].where(st.adata.var['gene_name'].notna(), st.adata.var_names)
+        
+    valid_genes = st.adata.var['gene_name'].notna()
+    st.adata = st.adata[:, valid_genes]
+
+
+    return st
+
 
 def save_spatial_plot(adata: sc.AnnData, save_path: str, name: str='', key='total_counts', pl_kwargs={}):
     """Save the spatial plot from that sc.AnnData
