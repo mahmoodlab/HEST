@@ -1243,9 +1243,8 @@ def unify_gene_names(adata: sc.AnnData, species="human", drop=False) -> sc.AnnDa
     
     if drop:
         adata = adata[:, ~remaining]
-    
+ 
     # TODO return dict map of renamed, and remaining
-    
     return adata
 
 def ensembleID_to_gene(st: HESTData, inplace=False, filter_na = False) -> HESTData:
