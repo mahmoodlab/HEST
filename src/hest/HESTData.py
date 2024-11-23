@@ -682,7 +682,7 @@ class HESTData:
         return SpatialData(tables=new_table, images=images, shapes=shapes)
     
     def ensembleID_to_gene(self):
-        ensembleID_to_gene(self, inplace=True)
+        ensembleID_to_gene(self)
 
     
 class VisiumHESTData(HESTData): 
@@ -1247,21 +1247,17 @@ def unify_gene_names(adata: sc.AnnData, species="human", drop=False) -> sc.AnnDa
     # TODO return dict map of renamed, and remaining
     return adata
 
-def ensembleID_to_gene(st: HESTData, inplace=False, filter_na = False) -> HESTData:
+def ensembleID_to_gene(st: HESTData, filter_na = False) -> HESTData:
     """
     Converts ensemble gene IDs of a HESTData object using Biomart annotations and filter out genes with no matching Ensembl ID
     
     Args: 
         st (HESTData): HESTData object
-        inplace (bool): whenever to perform the changes in placce. Defaults to True.
         filter_na (bool): whenever to filter genes that are not valid ensemble IDs. Defaults to False.
     
     Returns: 
         HESTData: HESTData object with gene names instead of ensemble gene IDs
     """
-    import scanpy as sc
-    if not inplace:
-        st = st.copy()
 
     import scanpy as sc
     species = st.meta['species']
