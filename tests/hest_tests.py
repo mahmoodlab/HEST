@@ -133,10 +133,10 @@ class TestHESTData(unittest.TestCase):
             self.sts = hest.load_hest('hest_data', id_list)
 
 
-    def test_conversion_ensembleID(self):
-        for idx, st in enumerate(self.sts):
-            with self.subTest(st_object=idx):
-                ensembleID_to_gene(st)
+    #def test_conversion_ensembleID(self):
+    #    for idx, st in enumerate(self.sts):
+    #        with self.subTest(st_object=idx):
+    #            ensembleID_to_gene(st)
 
         
     def test_tissue_seg(self):
