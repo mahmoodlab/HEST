@@ -108,7 +108,7 @@ class CellViTSegmenter(CellSegmenter):
         processes: {processes}
         target_mpp: {dst_pixel_size}
         wsi_extension: {wsi_extension}
-        wsi_paths: "{wsi_path}"
+        wsi_paths: {wsi_path}
         wsi_properties:
             magnification: 40
             slide_mpp: {src_pixel_size}
@@ -117,7 +117,6 @@ class CellViTSegmenter(CellSegmenter):
         
         import tempfile
         with tempfile.TemporaryDirectory() as temp_dir:
-            temp_dir = 'debug_seg'
             os.makedirs(temp_dir, exist_ok=True)
             config_path = os.path.join(temp_dir, name + '.yaml')
             with open(config_path, 'w') as file:
@@ -144,7 +143,7 @@ class CellViTSegmenter(CellSegmenter):
         pixel_size: float, 
         dst_pixel_size: float=0.25, 
         batch_size=2, 
-        gpu_ids=[], 
+        gpu_ids=[0], 
         save_dir='results/segmentation',
         model='CellViT-SAM-H-x40.pth'
     ) -> str:
@@ -310,7 +309,7 @@ def assign_spot_to_cell(cell_gdf, point_gdf, n_workers=-1):
     point_gdf['cell_id'] = cell_gdf['cell_id'].iloc[assignments[assignments != -1]].values
     
     
-    return point_gdf['cell_id']
+    return point_gdf
 
 
 def _buffer(block, exp_pixel):

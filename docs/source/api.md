@@ -42,6 +42,18 @@
     HESTData
 ```
 
+## Pooling of transcripts, binning
+
+```{eval-rst}
+.. currentmodule:: hest.readers
+
+.. autosummary::
+    :toctree: generated
+   
+    pool_transcripts_xenium
+    pool_bins_visiumhd
+```
+
 ## Batch effect visualization/correction
 
 ```{eval-rst}

@@ -88,81 +88,6 @@ def read_visium_positions_old(tissue_position_list_path):
 class VisiumHDReader(Reader):
     """10x Genomics Visium-HD reader"""
         
-    
-    def __bin_to_128um(self, adata: sc.AnnData, pixel_size: float) -> sc.AnnData: # type: ignore
-        import scanpy as sc
-        
-        y_max = adata.obs['pxl_row_in_fullres'].max()
-        y_min = adata.obs['pxl_row_in_fullres'].min()
-        x_max = adata.obs['pxl_col_in_fullres'].max()
-        x_min = adata.obs['pxl_col_in_fullres'].min()
-        
-        m = math.ceil((y_max - y_min) / (128 / pixel_size))
-        n = math.ceil((x_max - x_min) / (128 / pixel_size))
-
-        features = adata.var_names
-        
-        spot_grid = pd.DataFrame(0, index=range(m * n), columns=features)
-        
-        # a is the row and b is the column in the pseudo visium grid
-        a = np.floor((adata.obs['pxl_col_in_fullres'] - x_min) / (128. / pixel_size)).astype(int)
-        b = np.floor((adata.obs['pxl_row_in_fullres'] - y_min) / (128. / pixel_size)).astype(int)
-        
-        c = b * n + a
-        c = np.array(c)
-        spot_grid_np = spot_grid.values.astype(np.float32)
-        
-        expr_np = adata.to_df().values
-        
-        #my_c = c[:len(c)//4]
-        #my_df = adata.to_df()[:len(adata.to_df())//4]
-        
-        spot_grid_np[c] += expr_np
-        
-        
-        #spot_grid = adata.to_df().apply(lambda row: spot_grid.loc[c[index]] += row, axis=1)
-        #for index, row in tqdm(adata.to_df().iterrows(), total=len(adata.to_df())):
-        #    spot_grid.loc[c[index]] += row
-        
-        
-        #cols = spot_grid.columns.get_indexer(features)
-        
-        #spot_grid_np = spot_grid.values.astype(np.uint16)
-        #spot_grid_np[c, cols] += 1
-        #np.add.at(spot_grid_np, (c, cols), 1)
-        
-        
-        #if isinstance(spot_grid.columns.values[0], bytes):
-        #    spot_grid.columns = [i.decode('utf-8') for i in spot_grid.columns]
-        
-
-        expression_df = pd.DataFrame(spot_grid_np, columns=spot_grid.columns)
-        
-        row_sums = expression_df.sum(axis=1)
-
-        # Filter rows where the sum is not equal to zero
-        expression_df = expression_df[row_sums > 1e-8]
-        
-        
-        #coord_df = expression_df.copy()
-        pos_x = x_min + (expression_df.index % n) * (128. / pixel_size) + (64. / pixel_size)
-        pos_y = y_min + np.floor(expression_df.index / n) * (128. / pixel_size) + (64. / pixel_size)
-        
-        #spot_grid.index = [str(i) for i in expression_df.index]
-        
-        adata = sc.AnnData(expression_df) # type: ignore
-        adata.obsm['spatial'] = np.column_stack((pos_x, pos_y))
-        adata.obs['in_tissue'] = [True for _ in range(len(adata.obs))]
-        adata.obs['pxl_col_in_fullres'] = pos_x
-        adata.obs['pxl_row_in_fullres'] = pos_y
-        adata.obs['array_col'] = np.arange(len(adata.obs)) % n
-        adata.obs['array_row'] = np.arange(len(adata.obs)) // n
-        adata.obs.index = [str(row).zfill(4) + 'x' + str(col).zfill(4) for row, col in  zip(adata.obs['array_row'], adata.obs['array_col'])]
-        
-        return adata
-        
-        
-    
     def _auto_read(self, path, **read_kwargs) -> VisiumHDHESTData:
         img_filename = find_biggest_img(path)
         
@@ -190,12 +115,14 @@ class VisiumHDReader(Reader):
         img_path: str, 
         square_16um_path: str, 
         metrics_path: str = None,
-        square_2um_path: str = None
+        square_2um_path: str = None,
+        use_dask = False
     ) -> VisiumHDHESTData:
         import scanpy as sc
         
         self.square_2um_path = square_2um_path
         
+        print("Loading the WSI... (can be slow for large images)")
         img, pixel_size_embedded = load_wsi(img_path)
         
         spatial_path = find_first_file_endswith(square_16um_path, 'spatial')
@@ -205,7 +132,8 @@ class VisiumHDReader(Reader):
         tissue_positions = pd.read_parquet(tissue_positions_path)
         tissue_positions.index = tissue_positions['barcode']
         tissue_positions = tissue_positions.drop('barcode', axis=1)
-         
+
+        print("Loading spot counts...") 
         adata = sc.read_10x_h5(filtered_bc_matrix_path)
         
         aligned_spots = pd.merge(adata.obs, tissue_positions, how='inner', left_index=True, right_index=True)
@@ -218,17 +146,18 @@ class VisiumHDReader(Reader):
             
             
         pixel_size, _ = find_pixel_size_from_spot_coords(adata.obs, inter_spot_dist=16, packing=SpotPacking.GRID_PACKING)
-        
-        adata = self.__bin_to_128um(adata, pixel_size)
+
+
+        pooled_adata = pool_bins_visiumhd(adata, pixel_size, dst_bin_size_um=128, src_bin_size_um=16)
             
         meta['pixel_size_um_embedded'] = pixel_size_embedded
         meta['pixel_size_um_estimated'] = pixel_size
-        meta['spots_under_tissue'] = len(adata.obs)
+        meta['spots_under_tissue'] = len(pooled_adata.obs)
             
-        register_downscale_img(adata, img, pixel_size, spot_size=128)
+        register_downscale_img(pooled_adata, img, pixel_size, spot_size=128)
         
         
-        return VisiumHDHESTData(adata, img, meta['pixel_size_um_estimated'], meta)
+        return VisiumHDHESTData(pooled_adata, img, meta['pixel_size_um_estimated'], meta)
         
         
 class VisiumReader(Reader):
@@ -814,6 +743,32 @@ class STReader(Reader):
     
 class XeniumReader(Reader):
     """ 10x Xenium reader """
+
+    def auto_read(self, path: str, **read_kwargs) -> XeniumHESTData:
+        """
+        Automatically detect the file names and determine a reading strategy based on the
+        detected files. For more control on the reading process, consider using `read()` instead
+
+        auto_read will automatically identify the following files based on their name:
+        - a WSI: largest image in `path` (see `find_biggest_img`)
+        - an image alignment file: any file ending with 'imagealignment.csv'
+            this file contains an affine transformation used to align transcripts, 
+            and cells from DAPI to H&E. The transformation must be in the standard Xenium format
+        - a transcript file: file named `transcripts.parquet`
+        - an experiment file: experiment.xenium
+        - a `cell_feature_matrix.h5` file
+        - a `cells.parquet` file
+        - a `nucleus_boundaries.parquet` file
+        - a `cell_boundaries.parquet` file
+
+        Args:
+            path (st): path to the directory containing all the necessary files
+
+        Returns:
+            XeniumHESTData: STObject that was read
+        """
+        super().auto_read(path, **read_kwargs)
+        
     
     def _auto_read(self, path, **read_kwargs) -> XeniumHESTData:
         img_filename = find_biggest_img(path)
@@ -887,13 +842,22 @@ class XeniumReader(Reader):
         if alignment_matrix is not None:
             df_transcripts['he_x'] = 0.
             df_transcripts['he_y'] = 0.
-            df_transcripts = df_transcripts.map_partitions(align_xenium_df,
-                alignment_matrix, 
-                pixel_size_morph, 
-                'x_location',
-                'y_location',
-                meta=df_transcripts._meta,
-            )
+            if use_dask:
+                df_transcripts = df_transcripts.map_partitions(align_xenium_df,
+                    alignment_matrix, 
+                    pixel_size_morph, 
+                    'x_location',
+                    'y_location',
+                    meta=df_transcripts._meta,
+                )
+            else:
+                df_transcripts = align_xenium_df(
+                    df_transcripts,
+                    alignment_matrix, 
+                    pixel_size_morph, 
+                    'x_location',
+                    'y_location',
+                )
             df_transcripts['dapi_x'] = df_transcripts['x_location'] / pixel_size_morph
             df_transcripts['dapi_y'] = df_transcripts['y_location'] / pixel_size_morph
         else:
@@ -1163,9 +1127,86 @@ def pool_transcripts_xenium(
     sc.pp.filter_cells(adata, min_counts=1)
     
     return adata
+
+
+def pool_bins_visiumhd(adata: sc.AnnData, pixel_size: float, dst_bin_size_um=128, src_bin_size_um=16, chunk_len=50000) -> sc.AnnData: # type: ignore
+    """ Pool visium hd bins
+
+    Args:
+        adata (sc.AnnData): adata containing spot center coordiniates in `pxl_row_in_fullres` and `pxl_col_in_fullres`
+        pixel_size (float): pixel size of the WSI in um/px
+        dst_bin_size_um (int, optional): target bin size in um. Defaults to 128.
+        src_bin_size_um (int, optional): bin size of `adata` in um. Defaults to 16.
+        chunk_len (int, optional): chunk size when binning a larger than RAM `adata` (this is for RAM optimization only). Defaults to 50000.
+
+    Returns:
+        sc.AnnData: adata with pooled bins
+    """
+    import scanpy as sc
+
+    if src_bin_size_um >= dst_bin_size_um:
+        raise ValueError("dst_bin_size_um needs to be larger than src_bin_size_um")
+    
+    y_max = adata.obs['pxl_row_in_fullres'].max()
+    y_min = adata.obs['pxl_row_in_fullres'].min()
+    x_max = adata.obs['pxl_col_in_fullres'].max()
+    x_min = adata.obs['pxl_col_in_fullres'].min()
+    
+    # pxl_col_in_fullres and pxl_row_in_fullres refer to the center of each spot so we add + src_bin_size_um / pixel_size
+    grid_height_pxl = y_max - y_min + src_bin_size_um / pixel_size
+    grid_width_pxl = x_max - x_min + src_bin_size_um / pixel_size
+    dst_bin_pxl_size = dst_bin_size_um / pixel_size
+    src_bin_pxl_size = src_bin_size_um / pixel_size
+
+    m = math.ceil(grid_height_pxl / dst_bin_pxl_size)
+    n = math.ceil(grid_width_pxl / dst_bin_pxl_size)
+
+    features = adata.var_names
+    
+    spot_grid = pd.DataFrame(0, index=range(m * n), columns=features)
+    
+    # a is the row and b is the column in the binned grid
+    a = np.floor((adata.obs['pxl_col_in_fullres'] - x_min + src_bin_pxl_size // 2) / dst_bin_pxl_size).astype(int)
+    b = np.floor((adata.obs['pxl_row_in_fullres'] - y_min + src_bin_pxl_size // 2) / dst_bin_pxl_size).astype(int)
+    
+    c = b * n + a
+    c = np.array(c)
+    spot_grid_np = spot_grid.values.astype(np.float32)
+
+    nb_chunks = int(np.ceil(len(c) / chunk_len))
+
+    for i in range(nb_chunks):
+        start, end = i * chunk_len, min((i + 1) * chunk_len, len(c))
+        spot_grid_np[c[start:end]] += adata.X[start:end]
+
+    
+    expression_df = pd.DataFrame(spot_grid_np, columns=spot_grid.columns)
+    
+    row_sums = expression_df.sum(axis=1)
+
+    # Filter rows where the sum is not equal to zero
+    expression_df = expression_df[row_sums > 1e-8]
+    
+    
+    #coord_df = expression_df.copy()
+    pos_x = x_min + (expression_df.index % n) * dst_bin_pxl_size + dst_bin_pxl_size // 2
+    pos_y = y_min + np.floor(expression_df.index / n) * dst_bin_pxl_size + dst_bin_pxl_size // 2
+    
+    
+    adata = sc.AnnData(expression_df) # type: ignore
+    adata.obsm['spatial'] = np.column_stack((pos_x, pos_y))
+    adata.obs['in_tissue'] = [True for _ in range(len(adata.obs))]
+    adata.obs['pxl_col_in_fullres'] = pos_x
+    adata.obs['pxl_row_in_fullres'] = pos_y
+    adata.obs['array_col'] = np.arange(len(adata.obs)) % n
+    adata.obs['array_row'] = np.arange(len(adata.obs)) // n
+    adata.obs.index = [str(row).zfill(4) + 'x' + str(col).zfill(4) for row, col in  zip(adata.obs['array_row'], adata.obs['array_col'])]
+    
+    return adata
+
     
 
-def _process_cellvit(row, dest, **cellvit_kwargs):
+def _process_cellvit(row, **cellvit_kwargs):
     path = get_path_from_meta_row(row)
     wsi_path = os.path.join(path, 'processed', 'aligned_fullres_HE.tif')
     with open(os.path.join(path, 'processed', 'metrics.json')) as f:
@@ -1186,7 +1227,7 @@ def _process_cellvit(row, dest, **cellvit_kwargs):
         zipf.write(os.path.join(path, 'processed', f'cellvit_seg.geojson'), f'{id}_cellvit_seg.geojson')
     
         
-def process_meta_df_cellvit(dest, meta_df, cellvit_kwargs={'gpu_ids': [0, 1], 'batch_size': 4}):
+def process_meta_df_cellvit(meta_df, cellvit_kwargs={'gpu_ids': [0, 1], 'batch_size': 4}):
     for _, row in meta_df.iterrows():
-        _process_cellvit(row, dest, **cellvit_kwargs)
+        _process_cellvit(row, **cellvit_kwargs)
     

@@ -308,12 +308,12 @@ def preprocess_cells_visium_hd(
     nuclei_path = None
 ) -> Tuple[sc.AnnData, gpd.GeoDataFrame, gpd.GeoDataFrame]:
     
-    segment_kwargs['save_dir'] = full_exp_dir
+
     
     if nuclei_path is None:
         segmenter = cell_segmenter_factory(segment_method)
         logger.info('Segmenting cells...')
-        path_geojson = segmenter.segment_cells(he_wsi, '', pixel_size, **segment_kwargs)
+        path_geojson = segmenter.segment_cells(he_wsi, 'seg', pixel_size, save_dir=full_exp_dir, **segment_kwargs)
         nuc_gdf = GeojsonCellReader().read_gdf(path_geojson)  
     else:
         nuc_gdf = read_gdf(nuclei_path)
@@ -342,7 +342,8 @@ def process_meta_df(
     segment_tissue=True,
     registration_kwargs={},
     read_kwargs={},
-    segment_kwargs={}
+    segment_kwargs={},
+    preprocess_kwargs={}
 ):
     """Internal use method, process all the raw ST data in the meta_df"""
     for _, row in tqdm(meta_df.iterrows(), total=len(meta_df)):
@@ -404,21 +405,22 @@ def process_meta_df(
                     write_geojson(warped_cells, os.path.join(path, 'processed', f'he_cell_seg.geojson'), '', chunk=True)
                     write_geojson(warped_nuclei, os.path.join(path, 'processed', f'he_nucleus_seg.geojson'), '', chunk=True)
                 elif isinstance(st, VisiumHDHESTData):
-                    segment_config = {'method': 'cellvit'}
+                    segment_config = {}
                     binning_config = {}
                     
                     bc_matrix_path = find_first_file_endswith(os.path.join(path, 'binned_outputs', 'square_002um'), 'filtered_feature_bc_matrix.h5')
                     bin_positions_path = find_first_file_endswith(os.path.join(path, 'binned_outputs', 'square_002um', 'spatial'), 'tissue_positions.parquet')
                     
+                    del st.wsi
                     preprocess_cells_visium_hd(
                         os.path.join(path, 'processed', ALIGNED_HE_FILENAME),
                         full_exp_dir,
-                        row['id'],
                         st.pixel_size,
                         bc_matrix_path,
                         bin_positions_path,
                         segment_config,
                         binning_config,
+                        **preprocess_kwargs
                     )
 
             if isinstance(st, XeniumHESTData):
