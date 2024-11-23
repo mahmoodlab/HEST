@@ -743,6 +743,32 @@ class STReader(Reader):
     
 class XeniumReader(Reader):
     """ 10x Xenium reader """
+
+    def auto_read(self, path: str, **read_kwargs) -> XeniumHESTData:
+        """
+        Automatically detect the file names and determine a reading strategy based on the
+        detected files. For more control on the reading process, consider using `read()` instead
+
+        auto_read will automatically identify the following files based on their name:
+        - a WSI: largest image in `path` (see `find_biggest_img`)
+        - an image alignment file: any file ending with 'imagealignment.csv'
+            this file contains an affine transformation used to align transcripts, 
+            and cells from DAPI to H&E. The transformation must be in the standard Xenium format
+        - a transcript file: file named `transcripts.parquet`
+        - an experiment file: experiment.xenium
+        - a `cell_feature_matrix.h5` file
+        - a `cells.parquet` file
+        - a `nucleus_boundaries.parquet` file
+        - a `cell_boundaries.parquet` file
+
+        Args:
+            path (st): path to the directory containing all the necessary files
+
+        Returns:
+            XeniumHESTData: STObject that was read
+        """
+        super().auto_read(path, **read_kwargs)
+        
     
     def _auto_read(self, path, **read_kwargs) -> XeniumHESTData:
         img_filename = find_biggest_img(path)
@@ -816,13 +842,22 @@ class XeniumReader(Reader):
         if alignment_matrix is not None:
             df_transcripts['he_x'] = 0.
             df_transcripts['he_y'] = 0.
-            df_transcripts = df_transcripts.map_partitions(align_xenium_df,
-                alignment_matrix, 
-                pixel_size_morph, 
-                'x_location',
-                'y_location',
-                meta=df_transcripts._meta,
-            )
+            if use_dask:
+                df_transcripts = df_transcripts.map_partitions(align_xenium_df,
+                    alignment_matrix, 
+                    pixel_size_morph, 
+                    'x_location',
+                    'y_location',
+                    meta=df_transcripts._meta,
+                )
+            else:
+                df_transcripts = align_xenium_df(
+                    df_transcripts,
+                    alignment_matrix, 
+                    pixel_size_morph, 
+                    'x_location',
+                    'y_location',
+                )
             df_transcripts['dapi_x'] = df_transcripts['x_location'] / pixel_size_morph
             df_transcripts['dapi_y'] = df_transcripts['y_location'] / pixel_size_morph
         else:
