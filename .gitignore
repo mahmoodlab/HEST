@@ -8,6 +8,7 @@ tests/assets
 config
 tests/output_tests
 HEST/
+*.pyc
 
 results
 atlas
