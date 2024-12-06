@@ -75,7 +75,7 @@ class CustomInferenceEncoder(InferenceEncoder):
     def __init__(self, weights_path, name, model, transforms, precision):
         super().__init__(weights_path)
         self.model = model
-        self.transforms = transforms
+        self.eval_transforms = transforms
         self.precision = precision
         
     def _build(self, weights_path):

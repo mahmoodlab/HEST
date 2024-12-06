@@ -24,7 +24,7 @@
 .. autosummary::
     :toctree: generated
    
-    benchmark_encoder
+    benchmark
 ```
 
 ## HESTData class

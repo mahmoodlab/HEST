@@ -1,14 +1,14 @@
 # directory containing the data for each task
-bench_data_root: 'bench_data'
+bench_data_root: 'eval/bench_data'
 
 # directory where benchmark results will be dumped
-results_dir: 'ST_pred_results'
+results_dir: 'eval/ST_pred_results'
 
 # directory where the vision embeddings will be dumped
-embed_dataroot: 'ST_data_emb'
+embed_dataroot: 'eval/ST_data_emb'
 
 # directory to the model weights root
-weights_root: 'fm_v1'
+weights_root: 'eval/fm_v1'
 
 # inference parameters
 batch_size: 128
