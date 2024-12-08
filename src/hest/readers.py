@@ -1044,12 +1044,12 @@ def pool_transcripts_xenium(
     key_x='he_x',
     key_y='he_y',
 ) -> sc.AnnData: # type: ignore
-    """ Pool a xenium transcript dataframe by square spots of size 100um
+    """ Pool a xenium transcript dataframe by square spots of `spot_size_um` micrometers.
 
     Args:
-        df (pd.DataFrame): xenium transcipts dataframe containing columns:
-        - 'he_x' and 'he_y' indicating the pixel coordinates of each transcripts in the morphology image
-        - 'feature_name' indicating the transcript name
+        df (Union[pd.DataFrame, dd.DataFrame]): xenium transcipts dataframe containing columns:
+            - 'he_x' and 'he_y' indicating the pixel coordinates of each transcripts in the morphology image
+            - 'feature_name' indicating the transcript name
         pixel_size_he (float): pixel_size in um on the he image
         spot_size_um: pooling rectangle width in um
         key_x: column name of pixel x coordinate of each transcript in `df`
@@ -1057,7 +1057,7 @@ def pool_transcripts_xenium(
         
 
     Returns:
-        sc.AnnData: AnnData object, each obs represents the sum of transcripts within that bin, coordinates of the center of each bin (in pixel on WSI) are in adata.obsm['spatial']
+        sc.AnnData: AnnData object, each row in .obs represents a bin, each row in `.X` represents the sum of transcripts within that bin. Center coordinates of each bin (in pixel on WSI) are in adata.obsm['spatial']
     """
     import scanpy as sc
     import dask.dataframe as dd
@@ -1129,18 +1129,18 @@ def pool_transcripts_xenium(
     return adata
 
 
-def pool_bins_visiumhd(adata: sc.AnnData, pixel_size: float, dst_bin_size_um=128, src_bin_size_um=16, chunk_len=50000) -> sc.AnnData: # type: ignore
-    """ Pool visium hd bins
+def pool_bins_visiumhd(adata: sc.AnnData, pixel_size: float, dst_bin_size_um=128, src_bin_size_um: Literal[2, 8, 16]=16, chunk_len=50000) -> sc.AnnData: # type: ignore
+    """ Pool a Visium HD (with a source resolution of `src_bin_size_um`) by square spots of `spot_size_um` micrometers.
 
     Args:
         adata (sc.AnnData): adata containing spot center coordiniates in `pxl_row_in_fullres` and `pxl_col_in_fullres`
         pixel_size (float): pixel size of the WSI in um/px
         dst_bin_size_um (int, optional): target bin size in um. Defaults to 128.
-        src_bin_size_um (int, optional): bin size of `adata` in um. Defaults to 16.
+        src_bin_size_um (Literal[2, 8, 16], optional): bin size of `adata` in um. Defaults to 16.
         chunk_len (int, optional): chunk size when binning a larger than RAM `adata` (this is for RAM optimization only). Defaults to 50000.
 
     Returns:
-        sc.AnnData: adata with pooled bins
+        sc.AnnData: AnnData object, each row in .obs represents a bin, each row in `.X` represents the sum of visium-hd sub-bins (of size `src_bin_size_um`) within that larger bin (of size `dst_bin_size_um`). Center coordinates of each bin (in pixel on WSI) are in adata.obsm['spatial']
     """
     import scanpy as sc
 
