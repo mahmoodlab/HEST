@@ -1063,6 +1063,7 @@ def iter_hest(hest_dir: str, id_list: List[str] = None, **read_kwargs) -> HESTIt
     Args:
         hest_dir (str): hest directory containing folders: st, wsis, metadata, tissue_seg (optional)
         id_list (List[str], Optional): list of ids to read (ex: ['TENX96', 'TENX99']), pass None to read all available samples. Default to None
+        load_transcripts (bool, Optional): Whenever to load the full transcript dataframe for Xenium samples. Default to False
 
     Returns:
         HESTIterator: HESTData iterator
