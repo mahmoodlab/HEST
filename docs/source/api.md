@@ -13,7 +13,7 @@
 .. autosummary::
     :toctree: generated
    
-    load_hest
+    iter_hest
 ```
 
 ## Run HEST-Benchmark
@@ -24,7 +24,7 @@
 .. autosummary::
     :toctree: generated
    
-    benchmark_encoder
+    benchmark
 ```
 
 ## HESTData class
@@ -43,6 +43,8 @@
 ```
 
 ## Pooling of transcripts, binning
+
+Methods used to pool Xenium transcripts and Visium-HD bins into square bins of custom size
 
 ```{eval-rst}
 .. currentmodule:: hest.readers
@@ -72,7 +74,7 @@
     correct_batch_effect
 ```
 
-## Resolving gene name aliases
+## Gene names manipulation
 
 ```{eval-rst}
 .. currentmodule:: hest.HESTData
@@ -81,12 +83,13 @@
     :toctree: generated
 
     unify_gene_names
+    ensembl_id_to_gene
 ```
 
 
-## Readers to augment HEST-1k
+## Readers to expand HEST-1k
 
-Readers to create new HEST-1k samples.
+Readers to expand HEST-1k with additional samples.
 
 ```{eval-rst}
 .. currentmodule:: hest.readers
@@ -103,7 +106,7 @@ Readers to create new HEST-1k samples.
 
 
 ## CellViT segmentation
-Nuclei segmentation methods
+Simplified API for nuclei segmentation
 
 
 ```{eval-rst}

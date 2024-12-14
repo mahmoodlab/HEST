@@ -681,8 +681,8 @@ class HESTData:
         
         return SpatialData(tables=new_table, images=images, shapes=shapes)
     
-    def ensembleID_to_gene(self):
-        ensembleID_to_gene(self)
+    def ensembl_id_to_gene(self):
+        ensembl_id_to_gene(self)
 
     
 class VisiumHESTData(HESTData): 
@@ -1058,6 +1058,15 @@ class HESTIterator:
         return len(self.id_list)
 
 def iter_hest(hest_dir: str, id_list: List[str] = None, **read_kwargs) -> HESTIterator:
+    """ Iterate through the HEST samples contained in `hest_dir`
+
+    Args:
+        hest_dir (str): hest directory containing folders: st, wsis, metadata, tissue_seg (optional)
+        id_list (List[str], Optional): list of ids to read (ex: ['TENX96', 'TENX99']), pass None to read all available samples. Default to None
+
+    Returns:
+        HESTIterator: HESTData iterator
+    """
     return HESTIterator(hest_dir, id_list, **read_kwargs)
 
 def _read_st(hest_dir, st_filename, load_transcripts=False):
@@ -1247,7 +1256,7 @@ def unify_gene_names(adata: sc.AnnData, species="human", drop=False) -> sc.AnnDa
     # TODO return dict map of renamed, and remaining
     return adata
 
-def ensembleID_to_gene(st: HESTData, filter_na = False) -> HESTData:
+def ensembl_id_to_gene(st: HESTData, filter_na = False) -> HESTData:
     """
     Converts ensemble gene IDs of a HESTData object using Biomart annotations and filter out genes with no matching Ensembl ID
     

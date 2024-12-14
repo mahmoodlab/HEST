@@ -1,2 +1,2 @@
 from . import st_dataset
-from .benchmark import benchmark_encoder
+from .benchmark import benchmark
