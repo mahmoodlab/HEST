@@ -903,7 +903,8 @@ class XeniumReader(Reader):
         cell_bound_path: str = None,
         dapi_path = None,
         load_img=True,
-        use_dask=False
+        use_dask=False,
+        spot_size_um=100.
     ) -> XeniumHESTData:
         """ Read a Xenium sample
 
@@ -919,6 +920,7 @@ class XeniumReader(Reader):
             dapi_path (_type_, optional): path to a `morphology_focus_0000.ome.tif`/`morphology_focus.ome.tif` file. Defaults to None.
             load_img (bool, optional): whenever to load the WSI. Defaults to True.
             use_dask (bool, optional): whenever to load the transcript dataframe with DASK (recommended if the transcript dataframe does not fit into the RAM). Defaults to False.
+            spot_size_um (float, optional): transcripts are pooled into squares of spot_size_um x spot_size_um mirometers and then stored in `HESTData.adata`
 
         Returns:
             XeniumHESTData: Xenium sample
@@ -963,11 +965,12 @@ class XeniumReader(Reader):
                 transcript_df, 
                 dict['pixel_size_um_estimated'], 
                 key_x='he_x',
-                key_y='he_y'
+                key_y='he_y',
+                spot_size_um=spot_size_um
             )
             
-            dict['spot_diameter'] = 55.
-            dict['inter_spot_dist'] = 100.
+            dict['spot_diameter'] = spot_size_um
+            dict['inter_spot_dist'] = spot_size_um
             dict['spots_under_tissue'] = len(adata.obs)
             
         else:
