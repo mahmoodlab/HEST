@@ -3,7 +3,7 @@ Welcome to hest's documentation!
 
 `hest` is a python library for H&E/ST pairs manipulation. It was used to assemble the <em>HEST-1k</em> dataset.
 
-For the documentations of core WSI manipulations methods please visit the [hestcore documentation](https://hestcore.readthedocs.io/en/latest/)
+For the documentations of core WSI manipulations methods please visit the [hestcore documentation](https://hestcore.readthedocs.io/en/latest/) (work in progress)
 
 ```{eval-rst}
 .. card:: Installation

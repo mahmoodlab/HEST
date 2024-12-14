@@ -17,7 +17,7 @@ if elapsed_time > MAX_HEST_IMPORT_S:
 
 from hest.autoalign import autoalign_visium
 from hest.readers import VisiumReader
-from hest.HESTData import ensembleID_to_gene
+from hest.HESTData import ensembl_id_to_gene
 from hest.utils import load_image
 
 
@@ -136,7 +136,7 @@ class TestHESTData(unittest.TestCase):
     #def test_conversion_ensembleID(self):
     #    for idx, st in enumerate(self.sts):
     #        with self.subTest(st_object=idx):
-    #            ensembleID_to_gene(st)
+    #            ensembl_id_to_gene(st)
 
         
     def test_tissue_seg(self):
