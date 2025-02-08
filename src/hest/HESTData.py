@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import traceback
 import warnings
 from typing import Dict, List, Union
 
@@ -16,6 +17,7 @@ from loguru import logger
 
 from hest.io.seg_readers import TissueContourReader, write_geojson
 from hest.LazyShapes import LazyShapes, convert_old_to_gpd, old_geojson_to_new
+from hest.registration import preprocess_cells_xenium
 from hest.segmentation.TissueMask import TissueMask, load_tissue_mask
 
 try:
@@ -282,7 +284,8 @@ class HESTData:
         verbose=0,
         dump_visualization=True,
         use_mask=True,
-        threshold=0.15
+        threshold=0.15,
+        coords_only=False
     ):
         """ Dump H&E patches centered around ST spots to a .h5 file. 
         
@@ -299,6 +302,7 @@ class HESTData:
             dump_visualization (bool, optional): whenever to dump a visualization of the patches on top of the downscaled WSI. Defaults to True.
             use_mask (bool, optional): whenever to take into account the tissue mask. Defaults to True.
             threshold (float, optional): Tissue intersection threshold for a patch to be kept. Defaults to 0.15
+            coords_only (bool, optional): if false, save patches under the .h5 `img` key instead of coords only. Defaults to False.
         """
         
         os.makedirs(patch_save_dir, exist_ok=True)
@@ -333,7 +337,8 @@ class HESTData:
         barcodes = barcodes[in_slide_mask]
         mask = self.tissue_contours if use_mask else None
         coords_topleft = np.array(coords_topleft).astype(int)
-        patcher = self.wsi.create_patcher(target_patch_size, src_pixel_size, dst_pixel_size, mask=mask, custom_coords=coords_topleft, threshold=threshold)
+        patcher = self.wsi.create_patcher(target_patch_size, src_pixel_size, dst_pixel_size, 
+                                          mask=mask, custom_coords=coords_topleft, threshold=threshold, coords_only=coords_only)
 
         if mask is not None:
             valid_barcodes = barcodes[patcher.valid_mask]
@@ -510,10 +515,14 @@ class HESTData:
         # imports specific to spatial data conversion
         from dask import delayed
         from dask.array import from_delayed
-        from spatial_image import SpatialImage
-        from spatialdata import SpatialData
-        from spatialdata.models import Image2DModel, ShapesModel, TableModel
-        from spatialdata.transformations import Identity, Scale
+        try:
+            from spatial_image import SpatialImage
+            from spatialdata import SpatialData
+            from spatialdata.models import Image2DModel, ShapesModel, TableModel
+            from spatialdata.transformations import Identity, Scale
+        except Exception as e:
+            traceback.print_exc()
+            raise Exception("Please install spatialdata separately from HEST with `pip install spatialdata spatial_image`. Tested with spatialdata >= 0.1.2 and spatial_image >= 0.3.0")
         
         # AnnData keys
         SPATIAL = "spatial"
@@ -831,6 +840,71 @@ class XeniumHESTData(HESTData):
             he_nuclei.to_parquet(os.path.join(path, 'he_nucleus_seg.parquet'))
             write_geojson(he_nuclei, os.path.join(path, f'he_nucleus_seg.geojson'), '', chunk=True)
         
+
+    def align_with_valis(self, save_dir: str, he_path: str, dapi_path: str, align_nuclei=True, align_cells=True, 
+                         align_transcripts=True, verbose=True, save_geojson=True):
+        """ Align nuclei/cells/transcripts from the DAPI coordinate system to the H&E coordinate system.
+
+            Warning Valis alignment might require a significant amount or RAM based on the number of transcripts, shapes and image size.
+            Feel free to set align_transcripts, align_cells or align_nuclei to False.
+
+            Save the aligned objects to:
+                - {save_dir}/he_cell_seg.parquet
+                - {save_dir}/he_nucleus_seg.parquet
+                - {save_dir}/aligned_transcripts.parquet
+
+            Args:
+                save_dir (str): path to a directory where the aligned objects will be saved
+                he_path (str, optional): path to the H&E image, this image must be in generic pyramidal tiff!
+                dapi_path (str, optional): path to the raw Xenium DAPI image, either provide a path to `morphology_focus_0000.ome.tif` or `morphology_focus.ome.tif` based on availability.
+                align_nuclei (bool, optional): whenever to align nuclei. Defaults to True.
+                align_cells (bool, optional): whenever to align cells. Defaults to True.
+                align_transcripts (bool, optional): whenever to align transcripts. Defaults to True.
+                verbose (bool, optional): verbose. Defaults to True.
+                save_geojson (bool, optional): Save the aligned objects to a QuPath compatible geojson format. Defaults to True.
+        """
+        
+        if self.dapi_path is None and dapi_path is None:
+            raise ValueError(f"Either self.dapi_path must be set or dapi_path must be passed to the function")
+        
+        os.makedirs(save_dir, exist_ok=True)
+
+        dapi_path = self.dapi_path if dapi_path is None else dapi_path
+        verify_paths([dapi_path])
+
+        dapi_cells = self.get_shapes('tenx_cell', 'dapi').shapes if align_cells else None
+        dapi_nuclei = self.get_shapes('tenx_nucleus', 'dapi').shapes if align_nuclei else None
+        transcript_df = self.transcript_df if align_transcripts else None
+
+        if verbose:
+            print('finished reading shapes')
+        
+        reg_config = {}
+            
+        warped_cells, warped_nuclei, transcript_df = preprocess_cells_xenium(
+            he_path, 
+            dapi_path,
+            dapi_cells,
+            dapi_nuclei,
+            transcript_df,
+            reg_config,
+            'valis',
+            registration_kwargs={}
+        )
+
+        print('Saving warped cells/nuclei...')
+        if align_cells:
+            warped_cells.to_parquet(os.path.join(save_dir, f'he_cell_seg.parquet'))
+
+            if save_geojson:
+                write_geojson(warped_cells, os.path.join(save_dir, f'he_cell_seg.geojson'), '', chunk=True)
+        if align_nuclei:
+            warped_nuclei.to_parquet(os.path.join(save_dir, f'he_nucleus_seg.parquet'))
+            if save_geojson:
+                write_geojson(warped_nuclei, os.path.join(save_dir, f'he_nucleus_seg.geojson'), '', chunk=True)
+        if align_transcripts:
+            self.transcript_df.to_parquet(os.path.join(save_dir, f'aligned_transcripts.parquet'))
+
 
 def read_HESTData(
     adata_path: str, 

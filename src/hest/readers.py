@@ -15,6 +15,7 @@ from loguru import logger
 
 from hest.HESTData import (HESTData, STHESTData, VisiumHDHESTData,
                            VisiumHESTData, XeniumHESTData)
+from hestcore.wsi import wsi_factory
 from hest.io.seg_readers import XeniumParquetCellReader, read_gdf
 from hest.LazyShapes import LazyShapes
 from hest.segmentation.cell_segmenters import segment_cellvit
@@ -57,10 +58,6 @@ class Reader:
         verify_paths([path])
         
         hest_object = self._auto_read(path, **read_kwargs)
-        
-        if len(hest_object.adata) > 0:          
-            hest_object.adata.var["mito"] = hest_object.adata.var_names.str.startswith("MT-")
-            sc.pp.calculate_qc_metrics(hest_object.adata, qc_vars=["mito"], inplace=True)
         
         return hest_object
     
@@ -767,7 +764,7 @@ class XeniumReader(Reader):
         Returns:
             XeniumHESTData: STObject that was read
         """
-        super().auto_read(path, **read_kwargs)
+        return super().auto_read(path, **read_kwargs)
         
     
     def _auto_read(self, path, **read_kwargs) -> XeniumHESTData:
@@ -930,7 +927,7 @@ class XeniumReader(Reader):
             print("Loading the WSI... (can be slow for large images)")
             img, pixel_size_embedded = load_wsi(img_path)
         else:
-            img, pixel_size_embedded = np.zeros((1, 1, 3)), None
+            img, pixel_size_embedded = wsi_factory(np.zeros((1, 1, 3))), None
         
         dict = {}
         dict['pixel_size_um_embedded'] = pixel_size_embedded

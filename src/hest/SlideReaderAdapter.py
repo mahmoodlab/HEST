@@ -2,8 +2,8 @@
 import os
 
 import numpy as np
-from valis import slide_tools
-from valis.slide_io import PIXEL_UNIT, MetaData, SlideReader
+from valis_hest import slide_tools
+from valis_hest.slide_io import PIXEL_UNIT, MetaData, SlideReader
 
 from hestcore.wsi import wsi_factory
 
