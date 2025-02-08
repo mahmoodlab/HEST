@@ -19,7 +19,7 @@ from tqdm import tqdm
 from hest.HESTData import (VisiumHDHESTData, XeniumHESTData)
 from hest.io.seg_readers import GeojsonCellReader, read_gdf, write_geojson
 from hest.readers import VisiumHDReader, XeniumReader, read_and_save
-from hest.registration import register_dapi_he, warp_gdf_valis
+from hest.registration import preprocess_cells_xenium, register_dapi_he, warp_gdf_valis
 from hest.segmentation.cell_segmenters import (bin_per_cell,
                                                cell_segmenter_factory)
 from hest.subtyping.subtyping import assign_cell_types
@@ -182,69 +182,6 @@ def process_from_config(config_path: str):
                 
         types_adata.write_h5ad(os.path.join(full_exp_dir, 'types_adata.h5ad'))
         
-        
-def preprocess_cells_xenium(
-    he_wsi: Union[str, WSI, np.ndarray, openslide.OpenSlide, CuImage],  # type: ignore
-    dapi_path: str,
-    dapi_cells: gpd.GeoDataFrame,
-    dapi_nuclei: gpd.GeoDataFrame,
-    dapi_transcripts: pd.DataFrame,
-    reg_config: dict,
-    full_exp_dir: str,
-    registration_kwargs = {}
-) -> Tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
-    """ Find non-rigid transformation from DAPI to H&E and 
-    transform dapi_cells, dapi_nuclei and transcripts to the H&E coordinate system
-    
-    returns (warped_cells, warped_nuclei)
-    """
-
-    logger.info('Registering Xenium DAPI to H&E...')
-    max_non_rigid_registration_dim_px = reg_config.get('max_non_rigid_registration_dim_px', 10000)
-    path_registrar = register_dapi_he(
-        he_wsi,
-        dapi_path,
-        registrar_dir=full_exp_dir,
-        name='registration',
-        max_non_rigid_registration_dim_px=max_non_rigid_registration_dim_px,
-        **registration_kwargs
-    )
-    
-    if dapi_transcripts:
-        logger.info('Warping transcripts from DAPI to H&E...')
-        transcripts_gdf = gpd.GeoDataFrame(dapi_transcripts, geometry=gpd.points_from_xy(dapi_transcripts['dapi_x'], dapi_transcripts['dapi_y']))
-        warped_transcripts = warp_gdf_valis( # TODO valis interpolation is slow
-            transcripts_gdf,
-            path_registrar=path_registrar,
-            curr_slide_name=dapi_path
-        )
-        warped_transcripts = warped_transcripts.drop(['_polygons'], axis=1)
-        warped_transcripts['he_x'] = warped_transcripts.geometry.x
-        warped_transcripts['he_y'] = warped_transcripts.geometry.y
-    else:
-        warped_transcripts = None
-
-    if dapi_cells:
-        logger.info('Warping cells from DAPI to H&E...')
-        warped_cells = warp_gdf_valis( # TODO valis interpolation is slow
-            dapi_cells,
-            path_registrar=path_registrar,
-            curr_slide_name=dapi_path
-        )
-    else:
-        warped_cells = None
-    
-    if dapi_nuclei:
-        logger.info('Warping nuclei from DAPI to H&E...')
-        warped_nuclei = warp_gdf_valis( # TODO valis interpolation is slow
-            dapi_nuclei,
-            path_registrar=path_registrar,
-            curr_slide_name=dapi_path
-        )
-    else:
-        warped_nuclei = None
-    
-    return warped_cells, warped_nuclei, warped_transcripts
     
     
 def subtyping_pipeline(

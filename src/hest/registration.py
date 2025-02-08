@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Union
+from typing import Tuple, Union
 
 import geopandas as gpd
 import numpy as np
@@ -42,18 +42,16 @@ def register_dapi_he(
     """
     
     try:
-        from valis import (affine_optimizer, feature_detectors, preprocessing,
-                           registration)
-        from valis.micro_rigid_registrar import MicroRigidRegistrar
-        from valis.slide_io import BioFormatsSlideReader
+        from valis_hest import preprocessing, registration
+        from valis_hest.slide_io import BioFormatsSlideReader
 
         from .SlideReaderAdapter import SlideReaderAdapter
     except Exception:
         import traceback
         traceback.print_exc()
-        raise Exception("Valis needs to be installed independently. Please install Valis with `pip install valis-wsi` or follow instruction on their website")
+        raise Exception("Valis needs to be installed independently. Please install Valis with `pip install valis-hest`")
         
-    verify_paths([dapi_path, he_path])
+    #verify_paths([dapi_path, he_path])
     
     if name is None:
         date = get_name_datetime()
@@ -119,7 +117,7 @@ def warp_gdf_valis(
     """
     
     try:
-        from valis import registration
+        from valis_hest import registration
     except Exception:
         import traceback
         traceback.print_exc()
@@ -160,3 +158,66 @@ def warp_gdf_valis(
     
     return gdf
     
+
+def preprocess_cells_xenium(
+    he_wsi: Union[str, WSI, np.ndarray, openslide.OpenSlide, CuImage],  # type: ignore
+    dapi_path: str,
+    dapi_cells: gpd.GeoDataFrame,
+    dapi_nuclei: gpd.GeoDataFrame,
+    dapi_transcripts: pd.DataFrame,
+    reg_config: dict,
+    full_exp_dir: str,
+    registration_kwargs = {}
+) -> Tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
+    """ Find non-rigid transformation from DAPI to H&E and 
+    transform dapi_cells, dapi_nuclei and transcripts to the H&E coordinate system
+    
+    returns (warped_cells, warped_nuclei)
+    """
+
+    logger.info('Registering Xenium DAPI to H&E...')
+    max_non_rigid_registration_dim_px = reg_config.get('max_non_rigid_registration_dim_px', 10000)
+    path_registrar = register_dapi_he(
+        he_wsi,
+        dapi_path,
+        registrar_dir=full_exp_dir,
+        name='registration',
+        max_non_rigid_registration_dim_px=max_non_rigid_registration_dim_px,
+        **registration_kwargs
+    )
+    
+    if dapi_transcripts:
+        logger.info('Warping transcripts from DAPI to H&E...')
+        transcripts_gdf = gpd.GeoDataFrame(dapi_transcripts, geometry=gpd.points_from_xy(dapi_transcripts['dapi_x'], dapi_transcripts['dapi_y']))
+        warped_transcripts = warp_gdf_valis( # TODO valis interpolation is slow
+            transcripts_gdf,
+            path_registrar=path_registrar,
+            curr_slide_name=dapi_path
+        )
+        warped_transcripts = warped_transcripts.drop(['_polygons'], axis=1)
+        warped_transcripts['he_x'] = warped_transcripts.geometry.x
+        warped_transcripts['he_y'] = warped_transcripts.geometry.y
+    else:
+        warped_transcripts = None
+
+    if dapi_cells is not None:
+        logger.info('Warping cells from DAPI to H&E...')
+        warped_cells = warp_gdf_valis( # TODO valis interpolation is slow
+            dapi_cells,
+            path_registrar=path_registrar,
+            curr_slide_name=dapi_path
+        )
+    else:
+        warped_cells = None
+    
+    if dapi_nuclei is not None:
+        logger.info('Warping nuclei from DAPI to H&E...')
+        warped_nuclei = warp_gdf_valis( # TODO valis interpolation is slow
+            dapi_nuclei,
+            path_registrar=path_registrar,
+            curr_slide_name=dapi_path
+        )
+    else:
+        warped_nuclei = None
+    
+    return warped_cells, warped_nuclei, warped_transcripts
