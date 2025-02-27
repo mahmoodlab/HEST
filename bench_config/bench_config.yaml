@@ -16,11 +16,14 @@ num_workers: 1
 
 # encoders to benchmark
 encoders: [
-  #"plip",
   #"uni_v1", # uncomment after requesting the weights
   "resnet50",
   #"ctranspath",
   #"phikon",
+  #"phikon_v2",
+  #"h0_mini", # uncomment after requesting the weights
+  #"hibou_large",
+  #"kaiko_base_8",
   #"remedis", # uncomment after requesting the weights
   #"conch_v1", # uncomment after requesting the weights
   #"gigapath", # uncomment after requesting the weights
