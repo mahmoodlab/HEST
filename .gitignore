@@ -8,8 +8,6 @@ bench_data
 .gitattributes
 tests/assets
 config
-bench_config
-!bench_config/bench_config.yaml
 tests/output_tests
 HEST/
 
