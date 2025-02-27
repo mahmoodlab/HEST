@@ -83,10 +83,15 @@ class CustomInferenceEncoder(InferenceEncoder):
     
 
 class PhikonInferenceEncoder(InferenceEncoder):
-    def _build(self, _):
+
+    def _load(self):
         from transformers import ViTModel
-        
         model = ViTModel.from_pretrained("owkin/phikon", add_pooling_layer=False)
+        return model
+
+    def _build(self, _, return_cls=True):
+        self.return_cls = return_cls
+        model = self._load()
         mean, std = get_constants('imagenet')
         eval_transform = get_eval_transforms(mean, std)
         precision = torch.float32
@@ -94,13 +99,58 @@ class PhikonInferenceEncoder(InferenceEncoder):
     
     def forward(self, x):
         out = self.forward_features(x)
-        out = out.last_hidden_state[:, 0, :]
+        if self.return_cls:
+            out = out.last_hidden_state[:, 0, :]
+        else:
+            class_token = out.last_hidden_state[:, 0, :]
+            patch_tokens = out.last_hidden_state[:, 1:, :]
+            out = torch.cat([class_token, patch_tokens.mean(1)], dim=-1)
         return out
     
     def forward_features(self, x):
         out = self.model(pixel_values=x)
         return out
+
+class PhikonV2InferenceEncoder(PhikonInferenceEncoder):
+    def _load(self):
+        from transformers import AutoModel
+        model = AutoModel.from_pretrained("owkin/phikon-v2")
+        return model
+
+class H0MiniInferenceEncoder(InferenceEncoder):
+    import timm
     
+    def _build(
+        self,
+        _,
+        return_cls=True,
+        timm_kwargs={'mlp_layer': timm.layers.SwiGLUPacked, 'act_layer': torch.nn.SiLU}
+    ):
+        import timm
+        from timm.data import resolve_data_config
+        from timm.data.transforms_factory import create_transform
+        model = timm.create_model(
+            "hf-hub:bioptimus/H0-mini",
+            pretrained=True,
+            **timm_kwargs
+        )
+        eval_transform = create_transform(**resolve_data_config(model.pretrained_cfg, model=model))
+        precision = torch.float16
+        self.return_cls = return_cls
+        
+        return model, eval_transform, precision
+
+    def forward(self, x):
+        output = self.model(x)
+    
+        class_token = output[:, 0]
+        if self.return_cls:
+            return class_token
+        
+        patch_tokens = output[:, 5:]
+        embedding = torch.cat([class_token, patch_tokens.mean(1)], dim=-1)
+        return embedding
+
 
 class RemedisInferenceEncoder(InferenceEncoder):
     def _build(self, weights_path):
@@ -288,7 +338,79 @@ class HOptimus0InferenceEncoder(InferenceEncoder):
         precision = torch.float16
         return model, eval_transform, precision
          
+class HibouLargeInferenceEncoder(InferenceEncoder):
     
+    def _build(
+        self,
+        _,
+        return_cls=True,
+    ):
+        from transformers import AutoImageProcessor, AutoModel
+        _eval_transform = AutoImageProcessor.from_pretrained("histai/hibou-L", trust_remote_code=True)
+        model = AutoModel.from_pretrained("histai/hibou-L", trust_remote_code=True)
+
+        def eval_transform(img):
+            return _eval_transform(
+                img,
+                return_tensors='pt'
+            )['pixel_values'].squeeze()
+
+        precision = torch.float32
+        self.return_cls = return_cls
+        
+        return model, eval_transform, precision
+
+    def forward(self, x):
+        output = self.model(x).last_hidden_state
+    
+        class_token = output[:, 0]
+        if self.return_cls:
+            return class_token
+        
+        patch_tokens = output[:, 5:]
+        embedding = torch.cat([class_token, patch_tokens.mean(1)], dim=-1)
+        return embedding
+
+class KaikoBase8InferenceEncoder(InferenceEncoder):
+    
+    def _build(
+        self,
+        _,
+        return_cls=True,
+    ):
+        from torchvision.transforms import v2
+        model = torch.hub.load("kaiko-ai/towards_large_pathology_fms", "vitb8", trust_repo=True)
+        eval_transform = v2.Compose(
+            [
+                v2.ToImage(),
+                v2.Resize(size=224),
+                v2.CenterCrop(size=224),
+                v2.ToDtype(torch.float32, scale=True),
+                v2.Normalize(
+                    mean=(0.5, 0.5, 0.5),
+                    std=(0.5, 0.5, 0.5),
+                ),
+            ]
+        )
+
+        precision = torch.float32
+        self.return_cls = return_cls
+        
+        return model, eval_transform, precision
+
+    def forward(self, x):
+        output = self.model.forward_features(x)
+    
+        class_token = output[:, 0]
+        if self.return_cls:
+            return class_token
+        
+        patch_tokens = output[:, 1:]
+        embedding = torch.cat([class_token, patch_tokens.mean(1)], dim=-1)
+        return embedding
+
+
+
 def inf_encoder_factory(enc_name):
     if enc_name == 'conch_v1':
         return ConchInferenceEncoder
@@ -298,6 +420,14 @@ def inf_encoder_factory(enc_name):
         return CTransPathInferenceEncoder
     elif enc_name == 'phikon':
         return PhikonInferenceEncoder
+    elif enc_name == 'phikon_v2':
+        return PhikonV2InferenceEncoder 
+    elif enc_name == "h0_mini":
+        return H0MiniInferenceEncoder
+    elif enc_name == "hibou_large":
+        return HibouLargeInferenceEncoder
+    elif enc_name == "kaiko_base_8":
+        return KaikoBase8InferenceEncoder
     elif enc_name == 'remedis':
         return RemedisInferenceEncoder
     elif enc_name == 'resnet50':

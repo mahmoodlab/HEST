@@ -296,6 +296,11 @@ def enc_results_to_table(path) -> str:
         'ctranspath': 'CTransPath',
         'remedis': 'Remedis',
         'phikon': 'Phikon',
+        'phikon_v2': 'Phikon-v2',
+        'h0_mini': 'H0 Mini',
+        'hoptimus0': 'H-Optimus-0',
+        'hibou_large': 'Hibou Large',
+        'kaiko_base_8': 'Kaiko B/8',
         'uni_v1': 'UNI',
         'conch_v1': 'CONCH',
         'gigapath': 'gigapath'
