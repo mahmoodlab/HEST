@@ -1297,6 +1297,8 @@ def load_wsi(img_path: str) -> Tuple[WSI, float]:
     if img_path.endswith('.nd2'):
         import nd2
         img = nd2.imread(img_path)
+    elif img_path.endswith('.png') or img_path.endswith('.jpg'):
+        img = np.array(Image.open(img_path))
     else:
         img = tifffile.imread(img_path)
         
@@ -1309,17 +1311,17 @@ def load_wsi(img_path: str) -> Tuple[WSI, float]:
             factor = unit_to_micrometers[my_img.pages[0].tags['ResolutionUnit'].value]
             pixel_size_embedded = (my_img.pages[0].tags['XResolution'].value[1] / my_img.pages[0].tags['XResolution'].value[0]) * factor
     
-        # sometimes the RGB axis are inverted
-        if img.shape[0] == 3 or img.shape[0] == 4:
-            img = np.transpose(img, axes=(1, 2, 0))
-        if img.shape[2] == 4: # RGBA to RGB
-            img = img[:,:,:3]
-        if np.max(img) > 1000:
-            img = img.astype(np.float32)
-            img /= 2**8
-            img = img.astype(np.uint8)
-            
-        wsi = NumpyWSI(img)
+    # sometimes the RGB axis are inverted
+    if img.shape[0] == 3 or img.shape[0] == 4:
+        img = np.transpose(img, axes=(1, 2, 0))
+    if img.shape[2] == 4: # RGBA to RGB
+        img = img[:,:,:3]
+    if np.max(img) > 1000:
+        img = img.astype(np.float32)
+        img /= 2**8
+        img = img.astype(np.uint8)
+        
+    wsi = NumpyWSI(img)
     
     return wsi, pixel_size_embedded
 
