@@ -342,6 +342,8 @@ class HESTData:
 
         if mask is not None:
             valid_barcodes = barcodes[patcher.valid_mask]
+        else:
+            valid_barcodes = barcodes
 
         patcher.to_h5(h5_path, extra_assets={'barcode': valid_barcodes})
 
