@@ -103,10 +103,11 @@ is _underlined_. Additional results based on Random Forest and XGBoost regressio
 | **[Remedis](https://arxiv.org/abs/2205.09723)**            | 0.529  | 0.3471 | 0.4644 | 0.5818 | 0.2856 | 0.1145 | 0.2647 | 0.5336 | 0.2473    | 0.3742  |
 | **[Gigapath](https://huggingface.co/prov-gigapath/prov-gigapath)**          | 0.5508 | _0.3708_ | 0.4768 | 0.5538 | _0.301_ | 0.186 | 0.2391 | 0.5399 | 0.2493    | 0.3853  |
 | **[UNI](https://huggingface.co/MahmoodLab/UNI)**                | 0.5702 | 0.314  | 0.4764 | 0.6254 | 0.263  | 0.1762 | 0.2427 | 0.5511 | 0.2565    | 0.3862  |
+| **[H0-mini](https://huggingface.co/bioptimus/H0-mini)** | 0.5862 | 0.3684 | _0.4919_ | 0.6011 | 0.2494 | 0.1863 | _0.2670_ | 0.5481 | **0.2629** | 0.3957 |
 | **[Virchow](https://huggingface.co/paige-ai/Virchow)**            | 0.5702 | 0.3309 | 0.4875 | 0.6088 | **0.311** | 0.2019 | 0.2637 | 0.5459 | 0.2594    | 0.3977  |
 | **[Virchow2](https://huggingface.co/paige-ai/Virchow2)**           | 0.5922 | 0.3465 | 0.4661 | 0.6174 | 0.2578 | 0.2084 | **0.2788** | **0.5605** | 0.2582    | 0.3984  |
-| **UNIv1.5**            | **0.5989** | 0.3645 | _0.4902_ | _0.6401_ | 0.2925 | _0.2240_ | 0.2522 | _0.5586_ | **0.2597** | _0.4090_ |
-| **[Hoptimus0](https://github.com/bioptimus/releases/blob/main/models/h-optimus/v0/LICENSE.md)**        | _0.5982_ | **0.385** | **0.4932** | **0.6432** | 0.2991 | **0.2292** | _0.2654_ | 0.5582 | _0.2595_ | **0.4146** |
+| **UNIv1.5**            | **0.5989** | 0.3645 | 0.4902 | _0.6401_ | 0.2925 | _0.2240_ | 0.2522 | _0.5586_ | _0.2597_ | _0.4090_ |
+| **[Hoptimus0](https://github.com/bioptimus/releases/blob/main/models/h-optimus/v0/LICENSE.md)**        | _0.5982_ | **0.385** | **0.4932** | **0.6432** | 0.2991 | **0.2292** | 0.2654 | 0.5582 | 0.2595 | **0.4146** |
 
 
 ### Benchmarking your own model
