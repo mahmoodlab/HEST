@@ -26,7 +26,7 @@ dependencies = [
     "spatialdata >= 0.1.2",
     "dask >= 2024.2.1",
     "spatial_image >= 0.3.0",
-    "datasets",
+    "datasets < 4.0.0", # https://github.com/mahmoodlab/HEST/issues/110
     "mygene",
     "hestcore == 1.0.4"
 ]
