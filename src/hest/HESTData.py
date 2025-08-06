@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import traceback
 import warnings
@@ -526,6 +527,9 @@ class HESTData:
             traceback.print_exc()
             raise Exception("Please install spatialdata separately from HEST with `pip install spatialdata spatial_image`. Tested with spatialdata >= 0.1.2 and spatial_image >= 0.3.0")
         
+        def transform_name(old_name: str) -> str:
+            return re.sub(r"[^\w\._-]", "_", old_name)
+
         # AnnData keys
         SPATIAL = "spatial"
         SCALEFACTORS = "scalefactors"
@@ -681,6 +685,11 @@ class HESTData:
 
             # link the shapes to the table
             new_table = self.adata.copy()
+
+            rename_col = {var_name: transform_name(var_name) for var_name in new_table.var_names}
+            rename_col = {k: v for k, v in rename_col.items() if k != v}
+            new_table.var = new_table.var.rename(columns=rename_col, errors="raise")
+            
             if TableModel.ATTRS_KEY in new_table.uns:
                 del new_table.uns[TableModel.ATTRS_KEY]
             new_table.obs[REGION_KEY] = REGION
