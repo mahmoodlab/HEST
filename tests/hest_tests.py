@@ -130,8 +130,6 @@ class TestHESTData(unittest.TestCase):
         id_list = ['TENX24', 'SPA154']
         
         if download:
-            import datasets
-            
             local_dir = os.path.join(cur_dir, 'hest_data_test')
             
             ids_to_query = id_list
