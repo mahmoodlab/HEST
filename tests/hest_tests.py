@@ -3,9 +3,12 @@ import unittest
 import warnings
 from datetime import datetime
 from os.path import join as _j
+import zipfile
 
 from hestcore.segmentation import get_path_relative
 from hestcore.wsi import CucimWarningSingleton
+from huggingface_hub import snapshot_download
+from tqdm import tqdm
 
 MAX_HEST_IMPORT_S = 2
 start_time = datetime.now()
@@ -19,6 +22,19 @@ from hest.autoalign import autoalign_visium
 from hest.readers import VisiumReader
 from hest.HESTData import ensembl_id_to_gene
 from hest.utils import load_image
+
+def download_hest(patterns, local_dir):
+    repo_id = 'MahmoodLab/hest'
+    snapshot_download(repo_id=repo_id, allow_patterns=patterns, repo_type="dataset", local_dir=local_dir)
+
+    seg_dir = os.path.join(local_dir, 'cellvit_seg')
+    if os.path.exists(seg_dir):
+        print('Unzipping cell vit segmentation...')
+        for filename in tqdm([s for s in os.listdir(seg_dir) if s.endswith('.zip')]):
+            path_zip = os.path.join(seg_dir, filename)
+                        
+            with zipfile.ZipFile(path_zip, 'r') as zip_ref:
+                zip_ref.extractall(seg_dir)
 
 
 class TestHESTReader(unittest.TestCase):
@@ -120,13 +136,7 @@ class TestHESTData(unittest.TestCase):
             
             ids_to_query = id_list
             list_patterns = [f"*{id}[_.]**" for id in ids_to_query]
-            datasets.load_dataset(
-                'MahmoodLab/hest', 
-                cache_dir=local_dir,
-                patterns=list_patterns,
-                #download_mode='force_redownload',
-                trust_remote_code=True
-            )
+            download_hest(list_patterns, local_dir)
             
             self.sts = hest.load_hest(local_dir, id_list)
         else:
