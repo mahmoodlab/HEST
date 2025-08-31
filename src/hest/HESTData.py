@@ -688,7 +688,7 @@ class HESTData:
 
             rename_col = {var_name: transform_name(var_name) for var_name in new_table.var_names}
             rename_col = {k: v for k, v in rename_col.items() if k != v}
-            new_table.var = new_table.var.rename(columns=rename_col, errors="raise")
+            new_table.var = new_table.var.rename(index=rename_col, errors="raise")
             
             if TableModel.ATTRS_KEY in new_table.uns:
                 del new_table.uns[TableModel.ATTRS_KEY]
