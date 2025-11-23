@@ -131,4 +131,5 @@ Simplified API for nuclei segmentation
     autoalign_visium
     write_10X_h5
     find_pixel_size_from_spot_coords
+    get_k_genes
 ```

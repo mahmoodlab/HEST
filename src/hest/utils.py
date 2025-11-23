@@ -470,7 +470,8 @@ def get_k_genes_from_df(meta_df: pd.DataFrame, k: int, criteria: str, save_dir: 
 
 
 def get_k_genes(adata_list: List[sc.AnnData], k: int, criteria: str, save_dir: str=None, min_cells_pct=0.10) -> List[str]: # type: ignore
-    """Get the k genes according to some criteria across common genes in all the samples in the adata list
+    """ Get the top-k genes according to some criteria in common genes across multiple samples.\
+        This function was used to derive genes of interest for the HEST benchmark.
 
     Args:
         adata_list (List[sc.AnnData]): list of scanpy AnnData containing gene expressions in adata.to_df()
@@ -482,7 +483,18 @@ def get_k_genes(adata_list: List[sc.AnnData], k: int, criteria: str, save_dir: s
         min_cells_pct (float): filter out genes that are expressed in less than min_cells_pct% of the spots for each slide
 
     Returns:
-        List[str]: k genes according to the criteria
+        List[str]: top-k genes according to the criteria
+        
+
+    Examples
+    --------
+    >>> # Find genes for interest for HEST benchmark
+    >>> import scanpy as sc
+    >>> from hest import get_k_genes
+    >>> ad1 = sc.read_h5ad("TENX118.h5ad")
+    >>> ad2 = sc.read_h5ad("TENX141.h5ad")
+    >>> genes = get_k_genes([ad1, ad2], k=50, criteria="var")
+    >>> print(len(genes))
     """
     import scanpy as sc
     

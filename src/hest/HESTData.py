@@ -38,7 +38,7 @@ from .utils import (ALIGNED_HE_FILENAME, check_arg, deprecated,
 
 class HESTData:
     """
-    Object representing a Spatial Transcriptomics sample along with a full resolution H&E image and metadatas
+    Object representing a Spatial Transcriptomics sample along with a full resolution H&E image and associated metadata
     """
     
     shapes: List[LazyShapes] = []
