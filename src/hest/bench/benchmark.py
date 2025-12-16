@@ -199,7 +199,7 @@ def embed_tiles(
     for batch_idx, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
         batch = post_collate_fn(batch)
         imgs = batch['imgs'].to(device).float()
-        with torch.inference_mode(), torch.cuda.amp.autocast(dtype=precision):
+        with torch.inference_mode(), torch.amp.autocast('cuda', dtype=precision):
             embeddings = model(imgs)
         if batch_idx == 0:
             mode = 'w'
@@ -395,7 +395,7 @@ def benchmark(encoder: torch.nn.Module, enc_transf: Callable, precision: torch.d
     Args:
         encoder (torch.nn.Module): patch encoder to benchmark
         enc_transf (Callable): transformation applied to `encoder` during inference
-        precision (torch.dtype): precision used by torch.cuda.amp.autocast() during inference for `encoder`
+        precision (torch.dtype): precision used by torch.amp.autocast('cuda') during inference for `encoder`
         cli_args (dict): cli_arguments. Defaults to None.
         **kwargs: lookup `BenchmarkConfig` for additional parameters
 
