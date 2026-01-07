@@ -395,7 +395,7 @@ def benchmark(encoder: torch.nn.Module, enc_transf: Callable, precision: torch.d
     Args:
         encoder (torch.nn.Module): patch encoder to benchmark
         enc_transf (Callable): transformation applied to `encoder` during inference
-        precision (torch.dtype): precision used by torch.amp.autocast('cuda') during inference for `encoder
+        precision (torch.dtype): precision used by torch.amp.autocast('cuda') during inference for `encoder`
         cli_args (dict): cli_arguments. Defaults to None.
         **kwargs: lookup `BenchmarkConfig` for additional parameters
 
