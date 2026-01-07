@@ -48,7 +48,24 @@ class ConchInferenceEncoder(InferenceEncoder):
     
     def forward(self, x):
         return self.model.encode_image(x, proj_contrast=False, normalize=False)
-    
+
+
+class Conchv15InferenceEncoder(InferenceEncoder):
+
+    def _build(self, _, img_size=448):
+        from .conchv1_5.conchv1_5 import create_model_from_pretrained
+
+        self.enc_name = 'conch_v15'
+
+        try:
+            model, eval_transform = create_model_from_pretrained(checkpoint_path="hf_hub:MahmoodLab/conchv1_5", img_size=img_size)
+        except:
+            traceback.print_exc()
+            raise Exception("Failed to download CONCH v1.5 model, make sure that you were granted access and that you correctly registered your token")
+
+        precision = torch.float16
+        return model, eval_transform, precision
+
     
 class CTransPathInferenceEncoder(InferenceEncoder):
     def _build(self, weights_path):
@@ -221,6 +238,48 @@ class UNIInferenceEncoder(InferenceEncoder):
         precision = torch.float16
         return model, eval_transform, precision
     
+    
+class UNIv2InferenceEncoder(InferenceEncoder):
+
+
+    def _build(self, _):
+        import timm
+        from torchvision import transforms
+
+        self.enc_name = 'uni_v2'
+
+        timm_kwargs = {
+            'img_size': 224,
+            'patch_size': 14,
+            'depth': 24,
+            'num_heads': 24,
+            'init_values': 1e-5,
+            'embed_dim': 1536,
+            'mlp_ratio': 2.66667 * 2,
+            'num_classes': 0,
+            'no_embed_class': True,
+            'mlp_layer': timm.layers.SwiGLUPacked,
+            'act_layer': torch.nn.SiLU,
+            'reg_tokens': 8,
+            'dynamic_img_size': True
+        }
+
+        try:
+            model = timm.create_model("hf-hub:MahmoodLab/UNI2-h", pretrained=True, **timm_kwargs)
+        except:
+            traceback.print_exc()
+            raise Exception("Failed to download UNI v2 model, make sure that you were granted access and that you correctly registered your token")
+
+        eval_transform = transforms.Compose([
+            transforms.Resize(224),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+        ])
+
+        precision = torch.bfloat16
+        return model, eval_transform, precision
+
 
 class GigaPathInferenceEncoder(InferenceEncoder):
     def _build(
@@ -409,13 +468,47 @@ class KaikoBase8InferenceEncoder(InferenceEncoder):
         embedding = torch.cat([class_token, patch_tokens.mean(1)], dim=-1)
         return embedding
 
+class HOptimus1InferenceEncoder(InferenceEncoder):
 
+    def _build(
+        self,
+        _,
+        timm_kwargs={'init_values': 1e-5, 'dynamic_img_size': False},
+        **kwargs
+    ):
+        import timm
+        assert timm.__version__ == '0.9.16', f"H-Optimus requires timm version 0.9.16, but found {timm.__version__}. Please install the correct version using `pip install timm==0.9.16`"
+        from torchvision import transforms
+
+        self.enc_name = 'hoptimus1'
+
+        try:
+            model = timm.create_model("hf-hub:bioptimus/H-optimus-1", pretrained=True, **timm_kwargs)
+        except:
+            traceback.print_exc()
+            raise Exception("Failed to download HOptimus-1 model, make sure that you were granted access and that you correctly registered your token")
+
+        eval_transform = transforms.Compose([
+            transforms.Resize(224),  
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=(0.707223, 0.578729, 0.703617), 
+                std=(0.211883, 0.230117, 0.177517)
+            ),
+        ])
+        
+        precision = torch.float16
+        return model, eval_transform, precision
 
 def inf_encoder_factory(enc_name):
     if enc_name == 'conch_v1':
         return ConchInferenceEncoder
+    elif enc_name == 'conch_v15':
+        return Conchv15InferenceEncoder
     elif enc_name == 'uni_v1':
         return UNIInferenceEncoder
+    elif enc_name == 'uni_v2':
+        return UNIv2InferenceEncoder
     elif enc_name == 'ctranspath':
         return CTransPathInferenceEncoder
     elif enc_name == 'phikon':
@@ -440,5 +533,7 @@ def inf_encoder_factory(enc_name):
         return Virchow2InferenceEncoder
     elif enc_name == 'hoptimus0':
         return HOptimus0InferenceEncoder
+    elif enc_name == 'hoptimus1':
+        return HOptimus1InferenceEncoder
     else:
         raise ValueError(f"Unknown encoder name {enc_name}")

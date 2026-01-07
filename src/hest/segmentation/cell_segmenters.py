@@ -74,11 +74,12 @@ class CellSegmenter:
     
     
 class CellViTSegmenter(CellSegmenter):
-    models = {
-        'CellViT-SAM-H-x40.pth': 'https://drive.google.com/uc?id=1tVYAapUo1Xt8QgCN22Ne1urbbCZkah8q',
-        'CellViT-SAM-H-x20.pth': 'https://drive.google.com/uc?id=1wP4WhHLNwyJv97AK42pWK8kPoWlrqi30'
+    MODELS_SRC_MAP = {
+        'CellViT-256-x20.pth': '1w99U4sxDQgOSuiHMyvS_NYBiz6ozolN2',
+        'CellViT-256-x40.pth': '1tVYAapUo1Xt8QgCN22Ne1urbbCZkah8q',
+        'CellViT-SAM-H-x40.pth': '1MvRKNzDW2eHbQb5rAgTEp6s2zAXHixRV',
+        'CellViT-SAM-H-x20.pth': '1wP4WhHLNwyJv97AK42pWK8kPoWlrqi30'
     }
-    
     
     def _preprocess(self, wsi_path: str, name: str, src_pixel_size, dst_pixel_size, save_dir, processes=8):
         try:
@@ -108,7 +109,7 @@ class CellViTSegmenter(CellSegmenter):
         processes: {processes}
         target_mpp: {dst_pixel_size}
         wsi_extension: {wsi_extension}
-        wsi_paths: {wsi_path}
+        wsi_paths: "{wsi_path}"
         wsi_properties:
             magnification: 40
             slide_mpp: {src_pixel_size}
@@ -125,13 +126,13 @@ class CellViTSegmenter(CellSegmenter):
         return output_path
     
     
-    def _verify_model(self, model_path):
+    def _verify_model(self, model_path, model):
         import gdown
         
         if not os.path.exists(model_path):
             print(f'Model not found at {model_path}, downloading...')
-            url = 'https://drive.google.com/uc?id=1tVYAapUo1Xt8QgCN22Ne1urbbCZkah8q'
-            gdown.download(url, model_path, quiet=False)
+            gdrive_id = self.MODELS_SRC_MAP[model]
+            gdown.download(id=gdrive_id, output=model_path, quiet=False)
         else:
             print(f'Found model at {model_path}')
         
@@ -141,11 +142,11 @@ class CellViTSegmenter(CellSegmenter):
         wsi_path: str, 
         name: str, 
         pixel_size: float, 
-        dst_pixel_size: float=0.25, 
+        dst_pixel_size: float=0.5, 
         batch_size=2, 
         gpu_ids=[0], 
         save_dir='results/segmentation',
-        model='CellViT-SAM-H-x40.pth'
+        model='CellViT-SAM-H-x20.pth'
     ) -> str:
         try:
             import cellvit_light
@@ -158,11 +159,11 @@ class CellViTSegmenter(CellSegmenter):
         model_dir = get_path_relative(__file__, '../../../models')
         model_path = os.path.join(model_dir, model)
         
-        if model == 'CellViT-SAM-H-x40.pth':
-            self._verify_model(model_path)
+        if model in self.MODELS_SRC_MAP:
+            self._verify_model(model_path, model)
         else:
-            if not os.path.exits(model_path):
-                raise Exception("Can't find model weights {model_path}, only 'CellViT-SAM-H-x40.pth' can be downloaded automatically")
+            if not os.path.exists(model_path):
+                raise Exception(f"Can't find model weights {model_path}, only {list(self.MODELS_SRC_MAP.keys())} can be downloaded automatically")
         
         preprocess_path = self._preprocess(wsi_path, name, pixel_size, dst_pixel_size, save_dir)
         
@@ -212,11 +213,11 @@ def segment_cellvit(
     wsi_path: str, 
     name: str, 
     src_pixel_size: float=None, 
-    dst_pixel_size: float=0.25, 
+    dst_pixel_size: float=0.5, 
     batch_size=2, 
     gpu_ids=[0], 
     save_dir='results/segmentation',
-    model='CellViT-SAM-H-x40.pth'
+    model='CellViT-SAM-H-x20.pth'
 ) -> str:
     """ Segment nuclei with CellViT
 
@@ -228,7 +229,7 @@ def segment_cellvit(
         batch_size (int, optional): batch_size. Defaults to 2.
         gpu_ids (List[int], optional): list of gpu ids to use during inference. Defaults to [0].
         save_dir (str, optional): directory where to save the output. Defaults to 'results/segmentation'.
-        model (str, optional): name of model weights to use. Defaults to 'CellViT-SAM-H-x40.pth'.
+        model (str, optional): name of model weights to use. Defaults to 'CellViT-SAM-H-x20.pth'.
     """
     segmenter = CellViTSegmenter()
     return segmenter.segment_cells(

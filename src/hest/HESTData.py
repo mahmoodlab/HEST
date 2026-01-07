@@ -33,7 +33,7 @@ from tqdm import tqdm
 
 from .utils import (ALIGNED_HE_FILENAME, check_arg, deprecated,
                     find_first_file_endswith, get_k_genes_from_df, get_path_from_meta_row,
-                    plot_verify_pixel_size, tiff_save, verify_paths)
+                    plot_verify_pixel_size, tiff_save, verify_paths, visualize_random_crops)
 
 
 class HESTData:
@@ -134,7 +134,8 @@ class HESTData:
         self.wsi = NumpyWSI(self.wsi.numpy())
     
         
-    def save(self, path: str, save_img=True, pyramidal=True, bigtiff=False, plot_pxl_size=False, **kwargs):
+    def save(self, path: str, save_img=True, pyramidal=True, bigtiff=False, plot_pxl_size=False, 
+             save_adata=True, **kwargs):
         """Save a HESTData object to `path` as follows:
             - aligned_adata.h5ad (contains expressions for each spots + their location on the fullres image + a downscaled version of the fullres image)
             - metrics.json (contains useful metrics)
@@ -149,17 +150,19 @@ class HESTData:
             save_img (bool): whenever to save the image at all (can save a lot of time if set to False). Defaults to True
             pyramidal (bool, optional): whenever to save the full resolution image as pyramidal (can be slow to save, however it's sometimes necessary for loading large images in QuPath). Defaults to True.
             bigtiff (bool, optional): whenever the bigtiff image is more than 4.1GB. Defaults to False.
+            save_adata (bool, optional): whenever to save the genomic data. Defaults to True.
         """
         os.makedirs(path, exist_ok=True)
         
-        try:
-            self.adata.write(os.path.join(path, 'aligned_adata.h5ad'))
-        except:
-            # workaround from https://github.com/theislab/scvelo/issues/255
-            import traceback
-            traceback.print_exc()
-            self.adata.__dict__['_raw'].__dict__['_var'] = self.adata.__dict__['_raw'].__dict__['_var'].rename(columns={'_index': 'features'})
-            self.adata.write(os.path.join(path, 'aligned_adata.h5ad'))
+        if save_adata:
+            try:
+                self.adata.write(os.path.join(path, 'aligned_adata.h5ad'))
+            except:
+                # workaround from https://github.com/theislab/scvelo/issues/255
+                import traceback
+                traceback.print_exc()
+                self.adata.__dict__['_raw'].__dict__['_var'] = self.adata.__dict__['_raw'].__dict__['_var'].rename(columns={'_index': 'features'})
+                self.adata.write(os.path.join(path, 'aligned_adata.h5ad'))
         
         if save_img:
             img = self.wsi.numpy()
@@ -170,7 +173,7 @@ class HESTData:
         self.meta['fullres_px_width'] = width
         self.meta['fullres_px_height'] = height
         with open(os.path.join(path, 'metrics.json'), 'w') as json_file:
-            json.dump(self.meta, json_file) 
+            json.dump(self.meta, json_file, indent=4) 
         
         downscaled_img = self.adata.uns['spatial']['ST']['images']['downscaled_fullres']
         down_fact = self.adata.uns['spatial']['ST']['scalefactors']['tissue_downscaled_fullres_scalef']
@@ -285,7 +288,8 @@ class HESTData:
         dump_visualization=True,
         use_mask=True,
         threshold=0.15,
-        coords_only=False
+        coords_only=False,
+        qc=False,
     ):
         """ Dump H&E patches centered around ST spots to a .h5 file. 
         
@@ -303,6 +307,7 @@ class HESTData:
             use_mask (bool, optional): whenever to take into account the tissue mask. Defaults to True.
             threshold (float, optional): Tissue intersection threshold for a patch to be kept. Defaults to 0.15
             coords_only (bool, optional): if false, save patches under the .h5 `img` key instead of coords only. Defaults to False.
+            qc (bool, optional): if true, will save 10 random patches as patch_{k}.jpg (this is useful to quickly check the quality of patches)
         """
         
         os.makedirs(patch_save_dir, exist_ok=True)
@@ -352,6 +357,13 @@ class HESTData:
             
         if verbose:
             print(f'found {patch_count} valid patches')
+            
+        if qc and not coords_only:
+            random_idx = np.random.randint(0, len(patcher), size=min(5, len(patcher)))
+            for i in random_idx:
+                img, x, y = patcher[i]
+                Image.fromarray(img).save(os.path.join(patch_save_dir, f'patch_vis_qc_{i}_{x}_{y}.jpg'))
+                
             
     
     def __verify_mask(self):
@@ -807,10 +819,11 @@ class XeniumHESTData(HESTData):
             save_transcripts=False, 
             save_cell_seg=False, 
             save_nuclei_seg=False,
+            qc=False,
             **kwargs
         ):
         """Save a HESTData object to `path` as follows:
-            - aligned_adata.h5ad (contains expressions for each spots + their location on the fullres image + a downscaled version of the fullres image)
+            - aligned_adata.h5ad (contains pseudo-visium pooled expressions for each spots + their location on the fullres image + a downscaled version of the fullres image)
             - metrics.json (contains useful metrics)
             - downscaled_fullres.jpeg (a downscaled version of the fullres image)
             - aligned_fullres_HE.tif (the full resolution image)
@@ -834,6 +847,8 @@ class XeniumHESTData(HESTData):
 
         if save_cell_seg:
             he_cells = self.get_shapes('tenx_cell', 'he').shapes
+            if qc:
+                visualize_random_crops(None, self.wsi, plot_dir=path, seg=he_cells)
             he_cells.to_parquet(os.path.join(path, 'he_cell_seg.parquet'))
             write_geojson(he_cells, os.path.join(path, f'he_cell_seg.geojson'), '', chunk=True)
             

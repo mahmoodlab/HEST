@@ -388,40 +388,48 @@ def visualize_random_crops(transcript_df, wsi: WSI, plot_dir='', seg: gpd.GeoDat
     from shapely import Polygon
     
     K = 15
+    N = len(transcript_df) if transcript_df else len(seg)
     size_region = 1000
-    random_idx = np.random.randint(0, len(transcript_df), K)
+    random_idx = np.random.randint(0, N, K)
     ratio = 0.01
     
     width, height = wsi.get_dimensions()
     thumb = Image.fromarray(wsi.get_thumbnail(round(width * 0.1), round(height * 0.1)))
-    downsampled = transcript_df.sample(5000)
+    if transcript_df:
+        downsampled = transcript_df.sample(5000)
     
-    xy = downsampled[['he_x', 'he_y']].values
-    
-    fig, ax = plt.subplots()
-    ax.imshow(thumb)
-    #for geom in downsampled_cells.geometry:
-    #    ax.plot(*geom.exterior.xy, linewidth=0.2, color='red')
-    ax.scatter(xy[:, 0] * 0.1, xy[:, 1] * 0.1, s=0.5)
-    ax.axis('off')
-    os.makedirs(plot_dir, exist_ok=True)
-    fig.savefig(os.path.join(plot_dir, 'transcripts_plot.jpg'), bbox_inches='tight', dpi=200)
+        xy = downsampled[['he_x', 'he_y']].values
+        
+        fig, ax = plt.subplots()
+        ax.imshow(thumb)
+        #for geom in downsampled_cells.geometry:
+        #    ax.plot(*geom.exterior.xy, linewidth=0.2, color='red')
+        ax.scatter(xy[:, 0] * 0.1, xy[:, 1] * 0.1, s=0.5)
+        ax.axis('off')
+        os.makedirs(plot_dir, exist_ok=True)
+        fig.savefig(os.path.join(plot_dir, 'transcripts_plot.jpg'), bbox_inches='tight', dpi=200)
     
     for k in random_idx:
-        xy_center = transcript_df[['he_x', 'he_y']].iloc[k].values
+        if transcript_df:
+            xy_center = transcript_df[['he_x', 'he_y']].iloc[k].values
+        else:
+            point = seg.geometry.centroid.iloc[k]
+            xy_center = [point.x, point.y]
         left_x = round(xy_center[0]-size_region // 2)
         right_x = xy_center[0] + size_region // 2
         bottom_y = xy_center[1] + size_region // 2
         top_y = round(xy_center[1]-size_region // 2)
         region = wsi.read_region_pil((left_x, top_y), 0, (size_region, size_region))
-        sub_transcripts = transcript_df[
-            (left_x < transcript_df['he_x']) & 
-            (top_y < transcript_df['he_y']) & 
-            (transcript_df['he_x'] < right_x) & 
-            (transcript_df['he_y'] < bottom_y)
-        ]
         
-        sub_transcripts = sub_transcripts.sample(round(ratio * len(sub_transcripts)))
+        if transcript_df:
+            sub_transcripts = transcript_df[
+                (left_x < transcript_df['he_x']) & 
+                (top_y < transcript_df['he_y']) & 
+                (transcript_df['he_x'] < right_x) & 
+                (transcript_df['he_y'] < bottom_y)
+            ]
+            
+            sub_transcripts = sub_transcripts.sample(round(ratio * len(sub_transcripts)))
         
         fig, ax = plt.subplots()
         ax.imshow(region)
@@ -437,9 +445,10 @@ def visualize_random_crops(transcript_df, wsi: WSI, plot_dir='', seg: gpd.GeoDat
             for geom in sub_seg.geometry:
                 ax.plot(*geom.exterior.xy, linewidth=0.2, color='green')
         
-        xy = sub_transcripts[['he_x', 'he_y']].values
-    
-        ax.scatter(xy[:, 0] - left_x, xy[:, 1] - top_y, s=0.5)
+        if transcript_df:
+            xy = sub_transcripts[['he_x', 'he_y']].values
+            ax.scatter(xy[:, 0] - left_x, xy[:, 1] - top_y, s=0.5)
+            
         ax.axis('off')
         
         fig.savefig(os.path.join(plot_dir, str(k) + '_transcripts_plot.jpg'), bbox_inches='tight', dpi=200)
@@ -895,20 +904,27 @@ def tiff_save(img: np.ndarray, save_path: str, pixel_size: float, pyramidal=True
         print('saving to pyramidal tiff... can be slow')
         pyvips_img = pyvips.Image.new_from_array(img)
 
-        # save in the generic tiff format readable by both openslide and QuPath
-        # Note: had to change the compression from 'deflate' to 'lzw' because of a reading incompatibility with CuImage/OpenSlide
-        # when upgrading to vips 8.13 (necessary for Valis)
-        pyvips_img.tiffsave(
-            save_path, 
-            bigtiff=bigtiff, 
-            pyramid=True, 
-            tile=True, 
-            tile_width=256, 
-            tile_height=256, 
-            compression='lzw', 
-            resunit=pyvips.enums.ForeignTiffResunit.CM,
-            xres=1. / (pixel_size * 1e-4),
-            yres=1. / (pixel_size * 1e-4))
+        try:
+            # save in the generic tiff format readable by both openslide and QuPath
+            # Note: had to change the compression from 'deflate' to 'lzw' because of a reading incompatibility with CuImage/OpenSlide
+            # when upgrading to vips 8.13 (necessary for Valis)
+            pyvips_img.tiffsave(
+                save_path, 
+                bigtiff=bigtiff, 
+                pyramid=True, 
+                tile=True, 
+                tile_width=256, 
+                tile_height=256, 
+                compression='lzw', 
+                resunit=pyvips.enums.ForeignTiffResunit.CM,
+                xres=1. / (pixel_size * 1e-4),
+                yres=1. / (pixel_size * 1e-4))
+        except Exception as e:
+            msg = str(e)
+            if "Maximum TIFF file size exceeded" in msg:
+                raise ValueError(f"The image being saved is too big for standard TIFF. Please pass the bigtiff=True argument.")
+            else:
+                raise
     else:
         with tifffile.TiffWriter(save_path, bigtiff=bigtiff) as tif:
             options = dict(

@@ -4,7 +4,8 @@ import json
 import math
 import os
 import shutil
-from typing import Union
+from typing import Optional, Union
+import warnings
 import zipfile
 from abc import abstractmethod
 
@@ -81,6 +82,11 @@ def read_visium_positions_old(tissue_position_list_path):
     
     return tissue_positions
 
+def get_pixel_size_from_hd_scalefactors(scalefactors_path) -> Optional[float]:
+    with open(scalefactors_path) as f:
+        d = dict(json.load(f))
+        return d.get('microns_per_pixel')
+
 
 class VisiumHDReader(Reader):
     """10x Genomics Visium-HD reader"""
@@ -113,9 +119,27 @@ class VisiumHDReader(Reader):
         square_16um_path: str, 
         metrics_path: str = None,
         square_2um_path: str = None,
-        use_dask = False
+        dst_bin_size_um: int = 128,
+        chunk_len = 50000,
     ) -> VisiumHDHESTData:
+        """ Read a VisiumHD sample such that 16um bins are pooled into 128um pseudo-Visium bins
+
+        Args:
+            img_path (str): path to the WSI
+            square_16um_path (str): path to a square_016um/ Visium HD folder.
+            metrics_path (str, optional): path to a metrics_summary.csv Visium HD file.
+            square_2um_path (str, optional): path to a square_002um/ Visium HD folder.
+            dst_bin_size_um (int, optional): 16um spots will be pooled to spots of this size (must be a multiple of the spot size: 16)
+            chunk_len (str, optional): chunk length while pooling transcripts, a higher number will consume more RAM but might be faster.
+
+        Returns:
+            VisiumHDHESTData: Visium HD sample
+        """
         import scanpy as sc
+        SPOT_SIZE = 16
+        
+        if dst_bin_size_um % SPOT_SIZE != 0:
+            raise ValueError(f"dst_bin_size_um must be a multiple of the spot size ({SPOT_SIZE})")
         
         self.square_2um_path = square_2um_path
         
@@ -125,6 +149,7 @@ class VisiumHDReader(Reader):
         spatial_path = find_first_file_endswith(square_16um_path, 'spatial')
         tissue_positions_path = find_first_file_endswith(spatial_path, 'tissue_positions.parquet')
         filtered_bc_matrix_path = find_first_file_endswith(square_16um_path, 'filtered_feature_bc_matrix.h5')
+        scalefactors_path = find_first_file_endswith(spatial_path, 'scalefactors_json.json')
         
         tissue_positions = pd.read_parquet(tissue_positions_path)
         tissue_positions.index = tissue_positions['barcode']
@@ -140,18 +165,18 @@ class VisiumHDReader(Reader):
         meta = {}
         if metrics_path is not None:
             meta = metric_file_do_dict(metrics_path) 
-            
-            
-        pixel_size, _ = find_pixel_size_from_spot_coords(adata.obs, inter_spot_dist=16, packing=SpotPacking.GRID_PACKING)
+        
+        pixel_size = get_pixel_size_from_hd_scalefactors(scalefactors_path)
+        if pixel_size is None:
+            pixel_size, _ = find_pixel_size_from_spot_coords(adata.obs, inter_spot_dist=SPOT_SIZE, packing=SpotPacking.GRID_PACKING)
 
-
-        pooled_adata = pool_bins_visiumhd(adata, pixel_size, dst_bin_size_um=128, src_bin_size_um=16)
+        pooled_adata = pool_bins_visiumhd(adata, pixel_size, dst_bin_size_um=dst_bin_size_um, src_bin_size_um=SPOT_SIZE, chunk_len=chunk_len)
             
         meta['pixel_size_um_embedded'] = pixel_size_embedded
         meta['pixel_size_um_estimated'] = pixel_size
         meta['spots_under_tissue'] = len(pooled_adata.obs)
             
-        register_downscale_img(pooled_adata, img, pixel_size, spot_size=128)
+        register_downscale_img(pooled_adata, img, pixel_size, spot_size=dst_bin_size_um)
         
         
         return VisiumHDHESTData(pooled_adata, img, meta['pixel_size_um_estimated'], meta)
@@ -775,6 +800,9 @@ class XeniumReader(Reader):
             if file.endswith('imagealignment.csv'):
                 alignment_path = os.path.join(path, file)
         alignment_path = read_kwargs.pop('alignment_path', alignment_path)
+        
+        if alignment_path is None:
+            warnings.warn("Couldn't find an alignment file for the current Xenium sample. Does a file ending in imagealignment.csv exist in the given folder?")
                 
         dapi_path = None
         dapi_path = find_first_file_endswith(
@@ -1146,6 +1174,9 @@ def pool_bins_visiumhd(adata: sc.AnnData, pixel_size: float, dst_bin_size_um=128
 
     if src_bin_size_um >= dst_bin_size_um:
         raise ValueError("dst_bin_size_um needs to be larger than src_bin_size_um")
+    
+    if dst_bin_size_um % src_bin_size_um != 0:
+        raise ValueError("dst_bin_size_um must be a multiple of src_bin_size_um")
     
     y_max = adata.obs['pxl_row_in_fullres'].max()
     y_min = adata.obs['pxl_row_in_fullres'].min()
