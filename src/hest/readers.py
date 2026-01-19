@@ -851,7 +851,7 @@ class XeniumReader(Reader):
         return pixel_size_estimated
         
         
-    def __load_transcripts(self, transcripts_path, alignment_matrix, pixel_size_morph, use_dask):
+    def __load_transcripts(self, transcripts_path, alignment_matrix, pixel_size_morph, use_dask, nb_partitions=30):
 
         if use_dask:
             import dask.dataframe as dd
@@ -859,7 +859,7 @@ class XeniumReader(Reader):
 
             parquet_file = pq.ParquetFile(transcripts_path)
             total_row_groups = parquet_file.num_row_groups
-            row_groups_per_partition = max(1, total_row_groups // 30)
+            row_groups_per_partition = max(1, total_row_groups // nb_partitions)
             df_transcripts = dd.read_parquet(transcripts_path, split_row_groups=row_groups_per_partition)
         else:
             df_transcripts = pd.read_parquet(transcripts_path)
@@ -929,7 +929,8 @@ class XeniumReader(Reader):
         dapi_path = None,
         load_img=True,
         use_dask=False,
-        spot_size_um=100.
+        spot_size_um=100.,
+        nb_partitions=30,
     ) -> XeniumHESTData:
         """ Read a Xenium sample
 
@@ -946,7 +947,8 @@ class XeniumReader(Reader):
             load_img (bool, optional): whenever to load the WSI. Defaults to True.
             use_dask (bool, optional): whenever to load the transcript dataframe with DASK (recommended if the transcript dataframe does not fit into the RAM). Defaults to False.
             spot_size_um (float, optional): transcripts are pooled into squares of spot_size_um x spot_size_um mirometers and then stored in `HESTData.adata`
-
+            nb_partitions (int, optional): number of dask partition to use if use_dask is True. Defaults to 30
+            
         Returns:
             XeniumHESTData: Xenium sample
         """
@@ -983,7 +985,8 @@ class XeniumReader(Reader):
         
         if transcripts_path is not None:
             print('Loading transcripts...')
-            transcript_df = self.__load_transcripts(transcripts_path, alignment_matrix, pixel_size_morph, use_dask)
+            transcript_df = self.__load_transcripts(transcripts_path, alignment_matrix, pixel_size_morph, 
+                                                    use_dask, nb_partitions)
                     
             print("Pooling xenium transcripts in pseudo-visium spots...")
             adata = pool_transcripts_xenium(
@@ -1040,7 +1043,22 @@ def reader_factory(path: str) -> Reader:
     else:
         raise NotImplementedError('')
         
-def read_and_save(path: str, save_plots=True, pyramidal=True, bigtiff=False, plot_pxl_size=False, save_img=True, segment_tissue=False, read_kwargs={}, save_kwargs={}, segment_kwargs={}):
+def read_and_save(
+    path: str, 
+    save_plots=True, 
+    pyramidal=True, 
+    bigtiff=False, 
+    plot_pxl_size=True, 
+    save_img=True, 
+    segment_tissue=True, 
+    save_adata=True, 
+    qc=True,
+    dump_patches=True,
+    read_kwargs={}, 
+    save_kwargs={}, 
+    segment_kwargs={},
+    patching_kwargs={},
+):
     """For internal use, determine the appropriate reader based on the raw data path, and
     automatically process the data at that location, then the processed files are dumped
     to processed/
@@ -1060,11 +1078,26 @@ def read_and_save(path: str, save_plots=True, pyramidal=True, bigtiff=False, plo
         st_object.segment_tissue(**segment_kwargs)
     save_path = os.path.join(path, 'processed')
     os.makedirs(save_path, exist_ok=True)
-    st_object.save(save_path, pyramidal=pyramidal, bigtiff=bigtiff, plot_pxl_size=plot_pxl_size, save_img=save_img, **save_kwargs)
+    st_object.save(
+        save_path, 
+        pyramidal=pyramidal, 
+        bigtiff=bigtiff, 
+        plot_pxl_size=plot_pxl_size, 
+        save_img=save_img, 
+        save_adata=save_adata,
+        qc=qc,
+        **save_kwargs
+    )
     if save_plots:
         st_object.save_spatial_plot(save_path)
+    if dump_patches:
+        st_object.dump_patches(save_path, qc=qc, **patching_kwargs)
+
     return st_object
         
+def get_indices_chunk(partition, spot_grid_columns: pd.Index):
+    return spot_grid_columns.get_indexer(partition['feature_name'])
+
 def pool_transcripts_xenium(
     df: Union[pd.DataFrame, dd.DataFrame], 
     pixel_size_he: float,
@@ -1089,6 +1122,7 @@ def pool_transcripts_xenium(
     """
     import scanpy as sc
     import dask.dataframe as dd
+    import dask
 
     y_max = df[key_y].max()
     y_min = df[key_y].min()
@@ -1098,18 +1132,16 @@ def pool_transcripts_xenium(
     m = ((y_max - y_min) / (spot_size_um / pixel_size_he))
     n = ((x_max - x_min) / (spot_size_um / pixel_size_he))
 
+    unique_features = df['feature_name'].unique()
+    
     if isinstance(df, dd.DataFrame):
-        m = m.compute()
-        n = n.compute()
+        m, n, unique_features, x_min, y_min = dask.compute(
+            m, n, unique_features, x_min, y_min)
 
     m = math.ceil(m)
     n = math.ceil(n)
     
-    features = df['feature_name'].unique()
-    if isinstance(df, dd.DataFrame):
-        features = features.compute()
-    
-    spot_grid = pd.DataFrame(0, index=range(m * n), columns=features)
+    spot_grid = pd.DataFrame(0, index=range(m * n), columns=unique_features)
     
 
     # a is the row and b is the column in the pseudo visium grid
@@ -1118,8 +1150,11 @@ def pool_transcripts_xenium(
     
     c = b * n + a
     features = df['feature_name']
-    
-    cols = spot_grid.columns.get_indexer(features)
+
+    if isinstance(df, dd.DataFrame):
+        cols = df.map_partitions(get_indices_chunk, spot_grid.columns, meta=('result', 'int64'))
+    else:
+        cols = spot_grid.columns.get_indexer(features)
     
     ## use dask for this parts
     spot_grid_np = spot_grid.values.astype(np.uint16)
@@ -1133,9 +1168,6 @@ def pool_transcripts_xenium(
     expression_df = pd.DataFrame(spot_grid_np, columns=spot_grid.columns)
     
     coord_df = expression_df.copy()
-    if isinstance(df, dd.DataFrame):
-        x_min = x_min.compute()
-        y_min = y_min.compute()
 
     coord_df['x'] = x_min + (coord_df.index % n) * (spot_size_um / pixel_size_he) + ((spot_size_um / 2) / pixel_size_he)
     coord_df['y'] = y_min + np.floor(coord_df.index / n) * (spot_size_um / pixel_size_he) + ((spot_size_um / 2) / pixel_size_he)

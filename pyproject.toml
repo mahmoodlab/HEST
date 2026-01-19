@@ -24,7 +24,7 @@ dependencies = [
     "pyarrow >= 16.1.0",
     "timm-ctp",
     "spatialdata >= 0.1.2",
-    "dask >= 2024.2.1",
+    "dask[complete] >= 2024.2.1",
     "spatial_image >= 0.3.0",
     "mygene",
     "hestcore == 1.0.4"

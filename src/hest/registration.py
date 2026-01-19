@@ -66,9 +66,7 @@ def register_dapi_he(
     
     registrar_path = os.path.join(registrar_dir, 'data/_registrar.pickle')
 
-    if reuse_registrar:
-        registration.init_jvm()
-        return registrar_path
+    registration.init_jvm()
     registrar = registration.Valis(
         '', 
         registrar_dir, 
@@ -159,33 +157,13 @@ def warp_gdf_valis(
     return gdf
     
 
-def preprocess_cells_xenium(
-    he_wsi: Union[str, WSI, np.ndarray, openslide.OpenSlide, CuImage],  # type: ignore
-    dapi_path: str,
-    dapi_cells: gpd.GeoDataFrame,
-    dapi_nuclei: gpd.GeoDataFrame,
-    dapi_transcripts: pd.DataFrame,
-    reg_config: dict,
-    full_exp_dir: str,
-    registration_kwargs = {}
-) -> Tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
-    """ Find non-rigid transformation from DAPI to H&E and 
-    transform dapi_cells, dapi_nuclei and transcripts to the H&E coordinate system
-    
-    returns (warped_cells, warped_nuclei)
-    """
-
-    logger.info('Registering Xenium DAPI to H&E...')
-    max_non_rigid_registration_dim_px = reg_config.get('max_non_rigid_registration_dim_px', 10000)
-    path_registrar = register_dapi_he(
-        he_wsi,
-        dapi_path,
-        registrar_dir=full_exp_dir,
-        name='registration',
-        max_non_rigid_registration_dim_px=max_non_rigid_registration_dim_px,
-        **registration_kwargs
-    )
-    
+def warp_xenium_objects(
+    path_registrar, 
+    dapi_path,
+    dapi_cells=None,
+    dapi_transcripts=None,
+    dapi_nuclei=None
+):
     if dapi_transcripts:
         logger.info('Warping transcripts from DAPI to H&E...')
         transcripts_gdf = gpd.GeoDataFrame(dapi_transcripts, geometry=gpd.points_from_xy(dapi_transcripts['dapi_x'], dapi_transcripts['dapi_y']))
@@ -219,5 +197,42 @@ def preprocess_cells_xenium(
         )
     else:
         warped_nuclei = None
-    
+
     return warped_cells, warped_nuclei, warped_transcripts
+
+
+def preprocess_cells_xenium(
+    he_wsi: Union[str, WSI, np.ndarray, openslide.OpenSlide, CuImage],  # type: ignore
+    dapi_path: str,
+    dapi_cells: gpd.GeoDataFrame,
+    dapi_nuclei: gpd.GeoDataFrame,
+    dapi_transcripts: pd.DataFrame,
+    reg_config: dict,
+    full_exp_dir: str,
+    registration_kwargs = {}
+) -> Tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
+    """ Find non-rigid transformation from DAPI to H&E and 
+    transform dapi_cells, dapi_nuclei and transcripts to the H&E coordinate system
+    
+    returns (warped_cells, warped_nuclei)
+    """
+
+    logger.info('Registering Xenium DAPI to H&E...')
+    max_non_rigid_registration_dim_px = reg_config.get('max_non_rigid_registration_dim_px', 10000)
+
+    path_registrar = register_dapi_he(
+        he_wsi,
+        dapi_path,
+        registrar_dir=full_exp_dir,
+        name='registration',
+        max_non_rigid_registration_dim_px=max_non_rigid_registration_dim_px,
+        **registration_kwargs
+    )
+
+    return warp_xenium_objects(
+        path_registrar,
+        dapi_path,
+        dapi_cells,
+        dapi_transcripts,
+        dapi_nuclei
+    )

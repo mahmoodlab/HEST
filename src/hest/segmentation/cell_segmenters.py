@@ -132,6 +132,7 @@ class CellViTSegmenter(CellSegmenter):
         if not os.path.exists(model_path):
             print(f'Model not found at {model_path}, downloading...')
             gdrive_id = self.MODELS_SRC_MAP[model]
+            os.makedirs(os.path.dirname(model_path), exist_ok=True)
             gdown.download(id=gdrive_id, output=model_path, quiet=False)
         else:
             print(f'Found model at {model_path}')
