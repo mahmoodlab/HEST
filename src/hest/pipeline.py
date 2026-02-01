@@ -19,12 +19,13 @@ from hest.readers import read_and_save
 from hest.registration import preprocess_cells_xenium
 from hest.segmentation.cell_segmenters import (bin_per_cell,
                                                cell_segmenter_factory)
-from hest.utils import (ALIGNED_HE_FILENAME,
+from hest.utils import (ALIGNED_HE_FILENAME, deprecated,
                         find_first_file_endswith, get_col_selection,
                         get_path_from_meta_row,
-                        print_resource_usage, visualize_random_crops)
+                        print_resource_usage, plot_xenium_align_qc)
 
 
+@deprecated
 def preprocess_cells_visium_hd(
     he_wsi: Union[str, WSI, np.ndarray, openslide.OpenSlide, CuImage],  # type: ignore
     full_exp_dir: str,
@@ -60,7 +61,7 @@ def preprocess_cells_visium_hd(
     
     return cell_adata, cell_gdf, nuc_gdf
 
-
+@deprecated
 def process_meta_df(
     meta_df, 
     save_spatial_plots=True, 
@@ -131,8 +132,8 @@ def process_meta_df(
                     warped_cells.to_parquet(os.path.join(path, 'processed', f'he_cell_seg.parquet'))
                     warped_nuclei.to_parquet(os.path.join(path, 'processed', f'he_nucleus_seg.parquet'))
                     st.transcript_df.to_parquet(os.path.join(path, 'processed', f'aligned_transcripts.parquet'))
-                    write_geojson(warped_cells, os.path.join(path, 'processed', f'he_cell_seg.geojson'), '', chunk=True)
-                    write_geojson(warped_nuclei, os.path.join(path, 'processed', f'he_nucleus_seg.geojson'), '', chunk=True)
+                    write_geojson(warped_cells, os.path.join(path, 'processed', f'he_cell_seg.geojson'))
+                    write_geojson(warped_nuclei, os.path.join(path, 'processed', f'he_nucleus_seg.geojson'))
                 elif isinstance(st, VisiumHDHESTData):
                     segment_config = {}
                     binning_config = {}
@@ -153,7 +154,7 @@ def process_meta_df(
                     )
 
             if isinstance(st, XeniumHESTData):
-                visualize_random_crops(st.transcript_df, st.wsi, './', st.get_shapes('tenx_nucleus', 'he').shapes)
+                plot_xenium_align_qc(st.wsi, './', st.transcript_df, st.get_shapes('tenx_nucleus', 'he').shapes)
             
             row_dict = row.to_dict()
 

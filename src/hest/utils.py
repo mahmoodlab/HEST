@@ -3,14 +3,16 @@ from __future__ import annotations
 import concurrent.futures
 from datetime import datetime
 import functools
+import gc
 import gzip
 import json
 import os
+import random
 import shutil
 import sys
 import warnings
 from enum import Enum
-from typing import List, Tuple, Union
+from typing import List, Optional, Tuple, Union
 import zipfile
 
 import cv2
@@ -81,6 +83,70 @@ def verify_paths(paths, suffix=""):
             raise FileNotFoundError(f"No such file or directory: {path}" + suffix)
 
 
+def read_parquet_dask(path: str, nb_partitions=30) -> dd.DataFrame:
+    """ Read .parquet file with dask
+
+    Args:
+        path (str): path to parquet file
+        nb_partitions (int, optional): approximate number of partitions to use. Defaults to 30.
+
+    Returns:
+        dd.DataFrame: resulting dask dataframe
+    """
+    import dask.dataframe as dd
+    import pyarrow.parquet as pq
+    parquet_file = pq.ParquetFile(path)
+    total_row_groups = parquet_file.num_row_groups
+    row_groups_per_partition = max(1, total_row_groups // nb_partitions)
+    return dd.read_parquet(path, split_row_groups=row_groups_per_partition)
+
+
+def read_parquet_dask_geopandas(path: str, nb_partitions=30) -> dgpd.GeoDataFrame:
+    """ Read .parquet file with dask geopandas
+
+    Args:
+        path (str): path to parquet file
+        nb_partitions (int, optional): approximate number of partitions to use. Defaults to 30.
+
+    Returns:
+        dgpd.GeoDataFrame: resulting dask geodataframe
+    """
+    import dask_geopandas as dgpd
+    import pyarrow.parquet as pq
+    parquet_file = pq.ParquetFile(path)
+    total_row_groups = parquet_file.num_row_groups
+    row_groups_per_partition = max(1, total_row_groups // nb_partitions)
+    return dgpd.read_parquet(path, split_row_groups=row_groups_per_partition)
+
+
+def merge_parquet(folder_path: str, output_file: str) -> None:
+    """ Merge multiple .parquet files without loading everything into RAM.
+
+    Args:
+        folder_path (str): input folder containing .parquet files to be merged
+        output_file (str): full path to merged .parquet file
+    """
+    import pyarrow.parquet as pq
+    import os
+
+    from tqdm import tqdm
+
+
+    files = [f for f in os.listdir(folder_path) if f.endswith('.parquet')]
+
+    writer = None
+
+    for file in tqdm(files):
+        table = pq.read_table(os.path.join(folder_path, file))
+        
+        if writer is None:
+            writer = pq.ParquetWriter(output_file, table.schema)
+            
+        writer.write_table(table)
+        
+    if writer:
+        writer.close()
+
 logger.remove()
 logger.add(sys.stdout, format="<green>{time:HH:mm:ss}</green> | <level>{level}</level> | <level>{message}</level>")
 
@@ -122,18 +188,17 @@ def df_morph_um_to_pxl(df, x_key, y_key, pixel_size_morph):
 
 
 def read_xenium_alignment(alignment_file_path: str) -> np.ndarray:
-    """ Read a xenium alignment file and convert it to a 3x3 affine matrix """
+    """ Read a xenium alignment file (matrix or keypoints based) and convert it to a 3x3 affine matrix """
     alignment_file = pd.read_csv(alignment_file_path, header=None)
     alignment_matrix = alignment_file.values
 
-    # Xenium explorer >= v2.0
+    # Keypoint file
     if isinstance(alignment_matrix[0][0], str) and 'fixedX' in alignment_matrix[0]:
         points = pd.read_csv(alignment_file_path)
-        points = points.iloc[:3]
         my_dst_pts = points[['fixedX', 'fixedY']].values.astype(np.float32)
         my_src_pts = points[['alignmentX', 'alignmentY']].values.astype(np.float32)
-        alignment_matrix = cv2.getAffineTransform(my_src_pts, my_dst_pts)
-        alignment_matrix = np.vstack((alignment_matrix, [0, 0, 1]))
+        matrix, _ = cv2.estimateAffinePartial2D(my_src_pts, my_dst_pts)
+        alignment_matrix = np.vstack((matrix, [0, 0, 1]))
 
     return alignment_matrix
 
@@ -382,77 +447,202 @@ def cp_right_folder(path_df: str) -> None:
             shutil.move(src, dst)
 
 
-def visualize_random_crops(transcript_df, wsi: WSI, plot_dir='', seg: gpd.GeoDataFrame=None):
-    """ Plot random crops of transcripts and shapes on top of a WSI """
+def is_dask_gdf(gdf):
+    cls = gdf.__class__
+    module = cls.__module__
+    name = cls.__name__
+    
+    return "dask_geopandas" in module and name == "GeoDataFrame"
+
+def is_dask_dataframe(df):
+    return 'dask.dataframe' in str(type(df))
+
+
+def plot_shapes_qc(
+    wsi: WSI,
+    gdf: Union[gpd.GeoDataFrame, dgpd.GeoDataFrame],
+    plot_dir='', 
+    nb=15,
+):
     import matplotlib.pyplot as plt
     from shapely import Polygon
     
-    K = 15
-    N = len(transcript_df) if transcript_df else len(seg)
+    K = nb
+    N = len(gdf)
     size_region = 1000
-    random_idx = np.random.randint(0, N, K)
-    ratio = 0.01
     
-    width, height = wsi.get_dimensions()
-    thumb = Image.fromarray(wsi.get_thumbnail(round(width * 0.1), round(height * 0.1)))
-    if transcript_df:
-        downsampled = transcript_df.sample(5000)
+    random_points = gdf.sample(frac=K/N)
+    random_centroids = random_points.geometry.centroid
+    if is_dask_gdf(gdf):
+        random_centroids = random_centroids.compute()
+    random_centroids = np.array(random_centroids)
     
-        xy = downsampled[['he_x', 'he_y']].values
-        
-        fig, ax = plt.subplots()
-        ax.imshow(thumb)
-        #for geom in downsampled_cells.geometry:
-        #    ax.plot(*geom.exterior.xy, linewidth=0.2, color='red')
-        ax.scatter(xy[:, 0] * 0.1, xy[:, 1] * 0.1, s=0.5)
-        ax.axis('off')
-        os.makedirs(plot_dir, exist_ok=True)
-        fig.savefig(os.path.join(plot_dir, 'transcripts_plot.jpg'), bbox_inches='tight', dpi=200)
-    
-    for k in random_idx:
-        if transcript_df:
-            xy_center = transcript_df[['he_x', 'he_y']].iloc[k].values
-        else:
-            point = seg.geometry.centroid.iloc[k]
-            xy_center = [point.x, point.y]
+    for centroid in random_centroids:
+        xy_center = [centroid.x, centroid.y]
         left_x = round(xy_center[0]-size_region // 2)
         right_x = xy_center[0] + size_region // 2
         bottom_y = xy_center[1] + size_region // 2
         top_y = round(xy_center[1]-size_region // 2)
         region = wsi.read_region_pil((left_x, top_y), 0, (size_region, size_region))
         
-        if transcript_df:
-            sub_transcripts = transcript_df[
-                (left_x < transcript_df['he_x']) & 
-                (top_y < transcript_df['he_y']) & 
-                (transcript_df['he_x'] < right_x) & 
-                (transcript_df['he_y'] < bottom_y)
-            ]
-            
-            sub_transcripts = sub_transcripts.sample(round(ratio * len(sub_transcripts)))
-        
         fig, ax = plt.subplots()
         ax.imshow(region)
-        if seg is not None:
-            patch_poly = Polygon([
-                [left_x, top_y],
-                [right_x, top_y],
-                [right_x, bottom_y],
-                [left_x, bottom_y]
-            ])
-            sub_seg = seg[seg.intersects(patch_poly)]
-            sub_seg = sub_seg.translate(-left_x, -top_y)
-            for geom in sub_seg.geometry:
-                ax.plot(*geom.exterior.xy, linewidth=0.2, color='green')
+        patch_poly = Polygon([
+            [left_x, top_y],
+            [right_x, top_y],
+            [right_x, bottom_y],
+            [left_x, bottom_y]
+        ])
+        sub_seg = gdf[gdf.intersects(patch_poly)]
+        sub_seg = sub_seg.translate(-left_x, -top_y)
+        for geom in sub_seg.geometry:
+            ax.plot(*geom.exterior.xy, linewidth=0.2, color='green')
         
-        if transcript_df:
-            xy = sub_transcripts[['he_x', 'he_y']].values
-            ax.scatter(xy[:, 0] - left_x, xy[:, 1] - top_y, s=0.5)
+        ax.axis('off')
+        
+        fig.savefig(os.path.join(plot_dir, f'x_{left_x}_y_{top_y}.jpg'), bbox_inches='tight', dpi=200)
+
+
+def _get_random_transcript_names(df: Union[pd.DataFrame, dd.DataFrame], k=3):
+    sub_df = df.sample(frac=1000 / len(df))
+    unique_feature_names = np.unique(sub_df['feature_name'])
+    
+    shuffled_features = list(unique_feature_names) 
+    random.shuffle(shuffled_features)
+    
+    res = []
+    for feat_name in shuffled_features:
+        if not 'Deprecated' in feat_name and \
+            not 'Unassigned' in feat_name and \
+            not 'blank' in feat_name.lower():
+                
+            res.append(feat_name)
+            if len(res) >= k:
+                break
+    return res
+
+
+def plot_transcripts_qc(
+    wsi: WSI,
+    df: Union[pd.DataFrame, dd.DataFrame],
+    plot_dir='', 
+    nb=15,
+    verbose=True,
+    plot_global=True
+):
+    import matplotlib.pyplot as plt
+    from shapely.geometry import box
+    import geopandas as gpd
+    
+    use_dask = not isinstance(df, pd.DataFrame)
+    
+    K = nb
+    N = len(df)
+    size_region = 1000
+    random_idx = np.random.randint(0, N, K)
+    
+    width, height = wsi.get_dimensions()
+    
+    if plot_global:
+        thumb = Image.fromarray(wsi.get_thumbnail(round(width * 0.1), round(height * 0.1)))
+        feat_names = _get_random_transcript_names(df, k=3)
+        if verbose:
+            print(f"Plot global transcripts for the following genes: {feat_names}.")
+        
+        for feat_name in tqdm(feat_names):
+            sub_df = df[df['feature_name'] == feat_name]
+            downsampled = sub_df.sample(frac=min(3000, len(sub_df))/len(sub_df))
+
+            xy = np.array(downsampled[['he_x', 'he_y']].values)
+            
+            fig, ax = plt.subplots()
+            ax.imshow(thumb)
+            ax.scatter(xy[:, 0] * 0.1, xy[:, 1] * 0.1, s=0.5)
+            ax.axis('off')
+            os.makedirs(plot_dir, exist_ok=True)
+            fig.savefig(os.path.join(plot_dir, f'global_plot_{feat_name}.jpg'), bbox_inches='tight', dpi=200)
+        
+    # speedup for dask
+    k_rows = np.array(df[['he_x', 'he_y']].sample(frac=len(random_idx)/len(df)).values)
+    
+    if use_dask:
+        import dask_geopandas as dgpd
+        points_gdf = dgpd.from_dask_dataframe(
+            df, geometry=dgpd.points_from_xy(df, "he_x", "he_y")
+        )
+    else:
+        points_gdf = gpd.points_from_xy(df, df['he_x'], df['he_y'])
+        
+    boxes = []
+    for xy_center in k_rows:
+        left_x = xy_center[0] - size_region // 2
+        right_x = xy_center[0] + size_region // 2
+        bottom_y = xy_center[1] + size_region // 2
+        top_y = xy_center[1] - size_region // 2
+        boxes.append(box(left_x, top_y, right_x, bottom_y))
+
+    regions_gdf = gpd.GeoDataFrame({"geometry": boxes, "region_id": range(len(boxes))})
+
+    joined_df = points_gdf.sjoin(regions_gdf, how="inner")
+    if use_dask:
+        joined_df = joined_df.compute()
+    
+    for k in tqdm(range(len(k_rows))):
+        xy_center = k_rows[k]
+        left_x = round(xy_center[0]-size_region // 2)
+        right_x = xy_center[0] + size_region // 2
+        bottom_y = xy_center[1] + size_region // 2
+        top_y = round(xy_center[1]-size_region // 2)
+        region = wsi.read_region_pil((left_x, top_y), 0, (size_region, size_region))
+         
+        sub_df = joined_df[joined_df['region_id'] == k]
+        
+        sub_df = sub_df.sample(frac=min(5000, len(sub_df))/len(sub_df))
+    
+        fig, ax = plt.subplots()
+        ax.imshow(region)
+        
+        xy = np.array(sub_df[['he_x', 'he_y']].values)
+        ax.scatter(xy[:, 0] - left_x, xy[:, 1] - top_y, s=0.5)
             
         ax.axis('off')
         
-        fig.savefig(os.path.join(plot_dir, str(k) + '_transcripts_plot.jpg'), bbox_inches='tight', dpi=200)
+        fig.savefig(os.path.join(plot_dir, f'x_{left_x}_y_{top_y}.jpg'), bbox_inches='tight', dpi=200)
 
+
+def plot_xenium_align_qc(
+    wsi: WSI, 
+    plot_dir='', 
+    transcript_df: Optional[Union[pd.DataFrame, dd.DataFrame]]=None, 
+    seg_nuc: Optional[Union[gpd.GeoDataFrame, gpdd.GeoDataFrame]]=None, 
+    seg_cells: Optional[Union[gpd.GeoDataFrame, gpdd.GeoDataFrame]]=None, 
+    nb=15,
+    plot_global=False
+):
+    if transcript_df is not None:
+        os.makedirs(os.path.join(plot_dir, 'transcripts'), exist_ok=True)
+        plot_transcripts_qc(wsi, transcript_df, 
+                            plot_dir=os.path.join(plot_dir, 'transcripts'), 
+                            nb=nb, plot_global=plot_global)
+
+        del transcript_df
+        gc.collect()
+        
+    if seg_nuc is not None:
+        os.makedirs(os.path.join(plot_dir, 'xenium_nuc'), exist_ok=True)
+        plot_shapes_qc(wsi, seg_nuc, 
+                       plot_dir=os.path.join(plot_dir, 'xenium_nuc'), nb=nb)
+    
+        del seg_nuc
+        gc.collect()
+        
+    if seg_cells is not None:
+        os.makedirs(os.path.join(plot_dir, 'xenium_cells'), exist_ok=True)
+        plot_shapes_qc(wsi, seg_cells, 
+                       plot_dir=os.path.join(plot_dir, 'xenium_cells'), nb=nb)
+
+        del seg_cells
+        gc.collect()
 
 def get_k_genes_from_df(meta_df: pd.DataFrame, k: int, criteria: str, save_dir: str=None) -> List[str]:
     """Get the k genes according to some criteria across common genes in all the samples in the HEST meta dataframe

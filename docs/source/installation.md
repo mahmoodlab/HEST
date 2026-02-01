@@ -1,10 +1,10 @@
-# Installing `hest`
+# Installation
 
 Simply clone and install the package as follows:
 ```
 git clone https://github.com/mahmoodlab/HEST.git
 cd HEST
-conda create -n "hest" python=3.9
+conda create -n "hest" python=3.10
 conda activate hest
 pip install -e .
 ```

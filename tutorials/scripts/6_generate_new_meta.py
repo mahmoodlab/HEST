@@ -1,0 +1,78 @@
+import json
+import os
+import pandas as pd
+import scanpy
+from tqdm import tqdm
+from hest.utils import get_path_from_meta_row
+
+
+
+def update_hest_meta(old_df, new_df, new_version: str):
+    required_cols = [
+        'dataset_title',
+        'id',
+        'image_filename',
+        'organ',
+        'disease_state',
+        'oncotree_code',
+        'species',
+        'patient',
+        'st_technology',
+        'data_publication_date',
+        'license',
+        'study_link',
+        'download_page_link1',
+        'inter_spot_dist',
+        'spot_diameter',
+        'spots_under_tissue',
+        'preservation_method',
+        'nb_genes',
+        'treatment_comment',
+        'pixel_size_um_embedded',
+        'pixel_size_um_estimated',
+        'magnification',
+        'fullres_px_width',
+        'fullres_px_height',
+        'tissue',
+        'disease_comment',
+        'subseries',
+        'hest_version_added',
+    ]
+    
+    new_rows = []
+    for _, row in tqdm(new_df.iterrows()):
+        path = get_path_from_meta_row(row)
+        
+        with open(os.path.join(path, 'processed', f'meta.json'), 'r') as f:
+            meta = json.load(f)
+        
+        adata = scanpy.read_h5ad(os.path.join(path, 'processed', 'aligned_adata.h5ad'))
+        nb_genes = len(adata.var_names)
+            
+        new_rows.append(
+            {**{k: v for k, v in meta.items() if k in required_cols}, **{
+                'hest_version_added': new_version,
+                'image_filename': meta['id'] + '.tif',
+                'nb_genes': nb_genes
+            }}
+        )
+    new_df = pd.concat((pd.DataFrame(new_rows, columns=required_cols), old_df))
+    return new_df
+        
+
+if __name__ == '__main__':
+    id_list = [
+        "NCBI885",
+        "NCBI886",
+        "NCBI887",
+        "NCBI888",
+    ]
+
+    meta_df = pd.read_csv("/home/paul/Downloads/ST H&E datasets - NCBI.csv")
+
+
+    meta_df = meta_df[meta_df['id'].isin(id_list)]
+        
+    new_version = 'v1_3_0'
+    df = update_hest_meta(pd.read_csv('/home/paul/Downloads/HEST_v1_2_1.csv'), meta_df, new_version)
+    df.to_csv(f'/home/paul/Downloads/HEST_{new_version}.csv', index=False)

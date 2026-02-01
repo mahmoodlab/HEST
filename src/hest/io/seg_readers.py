@@ -1,6 +1,10 @@
+from __future__ import annotations
+
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import json
+import os
+from typing import Optional, Union
 import warnings
 from abc import abstractmethod
 
@@ -11,7 +15,7 @@ import pandas as pd
 from shapely.geometry.polygon import Point, Polygon
 from tqdm import tqdm
 
-from hest.utils import align_xenium_df, get_n_threads
+from hest.utils import align_xenium_df, get_n_threads, is_dask_gdf, read_parquet_dask
 
 
 def _process(x, extra_props, index_key, class_name):
@@ -61,61 +65,73 @@ def _read_geojson(path, class_name=None, extra_props=False, index_key=None) -> g
 
 
 class GDFReader:
+    """ Lazily read shapes such that read_gdf is called at compute time """
+
     @abstractmethod
-    def read_gdf(self, path) -> gpd.GeoDataFrame:
+    def read_gdf(self, path: str) -> Union[gpd.GeoDataFrame, dgpd.GeoDataFrame]:
+        """ Read shapes
+
+        Args:
+            path (str): path to shapes
+
+        Returns:
+            Union[gpd.GeoDataFrame, dgpd.GeoDataFrame]: shapes
+        """
         pass
    
-def fn(block, i):
-    logger.debug(f'start fn block {i}')
+    
+def groupby_shape(df, col, n_threads=0, col_shape='xy'):
+    block = df[[col, col_shape]]
+    
     groups = defaultdict(lambda: [])
-    [groups[row[0]].append(row[1]) for row in block]
-    g = np.array([Polygon(value) for _, value in groups.items()])
-    key = np.array([key for key, _ in groups.items()])
-    logger.debug(f'finish fn block {i}')
-    return np.column_stack((key, g))
-    
-def groupby_shape(df, col, n_threads, col_shape='xy'):
-    n_chunks = n_threads
-    
-    if n_threads >= 1:
-        l = len(df) // n_chunks
-        start = 0
-        chunk_lens = []
-        while start < len(df):
-            end = min(start + l, len(df))
-            while end < len(df) and df.iloc[end][col] == df.iloc[end - 1][col]:
-                end += 1
-            chunk_lens.append((start, end))
-            start = end 
-        
-        dfs = []
-        with ProcessPoolExecutor(max_workers=n_threads) as executor:
-            future_results = [executor.submit(fn, df[[col, col_shape]].iloc[start:end].values, start) for start, end in chunk_lens]
+    [groups[row[0]].append(row[1]) for row in block.values]
+    key, g = zip(*[
+        (key, Polygon(value)) 
+        for key, value in groups.items() 
+        if len(value) >= 4 or print(f"Warning: key {key} has less than 4 points ({len(value)}), skipping")
+    ])
 
-            for future in as_completed(future_results):
-                dfs.append(future.result()) 
-        
-        concat = np.concatenate(dfs)
-    else:
-        concat = fn(df[[col, col_shape]].values, 0)
+    key = np.array(key)
+    g = np.array(g)
+
+    concat = np.column_stack((key, g))
 
     gdf = gpd.GeoDataFrame(geometry=concat[:, 1])
     gdf.index = concat[:, 0]
     
+    import gc
+    gc.collect()
+    
     return gdf
 
 class XeniumParquetCellReader(GDFReader):
+    """ Xenium parquet shape reader """
     
-    def __init__(self, pixel_size_morph=None, alignment_matrix=None):
+    def __init__(
+        self, 
+        pixel_size_morph: Optional[float]=None, 
+        alignment_matrix=None, 
+        use_dask=False
+    ):
+        """ Xenium parquet shape reader
+
+        Args:
+            pixel_size_morph (Optional[float], optional): pixel size of DAPI in um/px. Defaults to None.
+            alignment_matrix (np.ndarray, optional): optional alignment matrix. Defaults to None.
+            use_dask (bool, optional): whenever to load as a dask geodataframe. Defaults to False.
+        """
+
         self.pixel_size_morph = pixel_size_morph
         self.alignment_matrix = alignment_matrix
+        self.use_dask = use_dask
     
-    def read_gdf(self, path, n_workers=0) -> gpd.GeoDataFrame:
+    def read_gdf(self, path, n_workers=0) -> Union[gpd.GeoDataFrame, dgpd.GeoDataFrame]:
         
-        df = pd.read_parquet(path)
+        if self.use_dask:
+            df = read_parquet_dask(path, nb_partitions=30)
+        else:
+            df = pd.read_parquet(path)
 
-        
-        
         if self.alignment_matrix is not None:
             df = align_xenium_df(
                 df,
@@ -128,18 +144,54 @@ class XeniumParquetCellReader(GDFReader):
         else:
             df['vertex_x'], df['vertex_y'] = df['vertex_x'] / self.pixel_size_morph, df['vertex_y'] / self.pixel_size_morph 
 
-        df['xy'] = list(zip(df['vertex_x'], df['vertex_y']))
-        df = df.drop(['vertex_x', 'vertex_y'], axis=1)   
+        if self.use_dask:
+            def create_xy_column(pdf):
+                pdf['xy'] = list(zip(pdf['vertex_x'], pdf['vertex_y']))
+                return pdf
+
+            df = df.map_partitions(create_xy_column)
+        else:
+            df['xy'] = list(zip(df['vertex_x'], df['vertex_y']))
+        df = df.drop(['vertex_x', 'vertex_y'], axis=1)
         
-        n_threads = get_n_threads(n_workers)
-        
-        gdf = groupby_shape(df, 'cell_id', n_threads)
+        if self.use_dask:
+            import dask_geopandas
+            from geopandas.array import GeometryDtype
+            
+            gdf = dask_geopandas.from_dask_dataframe(df)
+            gdf_template = gpd.GeoDataFrame(
+                {'geometry': gpd.GeoSeries(dtype=GeometryDtype())},
+                crs="EPSG:4326",
+                index=pd.Index([], dtype="string", name="index"),
+            )
+            gdf = gdf.map_partitions(groupby_shape, 'cell_id', meta=gdf_template)
+        else:
+            gdf = groupby_shape(df, 'cell_id')
         return gdf
 
+
 class GDFParquetCellReader(GDFReader):
+    """ Geopandas parquet shape reader """
     
-    def read_gdf(self, path) -> gpd.GeoDataFrame:
-        return gpd.read_parquet(path)
+    def __init__(self, use_dask=False, **kwargs):
+        """ Geopandas parquet shape reader
+
+        Args:
+            use_dask (bool, optional): whenever to load as a dask geodataframe. Defaults to False.
+        """
+        self.use_dask = use_dask
+    
+    
+    def read_gdf(self, path) -> Union[gpd.GeoDataFrame, dgpd.GeoDataFrame]:
+        if self.use_dask:
+            import dask_geopandas as dgpd
+            import pyarrow.parquet as pq
+            parquet_file = pq.ParquetFile(path)
+            total_row_groups = parquet_file.num_row_groups
+            row_groups_per_partition = max(1, total_row_groups // 30)
+            return dgpd.read_parquet(path, split_row_groups=row_groups_per_partition)
+        else:
+            return gpd.read_parquet(path)
 
 
 class GeojsonCellReader(GDFReader):
@@ -158,83 +210,151 @@ class TissueContourReader(GDFReader):
         return gdf
     
 
-def write_geojson(gdf: gpd.GeoDataFrame, path: str, category_key: str, extra_prop=False, uniform_prop=True, index_key: str=None, chunk=False) -> None:
-        
-    if isinstance(gdf.geometry.iloc[0], Point):
-        geometry = 'MultiPoint'
-    elif isinstance(gdf.geometry.iloc[0], Polygon):
-        geometry = 'MultiPolygon'
-    else:
-        raise ValueError(f"gdf.geometry[0] must be of type Point or Polygon, got {type(gdf.geometry.iloc[0])}")
+class XeniumTranscriptsReader(GDFReader):
+    """ Xenium transcript shape reader """
     
-    
-    if chunk:
-        n = 10
-        l = (len(gdf) // n) + 1
-        s = []
-        for i in range(n):
-            s.append(np.repeat(i, l))
-        cls = np.concatenate(s)
-        
-        gdf['_chunked'] = cls[:len(gdf)]
-        category_key = '_chunked'
-    
-    
-    groups = np.unique(gdf[category_key])
-    colors = generate_colors(groups)
-    cells = []
-    for group in tqdm(groups):
+    def __init__(self, pixel_size_morph: float, use_dask=False, **kwargs):
+        """ Xenium transcript shape reader
 
-        slice = gdf[gdf[category_key] == group]
-        shapes = slice.geometry
+        Args:
+            pixel_size_morph (float): pixel size of DAPI in um/px
+            use_dask (bool, optional): whenever to load as a dask geodataframe. Defaults to False.
+        """
+        self.use_dask = use_dask
+        self.pixel_size_morph = pixel_size_morph
+    
+    
+    def read_gdf(self, path) -> Union[gpd.GeoDataFrame, dgpd.GeoDataFrame]:
+        if self.use_dask:
+            import dask_geopandas as dgpd
+            transcripts_df = read_parquet_dask(path, nb_partitions=30)
+            transcripts_df['x_location'] = transcripts_df['x_location'] / self.pixel_size_morph
+            transcripts_df['y_location'] = transcripts_df['y_location'] / self.pixel_size_morph
+            transcripts_df['geometry'] = dgpd.points_from_xy(transcripts_df, 'x_location', 'y_location')
+            transcripts_gdf = dgpd.from_dask_dataframe(transcripts_df)
+        else:
+            transcripts_gdf = gpd.GeoDataFrame(path, geometry=gpd.points_from_xy(
+                transcripts_df['x_location'] / self.pixel_size_morph, 
+                transcripts_df['y_location'] / self.pixel_size_morph))
+        return transcripts_gdf
+    
+    
+class HESTXeniumTranscriptsReader(GDFReader):
+    """ HEST Xenium transcript reader """
+    
+    def __init__(self, use_dask=False, **kwargs):
+        """ HEST Xenium transcript reader
+
+        Args:
+            use_dask (bool, optional): whenever to load as a dask geodataframe. Defaults to False.
+        """
+        self.use_dask = use_dask
+    
+    
+    def read_gdf(self, path) -> Union[gpd.GeoDataFrame, dgpd.GeoDataFrame]:
+        if self.use_dask:
+            import dask_geopandas as dgpd
+            transcripts_df = read_parquet_dask(path, nb_partitions=30)
+            transcripts_df['geometry'] = dgpd.points_from_xy(transcripts_df, 'dapi_x', 'dapi_y')
+            transcripts_gdf = dgpd.from_dask_dataframe(transcripts_df)
+        else:
+            transcripts_gdf = gpd.GeoDataFrame(path, geometry=gpd.points_from_xy(
+                transcripts_df['dapi_x'], 
+                transcripts_df['dapi_y']))
+        return transcripts_gdf
+    
+
+def _write_geojson(
+    gdf: gpd.GeoDataFrame, 
+    path: str, 
+    geometry=None,
+    partition_info=None,
+):
+    colors = generate_colors(['all', 'test'])
+    shapes = gdf.geometry
+    
+    if partition_info is not None:
+        p_index = partition_info['number']
+    else:
+        p_index = -1
         
-        properties = {
-            "objectType": "annotation",
-            "classification": {
-                "name": str(group),
-                "color": colors[group]
-            }
+    properties = {
+        "objectType": "detection",
+        "classification": {
+            "name": str('group'),
+            "color": colors['test']
         }
-        
-        if extra_prop:
-            props = {}
-            col_exclude = [category_key, 'geometry']
-            if index_key is not None:
-                col_exclude.append(index_key)
-            for col in [c for c in gdf.columns if c not in col_exclude]:
-                if uniform_prop:
-                    unique = np.unique(slice[col])
-                    if len(unique) != 1:
-                        warnings.warn(f"extra property {col} is not uniform for group {group}, found {unique}")
-                props[col] = slice[col].iloc[0]
-            
-            properties = {**properties, **props}
-        
-        if index_key is not None:
-            key = index_key
-            props = {}
-            mask = (slice[key] == True).values
-            props = {key: np.arange(len(mask))[mask].tolist()}
-            properties = {**properties, **props}
-        
-        if isinstance(gdf.geometry.iloc[0], Point):
-            shapes = [[point.x, point.y] for point in shapes]
-        elif isinstance(gdf.geometry.iloc[0], Polygon):
-            shapes = [[[[x, y] for x, y in polygon.exterior.coords]] for polygon in shapes]
-        cell = {
-            'type': 'Feature',
-            'id': (str(id(path)) + '-id-' + str(group)).replace('.', '-'),
-            'geometry': {
-                'type': geometry,
-                'coordinates': shapes
-            },
-            "properties": properties
-        }
-        cells.append(cell)
+    }
+    
+    if isinstance(gdf.geometry.iloc[0], Point):
+        shapes = [[point.x, point.y] for point in shapes]
+    elif isinstance(gdf.geometry.iloc[0], Polygon):
+        shapes = [[[[x, y] for x, y in polygon.exterior.coords]] for polygon in shapes]
+    cells = [
+        {
+        'type': 'Feature',
+        'geometry': {
+            'type': geometry,
+            'coordinates': shape
+        },
+        "properties": properties
+    } for shape in shapes
+    ]
+    
+    partition_str = str(p_index) if p_index >= 0 else ''
+    path = path if partition_str == '' else os.path.join(path.removesuffix('.geojson'), f'part.{partition_str}.geojson')
     
     with open(path, 'w') as f:
-        json.dump(cells, f, indent=4)
-            
+        json.dump({
+            "type": "FeatureCollection",
+            "features": cells}
+        , f)
+    
+
+def write_geojson(
+    gdf: Union[gpd.GeoDataFrame, dgpd.GeoDataFrame], 
+    path: str, 
+) -> None:
+    """ Write a (dask) geodataframe in optimized QuPath geojson detection format.
+
+    Args:
+        gdf (Union[gpd.GeoDataFrame, dgpd.GeoDataFrame]): _description_
+        path (str): _description_
+
+    Raises:
+        ValueError: _description_
+        ValueError: _description_
+    """
+    if not path.endswith('.geojson'):
+        raise ValueError(f"path must end in .geojson")
+    
+    use_dask = is_dask_gdf(gdf)
+    
+    first_geom = gdf.geometry.head(1).values[0]
+    g_type = first_geom.geom_type
+        
+    if g_type == 'Point':
+        geometry = 'MultiPoint'
+    elif g_type == 'Polygon':
+        geometry = 'Polygon'
+    else:
+        raise ValueError(
+            f"gdf geometry must be Point or Polygon, got {g_type}"
+        )
+    
+
+    if use_dask:
+        meta = gdf.head(0).copy()
+
+        from geopandas.array import GeometryDtype
+        meta['geometry'] = gpd.GeoSeries(dtype=GeometryDtype())
+
+        meta = meta.set_geometry('geometry').set_crs("EPSG:4326")
+        os.makedirs(path.removesuffix('.geojson'), exist_ok=True)
+        gdf.map_partitions(_write_geojson, path, geometry,
+                           meta=meta).compute()
+    else:
+        _write_geojson(gdf, path, geometry)
     
     
 def generate_colors(names):

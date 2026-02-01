@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 from hestcore.segmentation import get_path_relative
 from loguru import logger
+from tqdm import tqdm
 
 from hest.HESTData import (HESTData, STHESTData, VisiumHDHESTData,
                            VisiumHESTData, XeniumHESTData)
@@ -23,9 +24,9 @@ from hest.segmentation.cell_segmenters import segment_cellvit
 from hest.utils import (SpotPacking, align_xenium_df, check_arg,
                         find_biggest_img,
                         find_first_file_endswith,
-                        find_pixel_size_from_spot_coords,
+                        find_pixel_size_from_spot_coords, get_col_selection,
                         get_path_from_meta_row, helper_mex, load_wsi,
-                        metric_file_do_dict, read_xenium_alignment,
+                        metric_file_do_dict, read_parquet_dask, read_xenium_alignment,
                         register_downscale_img, verify_paths)
 
 LOCAL = False
@@ -854,13 +855,7 @@ class XeniumReader(Reader):
     def __load_transcripts(self, transcripts_path, alignment_matrix, pixel_size_morph, use_dask, nb_partitions=30):
 
         if use_dask:
-            import dask.dataframe as dd
-            import pyarrow.parquet as pq
-
-            parquet_file = pq.ParquetFile(transcripts_path)
-            total_row_groups = parquet_file.num_row_groups
-            row_groups_per_partition = max(1, total_row_groups // nb_partitions)
-            df_transcripts = dd.read_parquet(transcripts_path, split_row_groups=row_groups_per_partition)
+            df_transcripts = read_parquet_dask(transcripts_path, nb_partitions)
         else:
             df_transcripts = pd.read_parquet(transcripts_path)
         
@@ -937,7 +932,7 @@ class XeniumReader(Reader):
         Args:
             img_path (str): path to the WSI
             experiment_path (str): path to a `experiment.xenium` file
-            alignment_file_path (str, optional): path to a DAPI->H&E alignment file, None if the H&E is already aligned with the DAPI. Defaults to None.
+            alignment_file_path (str, optional): path to a DAPI->H&E matrix/keypoints alignment file, None if the H&E is already aligned with the DAPI. Defaults to None.
             feature_matrix_path (str, optional): path to a `cell_feature_matrix.h5`. Defaults to None.
             transcripts_path (str, optional): path to a transcripts.parquet, None to not load the transcripts. Defaults to None.
             cells_path (str, optional): path to a `cells.parquet` file, None to not load the cells. Defaults to None.
@@ -973,14 +968,26 @@ class XeniumReader(Reader):
         alignment_matrix = read_xenium_alignment(alignment_file_path) if alignment_file_path else None
         dict['pixel_size_um_estimated'] = self.__xenium_estimate_pixel_size(pixel_size_morph, alignment_matrix)
         if cell_bound_path is not None:
-            shapes.append(LazyShapes(cell_bound_path, 'tenx_cell', 'dapi', reader=XeniumParquetCellReader, reader_kwargs={'pixel_size_morph': pixel_size_morph}))
+            shapes.append(LazyShapes(cell_bound_path, 'tenx_cell', 'dapi', 
+                                     reader=XeniumParquetCellReader, 
+                                     reader_kwargs={'pixel_size_morph': pixel_size_morph}))
             if alignment_matrix is not None:
-                shapes.append(LazyShapes(cell_bound_path, 'tenx_cell', 'he', reader=XeniumParquetCellReader, reader_kwargs={'pixel_size_morph': pixel_size_morph, 'alignment_matrix': alignment_matrix}))
+                shapes.append(LazyShapes(cell_bound_path, 'tenx_cell', 'he', 
+                                         reader=XeniumParquetCellReader, 
+                                         reader_kwargs={
+                                             'pixel_size_morph': pixel_size_morph, 
+                                             'alignment_matrix': alignment_matrix}))
 
         if nucleus_bound_path is not None:
-            shapes.append(LazyShapes(nucleus_bound_path, 'tenx_nucleus', 'dapi', reader=XeniumParquetCellReader, reader_kwargs={'pixel_size_morph': pixel_size_morph}))
+            shapes.append(LazyShapes(nucleus_bound_path, 'tenx_nucleus', 'dapi', 
+                                     reader=XeniumParquetCellReader, 
+                                     reader_kwargs={'pixel_size_morph': pixel_size_morph}))
             if alignment_matrix is not None:
-                shapes.append(LazyShapes(nucleus_bound_path, 'tenx_nucleus', 'he', reader=XeniumParquetCellReader, reader_kwargs={'pixel_size_morph': pixel_size_morph, 'alignment_matrix': alignment_matrix}))
+                shapes.append(LazyShapes(nucleus_bound_path, 'tenx_nucleus', 'he', 
+                                         reader=XeniumParquetCellReader, 
+                                         reader_kwargs={
+                                             'pixel_size_morph': pixel_size_morph, 
+                                             'alignment_matrix': alignment_matrix}))
 
         
         if transcripts_path is not None:
@@ -1043,6 +1050,7 @@ def reader_factory(path: str) -> Reader:
     else:
         raise NotImplementedError('')
         
+
 def read_and_save(
     path: str, 
     save_plots=True, 
@@ -1058,15 +1066,27 @@ def read_and_save(
     save_kwargs={}, 
     segment_kwargs={},
     patching_kwargs={},
-):
-    """For internal use, determine the appropriate reader based on the raw data path, and
-    automatically process the data at that location, then the processed files are dumped
-    to processed/
+) -> HESTData:
+    """ Determine the appropriate reader based on the raw data path, and
+        automatically process the data at that location, then the processed files are dumped
+        to processed/
 
     Args:
-        path (str): path of the raw data
-        save_plots (bool, optional): whenever to save the spatial plots. Defaults to True.
-        pyramidal (bool, optional): whenever to save as pyramidal. Defaults to True.
+        path (str): path to input folder (will be passed to reader auto_read)
+        save_plots (bool, optional): whenever to save spatial plots. Defaults to True.
+        pyramidal (bool, optional): whenever to save the wsi as pyramidal. Defaults to True.
+        bigtiff (bool, optional): whenever to save the wsi as bigtiff (should be set to True if >4.1GB). Defaults to False.
+        plot_pxl_size (bool, optional): whenever to save a plot showing the embedded vs computed pixel size. Defaults to True.
+        save_img (bool, optional): whenever to re-save the WSI in a format compatible with both openslide and qupath. Defaults to True.
+        segment_tissue (bool, optional): whenever to segment the tissue. Defaults to True.
+        save_adata (bool, optional): whenever to save an adata object with pooled expression. Defaults to True.
+        qc (bool, optional): whenever to save qc. Defaults to True.
+        dump_patches (bool, optional): whenever to dump patches. Defaults to True.
+        read_kwargs (dict, optional): kwargs passed to the reader. Defaults to {}.
+        save_kwargs (dict, optional): kwargs passed to HESTData save. Defaults to {}.
+        segment_kwargs (dict, optional): kwargs passed to segment_tissue. Defaults to {}.
+        patching_kwargs (dict, optional): kwargs passed to dump_patches. Defaults to {}.
+
     """
     print(f'Reading from {path}...')
     reader = reader_factory(path)
@@ -1095,8 +1115,14 @@ def read_and_save(
 
     return st_object
         
-def get_indices_chunk(partition, spot_grid_columns: pd.Index):
-    return spot_grid_columns.get_indexer(partition['feature_name'])
+def get_indices_chunk(partition, key_x, key_y, 
+                      x_min, y_min, spot_size_um, pixel_size_he, n, spot_grid_columns):
+    a = np.floor((partition[key_x] - x_min) / (spot_size_um / pixel_size_he)).astype(int)
+    b = np.floor((partition[key_y] - y_min) / (spot_size_um / pixel_size_he)).astype(int)
+
+    c = b * n + a
+    cols = spot_grid_columns.get_indexer(partition['feature_name'])
+    return pd.DataFrame({'c': c, 'cols': cols}, index=partition.index)
 
 def pool_transcripts_xenium(
     df: Union[pd.DataFrame, dd.DataFrame], 
@@ -1140,25 +1166,34 @@ def pool_transcripts_xenium(
 
     m = math.ceil(m)
     n = math.ceil(n)
-    
     spot_grid = pd.DataFrame(0, index=range(m * n), columns=unique_features)
+    spot_grid_np = spot_grid.values.astype(np.uint32)
     
-
-    # a is the row and b is the column in the pseudo visium grid
-    a = np.floor((df[key_x] - x_min) / (spot_size_um / pixel_size_he)).astype(int)
-    b = np.floor((df[key_y] - y_min) / (spot_size_um / pixel_size_he)).astype(int)
-    
-    c = b * n + a
-    features = df['feature_name']
-
     if isinstance(df, dd.DataFrame):
-        cols = df.map_partitions(get_indices_chunk, spot_grid.columns, meta=('result', 'int64'))
+        import dask.array as da
+            
+        cols_c = df.map_partitions(get_indices_chunk, key_x, key_y, 
+                      x_min, y_min, spot_size_um, pixel_size_he, n, spot_grid.columns,
+                      meta={'c': 'int64', 'cols': 'int64'})
+        
+        num_rows = m * n
+        num_cols = len(unique_features)
+        c_da = cols_c['c'].to_dask_array(lengths=True)
+        cols_da = cols_c['cols'].to_dask_array(lengths=True)
+        h, xedges, yedges = da.histogram2d(
+            c_da, 
+            cols_da, 
+            bins=[np.arange(num_rows + 1), np.arange(num_cols + 1)]
+        )
+        spot_grid_np = h.astype(np.uint32).compute()
+        
     else:
-        cols = spot_grid.columns.get_indexer(features)
-    
-    ## use dask for this parts
-    spot_grid_np = spot_grid.values.astype(np.uint16)
-    np.add.at(spot_grid_np, (c, cols), 1)
+        cols_c = get_indices_chunk(key_x, key_y, 
+                      x_min, y_min, spot_size_um, pixel_size_he, n, spot_grid.columns)
+
+        c = cols_c['c']
+        cols = cols_c['cols']
+        np.add.at(spot_grid_np, (c, cols), 1)
     
     
     if isinstance(spot_grid.columns.values[0], bytes):
@@ -1294,3 +1329,84 @@ def process_meta_df_cellvit(meta_df, cellvit_kwargs={'gpu_ids': [0, 1], 'batch_s
     for _, row in meta_df.iterrows():
         _process_cellvit(row, **cellvit_kwargs)
     
+
+def save_meta(row_dict):
+    path = get_path_from_meta_row(row_dict)
+    
+    with open(os.path.join(path, 'processed', f'metrics.json'), 'r') as f:
+        meta = json.load(f)
+    
+    combined_meta = {**meta, **row_dict}
+    cols = get_col_selection()
+    combined_meta = {k: v for k, v in combined_meta.items() if k in cols}
+    with open(os.path.join(path, 'processed', f'meta.json'), 'w') as f:
+        json.dump(combined_meta, f, indent=4)
+
+
+def process_raw_samples(
+    meta_df: pd.DataFrame,
+    save_plots=True, 
+    pyramidal=True, 
+    bigtiff=False, 
+    plot_pxl_size=True, 
+    save_img=True, 
+    segment_tissue=True, 
+    save_adata=True, 
+    qc=True,
+    dump_patches=True,
+    read_kwargs={
+        'use_dask': True,
+        'nb_partitions': 100,
+    }, 
+    save_kwargs={
+        'save_nuclei_seg': True,
+        'save_cell_seg': True
+    }, 
+    segment_kwargs={},
+    patching_kwargs={},
+) -> None:
+    """ Process raw samples and save them into HEST format
+
+        Args:
+            meta_df (str): metadata dataframe
+            save_plots (bool, optional): whenever to save spatial plots. Defaults to True.
+            pyramidal (bool, optional): whenever to save the wsi as pyramidal. Defaults to True.
+            bigtiff (bool, optional): whenever to save the wsi as bigtiff (should be set to True if >4.1GB). Defaults to False.
+            plot_pxl_size (bool, optional): whenever to save a plot showing the embedded vs computed pixel size. Defaults to True.
+            save_img (bool, optional): whenever to re-save the WSI in a format compatible with both openslide and qupath. Defaults to True.
+            segment_tissue (bool, optional): whenever to segment the tissue. Defaults to True.
+            save_adata (bool, optional): whenever to save an adata object with pooled expression. Defaults to True.
+            qc (bool, optional): whenever to save qc. Defaults to True.
+            dump_patches (bool, optional): whenever to dump patches. Defaults to True.
+            read_kwargs (dict, optional): kwargs passed to the reader. Defaults to {}.
+            save_kwargs (dict, optional): kwargs passed to HESTData save. Defaults to {}.
+            segment_kwargs (dict, optional): kwargs passed to segment_tissue. Defaults to {}.
+            patching_kwargs (dict, optional): kwargs passed to dump_patches. Defaults to {}.
+    """
+            
+    for _, row in tqdm(meta_df.iterrows()):
+        path = get_path_from_meta_row(row)
+
+        sample_folder_path = path
+        res_folder = os.path.join(path, 'processed')
+        os.makedirs(res_folder, exist_ok=True)
+
+        bigtiff = not(isinstance(row['bigtiff'], float) or row['bigtiff'] == 'FALSE')
+        read_and_save(
+            sample_folder_path,
+            save_plots=save_plots,
+            pyramidal=pyramidal,
+            bigtiff=bigtiff,
+            plot_pxl_size=plot_pxl_size,
+            save_img=save_img,
+            segment_tissue=segment_tissue,
+            save_adata=save_adata,
+            qc=qc,
+            dump_patches=dump_patches,
+            read_kwargs=read_kwargs,
+            save_kwargs=save_kwargs,
+            segment_kwargs=segment_kwargs,
+            patching_kwargs=patching_kwargs
+        )
+
+        save_meta(dict(row))

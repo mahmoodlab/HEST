@@ -10,6 +10,7 @@ tests/assets
 config
 tests/output_tests
 HEST/
+docs/_build
 
 results
 atlas

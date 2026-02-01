@@ -1,16 +1,17 @@
 from __future__ import annotations
 
+import gc
 import os
-from typing import Tuple, Union
+from typing import Optional, Tuple, Union
+import warnings
 
 import geopandas as gpd
 import numpy as np
 from loguru import logger
-from shapely import Polygon
 
-from hest.io.seg_readers import groupby_shape, read_gdf
-from hest.utils import (get_name_datetime,
-                        value_error_str, verify_paths)
+from hest.io.seg_readers import HESTXeniumTranscriptsReader, XeniumTranscriptsReader, groupby_shape, read_gdf, write_geojson
+from hest.utils import (deprecated, get_name_datetime, merge_parquet,
+                        value_error_str)
 from hestcore.wsi import WSI
 
 
@@ -24,7 +25,6 @@ def register_dapi_he(
     micro_rigid_registrar_params={},
     micro_reg=True,
     check_for_reflections=False,
-    reuse_registrar=False
 ) -> str:
     """ Register the DAPI WSI to HE with a fine-grained ridig + non-rigid transform with Valis
 
@@ -46,10 +46,8 @@ def register_dapi_he(
         from valis_hest.slide_io import BioFormatsSlideReader
 
         from .SlideReaderAdapter import SlideReaderAdapter
-    except Exception:
-        import traceback
-        traceback.print_exc()
-        raise Exception("Valis needs to be installed independently. Please install Valis with `pip install valis-hest`")
+    except Exception as e:
+        raise Exception("Valis needs to be installed independently. Please install Valis with `pip install valis-hest`") from e
         
     #verify_paths([dapi_path, he_path])
     
@@ -97,22 +95,66 @@ def register_dapi_he(
     
     return registrar_path
         
+        
+def _warp_gdf_valis(gdf, registrar, curr_slide_name, slide_obj):
+    if len(gdf) == 0:
+        return gdf
+    
+    geom_type = gdf.geometry.iloc[0].geom_type
+    
+    if geom_type in ['Polygon', 'MultiPolygon']:
+        coords = gdf.geometry.get_coordinates(index_parts=True)
+        points_gdf = coords
+        idx = coords.index.get_level_values(0)
+        points_gdf['_polygons'] = idx 
+        points = list(zip(points_gdf['x'], points_gdf['y']))
+    elif geom_type == 'Point':
+        points_gdf = gdf
+        points = list(zip(gdf.geometry.x, gdf.geometry.y))
+    else:
+        raise NotImplementedError('')
+        
+    morph = registrar.get_slide(curr_slide_name)
+    warped = morph.warp_xy_from_to(points, slide_obj)
+    
+    if geom_type in ['Polygon', 'MultiPolygon']:
+        points_gdf['xy'] = list(zip(warped[:, 0], warped[:, 1]))
+        aggr_df = groupby_shape(points_gdf, '_polygons', n_threads=0)
+        gdf.geometry = aggr_df.geometry
+    else:
+        import geopandas as gpd
+        gdf.geometry = gpd.points_from_xy(warped[:, 0], warped[:, 1])
+        
+        
+    return gdf
 
 def warp_gdf_valis(
-    shapes: Union[gpd.GeoDataFrame, str],
+    shapes: Union[gpd.GeoDataFrame, str, dgpd.GeoDataFrame],
     path_registrar: str,
     curr_slide_name: str,
-    n_workers=-1
-) -> gpd.GeoDataFrame:
-    """ Warp some shapes (points or polygons) from an existing Valis registration
+    n_workers=-1,
+    use_dask=True
+) -> Union[gpd.GeoDataFrame, dgpd.GeoDataFrame]:
+    """ Warp some shapes (points or polygons) from an existing Valis registration registrar
 
     Args:
-        shapes (Union[gpd.GeoDataFrame, str]): shapes to warp. A `str` will be interpreted as a path a nucleus shape file, can be .geojson, or xenium .parquet (ex: nucleus_boundaries.parquet)
+        shapes (Union[gpd.GeoDataFrame, str, dgpd.GeoDataFrame]): shapes to warp. A `str` will be interpreted as a path a nucleus shape file, can be .geojson, or xenium .parquet (ex: nucleus_boundaries.parquet)
         path_registrar (str): path to the .pickle file of an existing Valis registrar 
+        curr_slide_name (str): dapi slide filename in the Valis registrar
+        n_workers (int, optional): **Deprecated**. Use dask instead
+        use_dask (bool, optional): whenever to use dask to process larger than RAM data, highly recommended for all Xenium samples. Defaults to True.
 
     Returns:
-        gpd.GeoDataFrame: warped shapes
+        Union[gpd.GeoDataFrame, dgpd.GeoDataFrame]: warped geodataframe such that warped shapes are in the geometry column.
     """
+    
+    if n_workers != -1:
+        warnings.warn(
+            "The 'n_workers' parameter is deprecated and will be removed in a future version. "
+            "Please use 'use_dask' instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
     
     try:
         from valis_hest import registration
@@ -121,79 +163,176 @@ def warp_gdf_valis(
         traceback.print_exc()
         raise Exception("Valis needs to be installed independently. Please install Valis with `pip install valis-wsi` or follow instruction on their website")
     
+    XENIUM_PIXEL_SIZE_MORPH = 0.2125
     
     if isinstance(shapes, str):
-        gdf = read_gdf(shapes)
+        gdf = read_gdf(shapes, reader_kwargs={'pixel_size_morph': XENIUM_PIXEL_SIZE_MORPH, 'use_dask': use_dask})
     elif isinstance(shapes, gpd.GeoDataFrame):
         gdf = shapes.copy()
     else:
-        raise ValueError(value_error_str(shapes, 'shapes'))
+        try:
+            import dask_geopandas
+        except:
+            pass
+        if dask_geopandas and isinstance(shapes, dask_geopandas.expr.GeoDataFrame):
+            gdf = shapes
+        else:
+            raise ValueError(value_error_str(shapes, 'shapes'))
 
+    from valis_hest.registration import init_jvm
+    init_jvm(mem_gb=1)
     registrar = registration.load_registrar(path_registrar)
     slide_obj = registrar.get_slide(registrar.reference_img_f)
-    if isinstance(shapes.iloc[0].geometry, Polygon):
-        coords = gdf.geometry.get_coordinates(index_parts=True)
-        points_gdf = coords
-        idx = coords.index.get_level_values(0)
-        points_gdf['_polygons'] = idx # keep track of polygons
-        points = list(zip(points_gdf['x'], points_gdf['y']))
-    else:
-        points_gdf = gdf
-        gdf['_polygons'] = np.arange(len(points_gdf))
-        points = list(zip(gdf.geometry.x, gdf.geometry.y))
+    if use_dask:
+        from geopandas.array import GeometryDtype
+        from distributed import get_client
         
-    morph = registrar.get_slide(curr_slide_name)
-    logger.debug('warp with valis...')
-    warped = morph.warp_xy_from_to(points, slide_obj)
-    logger.debug('finished warping with valis')
-    
-    if isinstance(shapes.iloc[0].geometry, Polygon):
-        points_gdf['xy'] = list(zip(warped[:, 0], warped[:, 1]))
-        aggr_df = groupby_shape(points_gdf, '_polygons', n_threads=0)
-        gdf.geometry = aggr_df.geometry
+        try:
+            client = get_client()
+        except:
+            client = None
+        
+        meta = gdf.head(0).copy()
+
+        from geopandas.array import GeometryDtype
+        meta['geometry'] = gpd.GeoSeries(dtype=GeometryDtype())
+
+        meta = meta.set_geometry('geometry').set_crs("EPSG:4326")
+        if client is None:
+            registrar_future = registrar
+            slide_obj_future = slide_obj
+        else:
+            [registrar_future] = client.scatter([registrar], broadcast=True)
+            [slide_obj_future] = client.scatter([slide_obj], broadcast=True)
+        gdf = gdf.map_partitions(_warp_gdf_valis, registrar_future, curr_slide_name, slide_obj_future, meta=meta)
     else:
-        gdf.geometry = gpd.points_from_xy(warped[:, 0], warped[:, 1])
+        gdf = _warp_gdf_valis(gdf, registrar, curr_slide_name, slide_obj)
     
     return gdf
+
+
+def _read_transcripts(
+    dapi_transcripts: str,
+    use_dask: bool,
+):
+    PIXEL_SIZE_MORPH = 0.2125
     
+    import pyarrow.parquet as pq
+    parquet_file = pq.ParquetFile(dapi_transcripts)
+    if 'dapi_x' in parquet_file.schema.names:
+        reader = HESTXeniumTranscriptsReader(use_dask=use_dask)
+    else:
+        reader = XeniumTranscriptsReader(pixel_size_morph=PIXEL_SIZE_MORPH, use_dask=use_dask)
+    
+    gdf_transcripts = reader.read_gdf(dapi_transcripts)
+    return gdf_transcripts
+
+
+def _format_transcripts(warped_transcripts):
+    if '_polygons' in warped_transcripts.columns:
+        warped_transcripts = warped_transcripts.drop(['_polygons'], axis=1)
+    warped_transcripts['he_x'] = warped_transcripts.geometry.x
+    warped_transcripts['he_y'] = warped_transcripts.geometry.y
+    return warped_transcripts
+
+
+def _warp_transcripts(
+    dapi_transcripts,
+    use_dask,
+    verbose,
+    path_registrar,
+    dapi_path
+):
+    gdf_transcripts = _read_transcripts(dapi_transcripts, use_dask)
+    
+    if verbose:
+        logger.info('Warping transcripts from DAPI to H&E...')
+        
+    warped_transcripts = warp_gdf_valis(
+        gdf_transcripts,
+        path_registrar=path_registrar,
+        curr_slide_name=dapi_path,
+        use_dask=use_dask,
+    )
+    
+    warped_transcripts = _format_transcripts(warped_transcripts)
+    return warped_transcripts
+
 
 def warp_xenium_objects(
-    path_registrar, 
-    dapi_path,
-    dapi_cells=None,
-    dapi_transcripts=None,
-    dapi_nuclei=None
-):
+    path_registrar: str, 
+    dapi_path: str,
+    dapi_cells: str=None,
+    dapi_transcripts: str=None,
+    dapi_nuclei: str=None,
+    use_dask=True,
+    verbose=True
+) -> Tuple[Optional[Union[gpd.GeoDataFrame, dgpd.GeoDataFrame]], 
+                 Optional[Union[gpd.GeoDataFrame, dgpd.GeoDataFrame]], 
+                 Optional[Union[gpd.GeoDataFrame, dgpd.GeoDataFrame]]]:
+    """ **Deprecated** Use warp_and_save_xenium_objects instead. Wrap Xenium transcripts, cells and nuclei using Valis non-rigid micro-registration. 
+
+    Args:
+        path_registrar (str): path to an existing Valis registrar
+        dapi_path (str): dapi slide filename in the Valis registrar
+        dapi_cells (str, optional): path to xenium .parquet cell bondaries, usually **/cell_boundaries.parquet. Defaults to None.
+        dapi_transcripts (str, optional): path to xenium .parquet nucleus bondaries, usually **/nucleus_boundaries.parquet. Defaults to None.
+        dapi_nuclei (str, optional): path to xenium .parquet transcripts, usually **/transcripts.parquet. Defaults to None.
+        use_dask (bool, optional): whenever to use dask to process larger than RAM data, highly recommended for all Xenium samples. Defaults to True.
+        verbose (bool, optional): verbose flag. Defaults to True.
+
+    Returns:
+        warped (Tuple): warped objects as (warped_cells, warped_nuclei, warped_transcripts)
+        
+    Example:
+            >>> registrar_path = "./valis_results/data/_registrar.pickle"
+            >>> cells_path = "./xenium_out/cell_boundaries.parquet"
+            >>> cells, nuclei, transcripts = warp_xenium_objects(
+            ...     path_registrar=registrar_path,
+            ...     dapi_path="morphology_focus.ome.tif",
+            ...     dapi_cells=cells_path,
+            ...     use_dask=True
+            ... )
+            >>> if cells is not None:
+            ...     print(f"Warped {len(cells)} cells using Dask: {type(cells)}")
+    """
+    warnings.warn(
+        "warp_xenium_objects is deprecated and will be removed in a future version. "
+        "Please use 'warp_and_save_xenium_objects' instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    
     if dapi_transcripts:
-        logger.info('Warping transcripts from DAPI to H&E...')
-        transcripts_gdf = gpd.GeoDataFrame(dapi_transcripts, geometry=gpd.points_from_xy(dapi_transcripts['dapi_x'], dapi_transcripts['dapi_y']))
-        warped_transcripts = warp_gdf_valis( # TODO valis interpolation is slow
-            transcripts_gdf,
-            path_registrar=path_registrar,
-            curr_slide_name=dapi_path
-        )
-        warped_transcripts = warped_transcripts.drop(['_polygons'], axis=1)
-        warped_transcripts['he_x'] = warped_transcripts.geometry.x
-        warped_transcripts['he_y'] = warped_transcripts.geometry.y
+        warped_transcripts = _warp_transcripts(dapi_transcripts, use_dask, 
+                                               verbose, path_registrar, dapi_path)
     else:
         warped_transcripts = None
 
     if dapi_cells is not None:
-        logger.info('Warping cells from DAPI to H&E...')
-        warped_cells = warp_gdf_valis( # TODO valis interpolation is slow
+        
+        if verbose:
+            logger.info('Warping cells from DAPI to H&E...')
+        
+        warped_cells = warp_gdf_valis(
             dapi_cells,
             path_registrar=path_registrar,
-            curr_slide_name=dapi_path
+            curr_slide_name=dapi_path,
+            use_dask=use_dask,
         )
     else:
         warped_cells = None
     
     if dapi_nuclei is not None:
-        logger.info('Warping nuclei from DAPI to H&E...')
-        warped_nuclei = warp_gdf_valis( # TODO valis interpolation is slow
+        
+        if verbose:
+            logger.info('Warping nuclei from DAPI to H&E...')
+        
+        warped_nuclei = warp_gdf_valis(
             dapi_nuclei,
             path_registrar=path_registrar,
-            curr_slide_name=dapi_path
+            curr_slide_name=dapi_path,
+            use_dask=use_dask,
         )
     else:
         warped_nuclei = None
@@ -201,6 +340,127 @@ def warp_xenium_objects(
     return warped_cells, warped_nuclei, warped_transcripts
 
 
+def warp_and_save_xenium_objects(
+    path_registrar: str, 
+    dapi_path: str,
+    save_dir: str,
+    dapi_cells: str=None,
+    dapi_transcripts: str=None,
+    dapi_nuclei: str=None,
+    use_dask=True,
+    verbose=True,
+    save_parquet=True,
+    save_geojson=True,
+) -> None:
+    """ Wrap Xenium transcripts, cells and nuclei using Valis non-rigid micro-registration and save them.
+
+    Args:
+        path_registrar (str): path to an existing Valis registrar
+        dapi_path (str): dapi slide filename in the Valis registrar
+        save_dir (str): where to save warped objects. Objects will be saved to:
+            - save_dir/he_cell_seg.parquet
+            - save_dir/he_nucleus_seg.parquet
+            - save_dir/aligned_transcripts
+        dapi_cells (str, optional): path to xenium .parquet cell bondaries, usually **/cell_boundaries.parquet. Defaults to None.
+        dapi_transcripts (str, optional): path to xenium .parquet nucleus bondaries, usually **/nucleus_boundaries.parquet. Defaults to None.
+        dapi_nuclei (str, optional): path to xenium .parquet transcripts, usually **/transcripts.parquet. Defaults to None.
+        use_dask (bool, optional): whenever to use dask to process larger than RAM data, highly recommended for all Xenium samples. Defaults to True.
+        verbose (bool, optional): verbose flag. Defaults to True.
+        save_parquet (bool, optional): whenever to save objects as parquet. Defaults to True.
+        save_geojson (bool, optional): whenever to save objects as geojson. Defaults to True.
+
+    Example:
+            >>> registrar_path = "./valis_results/data/_registrar.pickle"
+            >>> cells_path = "./xenium_out/cell_boundaries.parquet"
+            >>> warp_and_save_xenium_objects(
+            ...     path_registrar=registrar_path,
+            ...     save_dir="warped_xenium",
+            ...     dapi_path="morphology_focus.ome.tif",
+            ...     dapi_cells=cells_path,
+            ...     use_dask=True
+            ... )
+            >>> if cells is not None:
+            ...     print(f"Warped {len(cells)} cells using Dask: {type(cells)}")
+    """
+    if not os.path.exists(save_dir):
+        raise ValueError(f"Save directory '{save_dir}' doesn't exist.")
+    
+    if dapi_transcripts:
+        warped_transcripts = _warp_transcripts(dapi_transcripts, use_dask, 
+                                               verbose, path_registrar, dapi_path)
+
+        res_path = 'aligned_transcripts' if use_dask else 'aligned_transcripts.parquet'
+        warped_transcripts.to_parquet(os.path.join(save_dir, res_path))
+        
+        if use_dask:
+            merge_parquet(os.path.join(save_dir, 'aligned_transcripts'),
+                        os.path.join(save_dir, 'aligned_transcripts.parquet'))
+
+        del warped_transcripts
+        gc.collect()
+    else:
+        warped_transcripts = None
+        
+    
+    if dapi_cells is not None:
+        
+        if verbose:
+            logger.info('Warping cells from DAPI to H&E...')
+        
+        warped_cells = warp_gdf_valis(
+            dapi_cells,
+            path_registrar=path_registrar,
+            curr_slide_name=dapi_path,
+            use_dask=use_dask,
+        )
+        
+        if save_parquet:
+            res_path = 'he_cell_seg' if use_dask else 'he_cell_seg.parquet'
+            warped_cells.to_parquet(os.path.join(save_dir, res_path))
+            
+            if use_dask:
+                merge_parquet(os.path.join(save_dir, 'he_cell_seg'),
+                            os.path.join(save_dir, 'he_cell_seg.parquet'))
+
+        if save_geojson:
+            write_geojson(warped_cells.compute(), os.path.join(save_dir, f'he_cell_seg.geojson'))
+            
+
+        del warped_cells
+        gc.collect()
+    else:
+        warped_cells = None
+        
+    
+    if dapi_nuclei is not None:
+        
+        if verbose:
+            logger.info('Warping nuclei from DAPI to H&E...')
+        
+        warped_nuclei = warp_gdf_valis(
+            dapi_nuclei,
+            path_registrar=path_registrar,
+            curr_slide_name=dapi_path,
+            use_dask=use_dask,
+        )
+        
+        if save_parquet:
+            res_path = 'he_nucleus_seg' if use_dask else 'he_nucleus_seg.parquet'
+            warped_nuclei.to_parquet(os.path.join(save_dir, res_path))
+            
+            if use_dask:
+                merge_parquet(os.path.join(save_dir, 'he_nucleus_seg'),
+                            os.path.join(save_dir, 'he_nucleus_seg.parquet'))
+            
+        if save_geojson:
+            write_geojson(warped_nuclei.compute(), os.path.join(save_dir, f'he_nucleus_seg.geojson'))
+            
+        del warped_nuclei
+        gc.collect()
+    else:
+        warped_nuclei = None
+    
+@deprecated
 def preprocess_cells_xenium(
     he_wsi: Union[str, WSI, np.ndarray, openslide.OpenSlide, CuImage],  # type: ignore
     dapi_path: str,

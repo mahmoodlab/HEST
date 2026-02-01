@@ -18,7 +18,7 @@ from loguru import logger
 
 from hest.io.seg_readers import TissueContourReader, write_geojson
 from hest.LazyShapes import LazyShapes, old_geojson_to_new
-from hest.registration import register_dapi_he, warp_xenium_objects
+from hest.registration import register_dapi_he, warp_and_save_xenium_objects
 
 try:
     import openslide
@@ -32,8 +32,8 @@ from shapely import Point
 from tqdm import tqdm
 
 from .utils import (ALIGNED_HE_FILENAME, check_arg, deprecated,
-                    find_first_file_endswith, get_k_genes_from_df, get_path_from_meta_row,
-                    plot_verify_pixel_size, tiff_save, verify_paths, visualize_random_crops)
+                    find_first_file_endswith, get_k_genes_from_df, get_path_from_meta_row, is_dask_dataframe, merge_parquet,
+                    plot_verify_pixel_size, tiff_save, verify_paths, plot_xenium_align_qc)
 
 
 class HESTData:
@@ -329,6 +329,7 @@ class HESTData:
         threshold=0.15,
         coords_only=False,
         qc=False,
+        nb_qc_patches=20,
     ):
         """ Dump H&E patches centered around ST spots to a .h5 file. 
         
@@ -346,12 +347,12 @@ class HESTData:
             use_mask (bool, optional): whenever to take into account the tissue mask. Defaults to True.
             threshold (float, optional): Tissue intersection threshold for a patch to be kept. Defaults to 0.15
             coords_only (bool, optional): if false, save patches under the .h5 `img` key instead of coords only. Defaults to False.
-            qc (bool, optional): if true, will save 10 random patches as patch_{k}.jpg (this is useful to quickly check the quality of patches)
+            qc (bool, optional): if true, will save nb_qc_patches random patches as patch_save_dir/qc/dump_patches/patch_vis_qc_{i}_{x}_{y}.jpg (this is useful to quickly check the quality of patches)
+            nb_qc_patches (int, optional): number of patches save if qc is True. Defaults to 20.
         """
         
         os.makedirs(patch_save_dir, exist_ok=True)
         
-        import matplotlib.pyplot as plt
         dst_pixel_size = target_pixel_size
         
         adata = self.adata.copy()
@@ -398,10 +399,13 @@ class HESTData:
             print(f'found {patch_count} valid patches')
             
         if qc and not coords_only:
-            random_idx = np.random.randint(0, len(patcher), size=min(5, len(patcher)))
+            
+            qc_dir = os.path.join(patch_save_dir, 'qc', 'dump_patches')
+            os.makedirs(qc_dir, exist_ok=True)
+            random_idx = np.random.randint(0, len(patcher), size=min(nb_qc_patches, len(patcher)))
             for i in random_idx:
                 img, x, y = patcher[i]
-                Image.fromarray(img).save(os.path.join(patch_save_dir, f'patch_vis_qc_{i}_{x}_{y}.jpg'))
+                Image.fromarray(img).save(os.path.join(qc_dir, f'patch_vis_qc_{i}_{x}_{y}.jpg'))
                 
             
     
@@ -489,33 +493,26 @@ class HESTData:
                 of the image and their respective coordinate systems.  
             
         Example: 
-            ```python
-            from hest import load_hest
-            hest_data = load_hest('../hest_data', id_list=['TENX68'])
-            st = hest_data[0]
-            st.to_spatial_data(fullres=True)
-
-            >>>
-            
-            ```
-            SpatialData object
-            ├── Images
-            │     ├── 'ST_downscaled_hires_image': SpatialImage[cyx] (3, 4779, 2586)
-            │     ├── 'ST_downscaled_lowres_image': SpatialImage[cyx] (3, 1000, 541)
-            │     └── 'ST_fullres_image': DataTree[cyx] (3, 38232, 20690), (3, 19116, 10345)
-            ├── Shapes
-            │     └── 'locations': GeoDataFrame shape: (1657, 2) (2D shapes)
-            └── Tables
-                └── 'table': AnnData (1657, 18085)
-            with coordinate systems:
-                ▸ 'ST_downscaled_hires', with elements:
-                    ST_downscaled_hires_image (Images), locations (Shapes)
-                ▸ 'ST_downscaled_lowres', with elements:
-                    ST_downscaled_lowres_image (Images), locations (Shapes)
-                ▸ 'ST_fullres', with elements:
-                    ST_fullres_image (Images), locations (Shapes)
-            ```
-            
+                >>> from hest import load_hest
+                >>> hest_data = load_hest('../hest_data', id_list=['TENX68'])
+                >>> st = hest_data[0]
+                >>> st.to_spatial_data(fullres=True)
+                SpatialData object
+                ├── Images
+                │     ├── 'ST_downscaled_hires_image': SpatialImage[cyx] (3, 4779, 2586)
+                │     ├── 'ST_downscaled_lowres_image': SpatialImage[cyx] (3, 1000, 541)
+                │     └── 'ST_fullres_image': DataTree[cyx] (3, 38232, 20690), (3, 19116, 10345)
+                ├── Shapes
+                │     └── 'locations': GeoDataFrame shape: (1657, 2) (2D shapes)
+                └── Tables
+                    └── 'table': AnnData (1657, 18085)
+                with coordinate systems:
+                    ▸ 'ST_downscaled_hires', with elements:
+                        ST_downscaled_hires_image (Images), locations (Shapes)
+                    ▸ 'ST_downscaled_lowres', with elements:
+                        ST_downscaled_lowres_image (Images), locations (Shapes)
+                    ▸ 'ST_fullres', with elements:
+                        ST_fullres_image (Images), locations (Shapes)
         """
         
         # imports specific to spatial data conversion
@@ -879,42 +876,68 @@ class XeniumHESTData(HESTData):
             save_cell_seg=False, 
             save_nuclei_seg=False,
             qc=False,
+            nb_qc_patches=20,
+            verbose=True,
             **kwargs
         ):
-        """Save a HESTData object to `path` as follows:
-            - aligned_adata.h5ad (contains pseudo-visium pooled expressions for each spots + their location on the fullres image + a downscaled version of the fullres image)
-            - metrics.json (contains useful metrics)
-            - downscaled_fullres.jpeg (a downscaled version of the fullres image)
-            - aligned_fullres_HE.tif (the full resolution image)
-            - cells.geojson (cell segmentation if it exists)
-            - Optional: cells_xenium.geojson (if xenium cell segmentation is attached to this object)
-            - Optional: nuclei_xenium.geojson (if xenium cell segmentation is attached to this object)
-            - Optional: tissue_contours.geojson (contours of the tissue segmentation if it exists)
+        """
+        Saves a Xenium HESTData object to the specified directory.
+
+        The following files are generated at the destination `path`:
+        * **aligned_adata.h5ad**: Pseudo-visium pooled expressions, spot locations, and a downscaled image.
+        * **metrics.json**: Key performance and data metrics.
+        * **downscaled_fullres.jpeg**: Low-resolution version of the H&E image.
+        * **aligned_fullres_HE.tif**: The full-resolution H&E image.
+        * **cells.geojson**: Cell segmentation boundaries (if available).
+        * **Optional Files**: `cells_xenium.geojson`, `nuclei_xenium.geojson`, and `tissue_contours.geojson`.
 
         Args:
-            path (str): save location
-            save_img (bool): whenever to save the image at all (can save a lot of time if set to False)
-            pyramidal (bool, optional): whenever to save the full resolution image as pyramidal (can be slow to save, however it's sometimes necessary for loading large images in QuPath). Defaults to True.
-            bigtiff (bool, optional): whenever the bigtiff image is more than 4.1GB. Defaults to False.
+            path (str): The directory where the data will be saved.
+            save_img (bool): If True, saves the H&E images. Setting to False significantly reduces runtime.
+            pyramidal (bool, optional): If True, saves the full-res image as a pyramidal TIFF. 
+                Recommended for large images to be opened in QuPath. Defaults to True.
+            bigtiff (bool, optional): Set to True if the output image exceeds 4.1GB. Defaults to False.
+            qc (bool, optional): If True, saves quality control (QC) patches and global transcript plots 
+                to `path/qc/`. Defaults to False.
+            nb_qc_patches (int, optional): The number of random patches to generate if `qc` is True. 
+                Defaults to 20.
+
+        Returns:
+            None
         """
         super().save(path, save_img, pyramidal, bigtiff, plot_pxl_size)
         if self.cell_adata is not None:
             self.cell_adata.write_h5ad(os.path.join(path, 'aligned_cells.h5ad'))
         
         if save_transcripts and self.transcript_df is not None:
-            self.transcript_df.to_parquet(os.path.join(path, 'aligned_transcripts.parquet'))
+            if is_dask_dataframe(self.transcript_df):
+                self.transcript_df.to_parquet(os.path.join(path, 'aligned_transcripts'))
+                merge_parquet(os.path.join(path, 'aligned_transcripts'),
+                        os.path.join(path, 'aligned_transcripts.parquet'))
+            else:
+                self.transcript_df.to_parquet(os.path.join(path, 'aligned_transcripts.parquet'))
 
         if save_cell_seg:
             he_cells = self.get_shapes('tenx_cell', 'he').shapes
             if qc:
-                visualize_random_crops(None, self.wsi, plot_dir=path, seg=he_cells)
+                plot_dir = os.path.join(path, 'qc')
+                os.makedirs(plot_dir, exist_ok=True)
+                plot_xenium_align_qc(self.wsi, plot_dir=plot_dir, seg_cells=he_cells, nb=nb_qc_patches)
+            if verbose:
+                print(f"Saving aligned cell-segmentation...")
             he_cells.to_parquet(os.path.join(path, 'he_cell_seg.parquet'))
-            write_geojson(he_cells, os.path.join(path, f'he_cell_seg.geojson'), '', chunk=True)
+            write_geojson(he_cells, os.path.join(path, f'he_cell_seg.geojson'))
             
         if save_nuclei_seg:
             he_nuclei = self.get_shapes('tenx_nucleus', 'he').shapes
+            if qc:
+                plot_dir = os.path.join(path, 'qc')
+                os.makedirs(plot_dir, exist_ok=True)
+                plot_xenium_align_qc(self.wsi, plot_dir=plot_dir, seg_nuc=he_nuclei, nb=nb_qc_patches)
+            if verbose:
+                print(f"Saving aligned nuclei-segmentation...")
             he_nuclei.to_parquet(os.path.join(path, 'he_nucleus_seg.parquet'))
-            write_geojson(he_nuclei, os.path.join(path, f'he_nucleus_seg.geojson'), '', chunk=True)
+            write_geojson(he_nuclei, os.path.join(path, f'he_nucleus_seg.geojson'))
         
 
     def register_dapi_he(
@@ -958,10 +981,13 @@ class XeniumHESTData(HESTData):
         save_cells=False,
         save_transcripts=False,
         save_nuclei=False,
+        save_parquet=True,
         save_geojson=True,
+        use_dask=False,
+        verbose=True
     ):
         """
-            Warp xenium objects based on the reigstrar
+            **Deprecated** use warp_and_save_xenium_objects instead. xenium objects based on the reigstrar
 
         Args:
             save_dir (str): Save the aligned objects to:
@@ -974,6 +1000,13 @@ class XeniumHESTData(HESTData):
             save_transcripts (bool, optional): Whenever to transform and save warped transcripts. Defaults to False.
             save_nuclei (bool, optional): Whenever to transform and save warped nuclei. Defaults to False.
         """
+        
+        warnings.warn(
+            "warp_xenium_objects is deprecated and will be removed in a future version. "
+            "Please use 'warp_and_save_xenium_objects' instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
 
         if not self.path_registrar:
             raise ValueError(f"No registration found for this xenium object, please execute `register_dapi_he` on this object first.")
@@ -982,26 +1015,75 @@ class XeniumHESTData(HESTData):
         dapi_nuclei = self.get_shapes('tenx_nucleus', 'dapi').shapes if save_nuclei else None
         transcript_df = self.transcript_df if save_transcripts else None
 
-        warped_cells, warped_nuclei, warped_transcripts = warp_xenium_objects(
+        warp_and_save_xenium_objects(
             path_registrar=self.path_registrar,
             dapi_path=dapi_path,
+            save_dir=save_dir,
             dapi_cells=dapi_cells,
             dapi_transcripts=transcript_df,
             dapi_nuclei=dapi_nuclei,
+            use_dask=use_dask,
+            verbose=verbose,
+            save_parquet=save_parquet,
+            save_geojson=save_geojson,
         )
+        
 
-        print('Saving warped cells/nuclei...')
-        if save_cells:
-            warped_cells.to_parquet(os.path.join(save_dir, f'he_cell_seg.parquet'))
+    def warp_and_save_xenium_objects(
+        self, 
+        dapi_path: str,
+        save_dir: str,
+        dapi_cells: str=None,
+        dapi_transcripts: str=None,
+        dapi_nuclei: str=None,
+        use_dask=True,
+        verbose=True,
+        save_parquet=True,
+        save_geojson=True,
+    ) -> None:
+        """ Wrap Xenium transcripts, cells and nuclei using Valis non-rigid micro-registration and save them.
 
-            if save_geojson:
-                write_geojson(warped_cells, os.path.join(save_dir, f'he_cell_seg.geojson'), '', chunk=True)
-        if save_nuclei:
-            warped_nuclei.to_parquet(os.path.join(save_dir, f'he_nucleus_seg.parquet'))
-            if save_geojson:
-                write_geojson(warped_nuclei, os.path.join(save_dir, f'he_nucleus_seg.geojson'), '', chunk=True)
-        if save_transcripts:
-            warped_transcripts.to_parquet(os.path.join(save_dir, f'aligned_transcripts.parquet'))
+        Args:
+            dapi_path (str): dapi slide filename in the Valis registrar
+            save_dir (str): where to save warped objects. Objects will be saved to:
+                - save_dir/he_cell_seg.parquet
+                - save_dir/he_nucleus_seg.parquet
+                - save_dir/aligned_transcripts
+            dapi_cells (str, optional): path to xenium .parquet cell bondaries, usually **/cell_boundaries.parquet. Defaults to None.
+            dapi_transcripts (str, optional): path to xenium .parquet nucleus bondaries, usually **/nucleus_boundaries.parquet. Defaults to None.
+            dapi_nuclei (str, optional): path to xenium .parquet transcripts, usually **/transcripts.parquet. Defaults to None.
+            use_dask (bool, optional): whenever to use dask to process larger than RAM data, highly recommended for all Xenium samples. Defaults to True.
+            verbose (bool, optional): verbose flag. Defaults to True.
+            save_parquet (bool, optional): whenever to save objects as parquet. Defaults to True.
+            save_geojson (bool, optional): whenever to save objects as geojson. Defaults to True.
+
+        Example:
+                >>> cells_path = "./xenium_out/cell_boundaries.parquet"
+                >>> st.warp_and_save_xenium_objects(
+                ...     save_dir="warped_xenium",
+                ...     dapi_path="morphology_focus.ome.tif",
+                ...     dapi_cells=cells_path,
+                ...     use_dask=True
+                ... )
+                >>> if cells is not None:
+                ...     print(f"Warped {len(cells)} cells using Dask: {type(cells)}")
+        """
+        if not self.path_registrar:
+            raise ValueError(f"No registration found for this xenium object, please execute `register_dapi_he` on this object first.")
+
+        
+        warp_and_save_xenium_objects(
+            self.path_registrar,
+            dapi_path,
+            save_dir,
+            dapi_cells,
+            dapi_transcripts,
+            dapi_nuclei,
+            use_dask,
+            verbose,
+            save_parquet,
+            save_geojson,
+        )
 
 
     def align_with_valis(self, save_dir: str, he_path: str, dapi_path: str, align_nuclei=True, align_cells=True, 
@@ -1211,7 +1293,7 @@ class HESTIterator:
         return len(self.id_list)
 
 def iter_hest(hest_dir: str, id_list: List[str] = None, **read_kwargs) -> HESTIterator:
-    """ Iterate through the HEST samples contained in `hest_dir`
+    """ Iterate through HEST samples contained in `hest_dir`
 
     Args:
         hest_dir (str): hest directory containing folders: st, wsis, metadata, tissue_seg (optional)

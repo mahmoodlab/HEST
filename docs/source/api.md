@@ -3,6 +3,8 @@
 
 ## Interact with HEST-1k
 
+See tutorial `2. Interacting with HEST`.
+
 ```{eval-rst}
 .. module:: hest
 ```
@@ -17,6 +19,8 @@
 ```
 
 ## Run HEST-Benchmark
+
+See tutorial `4. Running HEST Benchmark`.
 
 ```{eval-rst}
 .. module:: hest.bench
@@ -89,7 +93,7 @@ Methods used to pool Xenium transcripts and Visium-HD bins into square bins of c
 
 ## Readers to expand HEST-1k
 
-Readers to expand HEST-1k with additional samples.
+Readers to expand HEST-1k with additional samples. See tutorial `3. Assembling HEST Data`.
 
 ```{eval-rst}
 .. currentmodule:: hest.readers
@@ -116,6 +120,22 @@ Simplified API for nuclei segmentation
     :toctree: generated
 
     segment_cellvit
+```
+
+## IO
+
+```{eval-rst}
+.. currentmodule:: hest.io.seg_readers
+
+.. autosummary::
+    :toctree: generated
+
+    GDFReader
+    XeniumParquetCellReader
+    GDFParquetCellReader
+    XeniumTranscriptsReader
+    HESTXeniumTranscriptsReader
+    write_geojson
 ```
 
 
