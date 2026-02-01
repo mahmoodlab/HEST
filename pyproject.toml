@@ -40,6 +40,6 @@ where = ["src"]
 docs = [
     "myst-nb",
     "sphinx-design",
-    "sphinx-rtd-theme == 2.0.0"
+    "sphinx-rtd-theme == 2.0.0",
     "furo",
 ]
