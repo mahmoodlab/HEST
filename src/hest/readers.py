@@ -4,7 +4,7 @@ import json
 import math
 import os
 import shutil
-from typing import Optional, Union
+from typing import Optional, Tuple, Union
 import warnings
 import zipfile
 from abc import abstractmethod
@@ -20,7 +20,7 @@ from hest.HESTData import (HESTData, STHESTData, VisiumHDHESTData,
 from hestcore.wsi import wsi_factory
 from hest.io.seg_readers import XeniumParquetCellReader, read_gdf
 from hest.LazyShapes import LazyShapes
-from hest.segmentation.cell_segmenters import segment_cellvit
+from hest.segmentation.cell_segmenters import assign_spot_to_cell, expand_nuclei, read_adata, read_seg, read_spots_gdf, segment_cellvit, sum_per_cell
 from hest.utils import (SpotPacking, align_xenium_df, check_arg,
                         find_biggest_img,
                         find_first_file_endswith,
@@ -99,15 +99,12 @@ class VisiumHDReader(Reader):
         if square_16um_path is None:
             square_16um_path = find_first_file_endswith(os.path.join(path, 'binned_outputs'), 'square_016um')
             
-        square_2um_path = find_first_file_endswith(path, 'square_002um', anywhere=True)
-        
         metrics_path = find_first_file_endswith(path, 'metrics_summary.csv')
         
         st_object = self.read(
             img_path=os.path.join(path, img_filename),
             square_16um_path=square_16um_path,
             metrics_path=metrics_path,
-            square_2um_path=square_2um_path,
             **read_kwargs
         )
         
@@ -118,8 +115,8 @@ class VisiumHDReader(Reader):
         self, 
         img_path: str, 
         square_16um_path: str, 
+        square_2um_path: str,
         metrics_path: str = None,
-        square_2um_path: str = None,
         dst_bin_size_um: int = 128,
         chunk_len = 50000,
     ) -> VisiumHDHESTData:
@@ -128,8 +125,8 @@ class VisiumHDReader(Reader):
         Args:
             img_path (str): path to the WSI
             square_16um_path (str): path to a square_016um/ Visium HD folder.
+            square_2um_path (str): **Deprecated** path to a square_002um/ Visium HD folder.
             metrics_path (str, optional): path to a metrics_summary.csv Visium HD file.
-            square_2um_path (str, optional): path to a square_002um/ Visium HD folder.
             dst_bin_size_um (int, optional): 16um spots will be pooled to spots of this size (must be a multiple of the spot size: 16)
             chunk_len (str, optional): chunk length while pooling transcripts, a higher number will consume more RAM but might be faster.
 
@@ -138,11 +135,15 @@ class VisiumHDReader(Reader):
         """
         import scanpy as sc
         SPOT_SIZE = 16
+
+        warnings.warn(
+            "square_2um_path is deprecated and will be removed in a future version. ",
+            DeprecationWarning,
+            stacklevel=2
+        )
         
         if dst_bin_size_um % SPOT_SIZE != 0:
             raise ValueError(f"dst_bin_size_um must be a multiple of the spot size ({SPOT_SIZE})")
-        
-        self.square_2um_path = square_2um_path
         
         print("Loading the WSI... (can be slow for large images)")
         img, pixel_size_embedded = load_wsi(img_path)
@@ -1134,10 +1135,11 @@ def pool_transcripts_xenium(
     """ Pool a xenium transcript dataframe by square spots of `spot_size_um` micrometers.
 
     Args:
-        df (Union[pd.DataFrame, dd.DataFrame]): xenium transcipts dataframe containing columns:
+        df (Union[pd.DataFrame, dd.DataFrame]): xenium transcipts (dask) dataframe containing columns:
+
             - 'he_x' and 'he_y' indicating the pixel coordinates of each transcripts in the morphology image
             - 'feature_name' indicating the transcript name
-        pixel_size_he (float): pixel_size in um on the he image
+        pixel_size_he (float): pixel size in um/px of 'he_x' and 'he_y'
         spot_size_um: pooling rectangle width in um
         key_x: column name of pixel x coordinate of each transcript in `df`
         key_y: column name of pixel y coordinate of each transcript in `df`
@@ -1225,7 +1227,8 @@ def pool_transcripts_xenium(
 
 
 def pool_bins_visiumhd(adata: sc.AnnData, pixel_size: float, dst_bin_size_um=128, src_bin_size_um: Literal[2, 8, 16]=16, chunk_len=50000) -> sc.AnnData: # type: ignore
-    """ Pool a Visium HD (with a source resolution of `src_bin_size_um`) by square spots of `spot_size_um` micrometers.
+    """ Pools Visium HD bins from an initial resolution (src_bin_size_um) into larger square spots of spot_size_um. 
+    This performs a best-effort spatial downsampling (bin-to-bin aggregation).
 
     Args:
         adata (sc.AnnData): adata containing spot center coordiniates in `pxl_row_in_fullres` and `pxl_col_in_fullres`
@@ -1302,6 +1305,54 @@ def pool_bins_visiumhd(adata: sc.AnnData, pixel_size: float, dst_bin_size_um=128
     
     return adata
 
+
+def pool_bins_visiumhd_per_cell(
+    nuc_seg: Union[str, gpd.GeoDataFrame], 
+    bc_matrix: Union[str, sc.AnnData], 
+    path_bins_pos: str, 
+    pixel_size: float, 
+    save_dir: str = None, 
+    exp_um = 5, 
+    exp_nuclei: bool = True
+) -> Tuple[sc.AnnData, gpd.GeoDataFrame]:
+    """ Pool Visium-hd bins per cell.
+
+    Args:
+        nuc_seg (Union[str, gpd.GeoDataFrame]): nuclei segmentation
+        bc_matrix (Union[str, sc.AnnData]): bc_matrix representing Visium-hd bins.
+        path_bins_pos (str): path to `tissue_positions.parquet`
+        pixel_size (float): pixel size of path_bins_pos in um/px
+        save_dir (str, optional): whenever to save to aligned_cells.h5ad. Defaults to None.
+        exp_um (int, optional): nuclei expansion in um if exp_nuclei is True. Defaults to 5.
+        exp_nuclei (bool, optional): whenever to expand nuclei to derive cells. Defaults to True.
+
+    Returns:
+        Tuple[sc.AnnData, gpd.GeoDataFrame]: binned adata and (expended) nuclei
+    """
+    
+    verify_paths([bc_matrix, path_bins_pos])
+    
+
+    nuclei_gdf = read_seg(nuc_seg)
+    
+    if exp_nuclei:
+        cell_gdf = expand_nuclei(nuclei_gdf, pixel_size, exp_um=exp_um)
+    else:
+        cell_gdf = nuclei_gdf
+    
+    logger.info('Read bin positions...')
+    points_gdf = read_spots_gdf(path_bins_pos)
+    
+    assignment = assign_spot_to_cell(cell_gdf, points_gdf)
+    
+    adata = read_adata(bc_matrix)
+    
+    cell_adata = sum_per_cell(adata, assignment)
+    
+    if save_dir is not None:
+        cell_adata.write_h5ad(os.path.join(save_dir, 'aligned_cells.h5ad'))
+    
+    return cell_adata, cell_gdf
     
 
 def _process_cellvit(row, **cellvit_kwargs):

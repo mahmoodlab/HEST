@@ -6,6 +6,14 @@ import pandas as pd
 from hest.registration import warp_and_save_xenium_objects
 from dask.distributed import LocalCluster, Client, WorkerPlugin
 
+from hest.utils import get_path_from_meta_row
+
+id_list = [
+    'TENX195',
+]
+
+meta_df = pd.read_csv("/home/paul/Downloads/ST H&E datasets - 10XGenomics.csv")
+meta_df = meta_df[meta_df['id'].isin(id_list)]
 
 if __name__ == "__main__":
     from valis_hest.registration import init_jvm
@@ -31,23 +39,30 @@ if __name__ == "__main__":
     client = Client(cluster)
     client.register_worker_plugin(JVMPlugin(), name="jvm")
     
-    root = '/media/paul/ssd2/xenium/Fishing with Two Lines: A Hybrid Approach to Spatial Transcriptomic Discovery/PDLTMA06-11_5K/'
-
-    dapi_transcripts_path = os.path.join(root, 'transcripts.parquet')
-    dapi_nucleus_path = os.path.join(root, 'nucleus_boundaries.parquet')
-    dapi_cell_path = os.path.join(root, 'cell_boundaries.parquet')
-    save_dir = os.path.join(root, 'processed')
+    registrar_base = '/home/paul/HEST/results/'
     
-
-    warp_and_save_xenium_objects(
-        '/home/paul/HEST/results/PDLTMA06-11_5K/2026_01_16_16_34_20/data/_registrar.pickle',
-        'morphology_focus_0000.ome.tif',
-        save_dir,
-        dapi_transcripts=dapi_transcripts_path,
-        dapi_cells=dapi_cell_path,
-        dapi_nuclei=dapi_nucleus_path,
-        use_dask=True,
-        verbose=True,
-        save_geojson=True
-    )
     
+    for _, row in meta_df.iterrows():
+        base_path = get_path_from_meta_row(row)
+    
+        dapi_transcripts_path = os.path.join(base_path, 'transcripts.parquet')
+        dapi_nucleus_path = os.path.join(base_path, 'nucleus_boundaries.parquet')
+        dapi_cell_path = os.path.join(base_path, 'cell_boundaries.parquet')
+        save_dir = os.path.join(base_path, 'processed')
+        
+        dirname = list(os.listdir(os.path.join(registrar_base, row['id'])))[0]
+        
+
+        warp_and_save_xenium_objects(
+            os.path.join(registrar_base, row['id'], dirname, 'data', '_registrar.pickle'),
+            'ch0000_dapi.ome.tif',
+            #'morphology_focus_0000.ome.tif',
+            save_dir,
+            dapi_transcripts=dapi_transcripts_path,
+            dapi_cells=dapi_cell_path,
+            dapi_nuclei=dapi_nucleus_path,
+            use_dask=True,
+            verbose=True,
+            save_geojson=True
+        )
+        

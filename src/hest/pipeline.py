@@ -38,8 +38,6 @@ def preprocess_cells_visium_hd(
     nuclei_path = None
 ) -> Tuple[sc.AnnData, gpd.GeoDataFrame, gpd.GeoDataFrame]:
     
-
-    
     if nuclei_path is None:
         segmenter = cell_segmenter_factory(segment_method)
         logger.info('Segmenting cells...')

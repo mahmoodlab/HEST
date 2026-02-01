@@ -38,7 +38,7 @@ from .utils import (ALIGNED_HE_FILENAME, check_arg, deprecated,
 
 class HESTData:
     """
-    Object representing a Spatial Transcriptomics sample along with a full resolution H&E image and associated metadata
+    Object representing a (pooled) Spatial Transcriptomics sample along with a full resolution H&E image and associated metadata
     """
     
     shapes: List[LazyShapes] = []
@@ -72,7 +72,7 @@ class HESTData:
         shapes: List[LazyShapes]=[]
     ):
         """
-        class representing a single ST profile + its associated WSI image
+        class representing a single (pooled) ST profile + its associated WSI image
         
         Args:
             adata (sc.AnnData): Spatial Transcriptomics data in a scanpy Anndata object
@@ -81,6 +81,7 @@ class HESTData:
                 If a str is passed, the image is opened with cucim if available and OpenSlide otherwise
             pixel_size (float): pixel_size of WSI im um/px, this pixel size will be used to perform operations on the slide, such as patching and segmenting
             meta (Dict): metadata dictionary containing information such as the pixel size, or QC metrics attached to that sample
+            tissue_contours (GeoDataFrame): tissue contours
             shapes (List[LazyShapes]): dictionary of shapes, note that these shapes will be lazily loaded. Default: []
         """
         import scanpy as sc
@@ -304,17 +305,6 @@ class HESTData:
     
     def save_tissue_contours(self, save_dir: str, name: str) -> None:
         self.tissue_contours.to_file(os.path.join(save_dir, name + '_contours.geojson'), driver="GeoJSON")   
-
-    @deprecated
-    def get_tissue_mask(self) -> np.ndarray:
-        """ Deprecated. Return existing tissue segmentation mask if it exists, raise an error if it doesn't exist
-
-        Returns:
-            np.ndarray: an array with the same resolution as the WSI image, where 1 means tissue and 0 means background
-        """
-        
-        self.__verify_mask()
-        return self.tissue_mask
     
 
     def dump_patches(
@@ -407,42 +397,12 @@ class HESTData:
                 img, x, y = patcher[i]
                 Image.fromarray(img).save(os.path.join(qc_dir, f'patch_vis_qc_{i}_{x}_{y}.jpg'))
                 
-            
-    
-    def __verify_mask(self):
-        if self.tissue_contours is None:
-            raise Exception("No existing tissue mask for that sample, compute the tissue mask with self.segment_tissue()")        
-    
     
     def get_shapes(self, name, coordinate_system):
         for shape in self.shapes:
             if shape.name == name and shape.coordinate_system == coordinate_system:
                 return shape
         return None
-    
-
-    @deprecated
-    def get_tissue_contours(self) -> Dict[str, list]:
-        """*Deprecated* use `self.tissue_contours` instead. 
-        
-        Get the tissue contours and holes
-
-        Returns:
-            Dict[str, list]: dictionnary of contours and holes in the tissue
-        """
-        
-        self.__verify_mask()
-        
-
-        contours_tissue = self.tissue_contours.geometry.values
-        contours_tissue = [list(c.exterior.coords) for c in contours_tissue]
-        contours_holes = [[] for _ in range(len(contours_tissue))]
-        
-        
-        asset_dict = {'holes': contours_holes, 
-                      'tissue': contours_tissue, 
-                      'groups': None}
-        return asset_dict
     
     
     @property
@@ -462,12 +422,6 @@ class HESTData:
         )
     
     
-    @deprecated
-    def save_vis(self, save_dir, name) -> None:
-        """ *Deprecated* use save_tissue_vis instead"""
-        vis = self.get_tissue_vis()
-        vis.save(os.path.join(save_dir, f'{name}_vis.jpg'))
-        
     def save_tissue_vis(self, save_dir: str, name: str) -> None:
         """ Save a visualization of the tissue segmentation on top of the downscaled H&E
 
@@ -701,7 +655,13 @@ class HESTData:
         
         return SpatialData(tables=new_table, images=images, shapes=shapes)
     
-    def ensembl_id_to_gene(self):
+    def ensembl_id_to_gene(self) -> None:
+        """
+        Converts ensemble gene IDs using Biomart annotations and filter out genes with no matching Ensembl ID for the current object
+        
+        Args: 
+            filter_na (bool): whenever to filter genes that are not valid ensemble IDs. Defaults to False.
+        """
         ensembl_id_to_gene(self)
 
     
@@ -717,6 +677,10 @@ class VisiumHESTData(HESTData):
         super().__init__(adata, img, pixel_size, meta, tissue_contours=tissue_contours, shapes=shapes)
 
 class VisiumHDHESTData(HESTData): 
+    """
+    Object representing a pooled Visium HD sample along with a full resolution H&E image and associated metadata
+    """
+
     def __init__(self, 
         adata: sc.AnnData, # type: ignore
         img: Union[np.ndarray, str],

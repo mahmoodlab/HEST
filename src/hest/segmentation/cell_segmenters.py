@@ -10,18 +10,13 @@ from typing import Tuple, Union
 
 import geopandas as gpd
 import numpy as np
-import openslide
 import pandas as pd
 from hestcore.segmentation import get_path_relative
-from hestcore.wsi import wsi_factory
 from loguru import logger
-from shapely import Polygon
-from shapely.affinity import translate
 from tqdm import tqdm
 
 from hest.io.seg_readers import GeojsonCellReader
-from hest.utils import deprecated, get_n_threads, verify_paths
-from hestcore.wsi import wsi_factory
+from hest.utils import get_n_threads
 from hest.utils import verify_paths
 
 
@@ -218,7 +213,7 @@ def segment_cellvit(
     batch_size=2, 
     gpu_ids=[0], 
     save_dir='results/segmentation',
-    model='CellViT-SAM-H-x20.pth'
+    model: str='CellViT-SAM-H-x20.pth'
 ) -> str:
     """ Segment nuclei with CellViT
 
@@ -230,7 +225,15 @@ def segment_cellvit(
         batch_size (int, optional): batch_size. Defaults to 2.
         gpu_ids (List[int], optional): list of gpu ids to use during inference. Defaults to [0].
         save_dir (str, optional): directory where to save the output. Defaults to 'results/segmentation'.
-        model (str, optional): name of model weights to use. Defaults to 'CellViT-SAM-H-x20.pth'.
+        model (str, optional): name of model weights to use. Defaults to 'CellViT-SAM-H-x20.pth'. List of weights available:
+
+            - 'CellViT-256-x20.pth' 
+            - 'CellViT-256-x40.pth'
+            - 'CellViT-SAM-H-x40.pth' 
+            - 'CellViT-SAM-H-x20.pth'
+
+    Returns:
+        str: path to the result segmentation .geojson
     """
     segmenter = CellViTSegmenter()
     return segmenter.segment_cells(
@@ -428,12 +431,35 @@ def bin_per_cell(
     path_bins_pos: str, 
     pixel_size: float, 
     save_dir: str = None, 
-    name = '',
     exp_um = 5, 
     exp_nuclei: bool = True
 ) -> Tuple[sc.AnnData, gpd.GeoDataFrame]:
+    """ Bin Visium-hd sub-bins per cell.
+
+    **Deprecated** use hest.readers.pool_bins_visiumhd_per_cell instead
+
+    Args:
+        nuc_seg (Union[str, gpd.GeoDataFrame]): nuclei segmentation
+        bc_matrix (Union[str, sc.AnnData]): bc_matrix representing Visium-hd bins.
+        path_bins_pos (str): path to `tissue_positions.parquet`
+        pixel_size (float): pixel size of path_bins_pos in um/px
+        save_dir (str, optional): whenever to save to aligned_cells.h5ad. Defaults to None.
+        exp_um (int, optional): nuclei expansion in um if exp_nuclei is True. Defaults to 5.
+        exp_nuclei (bool, optional): whenever to expand nuclei to derive cells. Defaults to True.
+
+    Returns:
+        Tuple[sc.AnnData, gpd.GeoDataFrame]: binned adata and (expended) nuclei
+    """
+    warnings.warn(
+        "bin_per_cell is deprecated and will be removed in a future version. "
+        "Please use 'pool_bins_visiumhd_per_cell' instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    
     verify_paths([bc_matrix, path_bins_pos])
     
+
     nuclei_gdf = read_seg(nuc_seg)
     
     if exp_nuclei:
@@ -492,197 +518,3 @@ def sum_per_cell(adata: sc.AnnData, assignment: gpd.GeoDataFrame):
         
     cell_adata = sc.AnnData(X=summed_counts.tocsr() ,obs=pd.DataFrame(cell_ids, columns=['cell_id'], index=cell_ids),var=adata.var)
     return cell_adata
-
-
-class AlignmentRefiner:
-    
-    @abstractmethod
-    def refine(self, centroids: gpd.GeoDataFrame, polygons: gpd.GeoDataFrame, class_key='class') -> gpd.GeoDataFrame:
-        pass
-
-class RegAlignmentRefiner:
-    
-    def refine(self, centroids: gpd.GeoDataFrame, polygons: gpd.GeoDataFrame, class_key='class') -> gpd.GeoDataFrame:
-        pass
-    
-    
-class SegAlignmentRefiner(AlignmentRefiner):
-    
-    def refine(self, centroids: gpd.GeoDataFrame, polygons: gpd.GeoDataFrame, class_key='class') -> gpd.GeoDataFrame:
-        merged = centroids.sjoin(polygons, how='inner', predicate='within')
-        point_in_poly_idx = merged.index
-        poly_cont_point_idx = merged['index_right']
-        
-        
-        filt_centroids = centroids.drop(point_in_poly_idx)
-        filt_poly = polygons.drop(poly_cont_point_idx)
-        
-        nearest_idx = filt_centroids.geometry.centroid.sindex.nearest(filt_poly.geometry)[1]
-        filt_poly[class_key] = filt_centroids.iloc[nearest_idx][class_key].values
-        
-        matched_poly = polygons.loc[poly_cont_point_idx]
-        cont = matched_poly.sjoin(centroids, how='left', predicate='contains')
-        cont = cont.drop_duplicates(keep='last')
-        matched_poly[class_key] = cont[f'{class_key}_right'].values
-        
-        gdf = gpd.GeoDataFrame(pd.concat([matched_poly, filt_poly], ignore_index=True))
-        
-        return gdf
-    
-    
-def alignment_refiner_factory(method) -> AlignmentRefiner:
-    if method == 'seg':
-        return SegAlignmentRefiner()
-    elif method == 'reg':
-        return RegAlignmentRefiner()
-    
-    
-def refine_alignment_reg(
-    source_path: str, 
-    target_path: str,
-    output_dir: str,
-):  
-    
-    
-    import deeperhistreg
-
-    ### Define Params ###
-    registration_params : dict = deeperhistreg.configs.default_initial_nonrigid()
-    # Alternative: # registration_params = deeperhistreg.configs.load_parameters(config_path) # To load config from JSON file
-    save_displacement_field : bool = True # Whether to save the displacement field (e.g. for further landmarks/segmentation warping)
-    copy_target : bool = True # Whether to copy the target (e.g. to simplify the further analysis)
-    delete_temporary_results : bool = True # Whether to keep the temporary results
-    case_name : str = "Example_Nonrigid" # Used only if the temporary_path is important, otherwise - provide whatever
-    temporary_path = None # Will use default if set to None
-
-    ### Create Config ###
-    config = dict()
-    config['source_path'] = source_path
-    config['target_path'] = target_path
-    config['output_path'] = output_dir
-    config['registration_parameters'] = registration_params
-    config['case_name'] = case_name
-    config['save_displacement_field'] = save_displacement_field
-    config['copy_target'] = copy_target
-    config['delete_temporary_results'] = delete_temporary_results
-    config['temporary_path'] = temporary_path
-    
-    ### Run Registration ###
-    deeperhistreg.run_registration(**config)
-  
-    
-    
-def refine_alignment(centroids, polygons, class_key='class', method='seg') -> gpd.GeoDataFrame:
-    return alignment_refiner_factory(method).refine(centroids, polygons, class_key=class_key)
-
-@deprecated
-def refine_with_anchor(
-    gdf: gpd.GeoDataFrame, 
-    anchor_gdf: gpd.GeoDataFrame, 
-    pixel_size: float, 
-    img: Union[str, np.ndarray, openslide.OpenSlide, CuImage],  # type: ignore
-    patch_size_um=200,
-    max_offset=5, 
-    lower_cut=0.4, 
-    upper_cut=0.6
-) -> gpd.GeoDataFrame:
-    
-    if isinstance(anchor_gdf.geometry[0], Polygon):
-        logger.warning('anchor_gdf should contain points, found polygons, converting to their centroid')
-        anchor_gdf = anchor_gdf.copy().centroid
-    
-    wsi = wsi_factory(img)
-    width, height = wsi.get_dimensions()
-    patch_size_pxl = patch_size_um / pixel_size
-    n_col = round(np.ceil(width / patch_size_pxl))
-    n_row = round(np.ceil(height / patch_size_pxl))
-    
-    center_gdf = gdf.copy()
-    center_gdf.geometry = center_gdf.geometry.centroid
-    center_gdf['polygons'] = gdf.geometry
-    
-    ## TODO should match anchors to xenium cells not the other way around
-    
-    # get nearest anchor for every cell
-    nearest_idx = center_gdf.geometry.centroid.sindex.nearest(anchor_gdf.geometry)[1]
-    # index of nearest cell for each anchor
-    center_gdf = center_gdf.iloc[nearest_idx].reset_index()
-    
-    #center_gdf['nearest_idx'] = nearest_idx
-    
-    points_anchor = anchor_gdf.geometry
-    center_gdf['offset_x'] = points_anchor.x.values - center_gdf.geometry.x.values
-    center_gdf['offset_y'] = points_anchor.y.values - center_gdf.geometry.y.values
-    
-    
-    polygons = []
-    
-    for i in range(n_row):
-        for j in range(n_col):
-            x_left = j * patch_size_pxl
-            x_right = x_left + patch_size_pxl
-            y_top = i * patch_size_pxl
-            y_bottom = y_top + patch_size_pxl
-            polygons.append(Polygon([(x_left, y_top), (x_right, y_top), (x_right, y_bottom), (x_left, y_bottom)]))
-            
-    grid = gpd.GeoDataFrame(geometry=polygons)
-    
-    joined = gpd.sjoin(grid, center_gdf, how='left', predicate='contains')
-    joined = joined.dropna()
-    joined['index_col'] = joined.index
-    joined = joined.rename(columns={
-        'index_right': 'index_centroid'
-    })
-    
-    def trimmed_mean(series):
-        q1 = series.quantile(lower_cut)
-        q3 = series.quantile(upper_cut)
-        filtered_series = series[(series > q1) & (series < q3)]
-        mean_value = filtered_series.mean()
-        return mean_value
-    
-    logger.info('Remove anchor outliers...')
-    
-    grouped = joined.groupby('index_col').agg({
-        'offset_x': trimmed_mean,
-        'offset_y': trimmed_mean
-    })
-    grouped = grouped.fillna(0)
-    
-    
-    joined['pooled_offset_x'] = grouped['offset_x'].clip(-max_offset, max_offset)
-    joined['pooled_offset_y'] = grouped['offset_y'].clip(-max_offset, max_offset)
-    
-    joined = joined.fillna(0)
-    joined['class'] = joined.index
-    
-    def shift_polygon(row):
-        return translate(row.geometry, xoff=row['pooled_offset_x'], yoff=row['pooled_offset_y'])
-
-
-    #joined.geometry = joined.apply(shift_polygon, axis=1)
-    
-    joined.geometry = center_gdf.geometry.iloc[joined['index_centroid'].astype(int).values].values
-    joined['class'] = (joined['pooled_offset_x'] + joined['pooled_offset_y']).round()
-    
-    logger.info('Shift polygons...')
-    
-    joined.geometry = joined['polygons']
-    
-    offsets = joined[~joined.index.duplicated(keep='first')]
-    
-    gdf_copy = gdf.copy()
-    gdf_copy['orig_polygons'] = gdf_copy.geometry
-    gdf_copy.geometry = gdf_copy.geometry.centroid
-    ## Add unmatched cells back into the dataframe and set offset based on neighbors
-    all_cells = gpd.sjoin(grid, gdf_copy, how='left', predicate='contains').dropna().merge(offsets, left_index=True, right_index=True, how='inner')
-    all_cells = gpd.GeoDataFrame(all_cells, geometry=all_cells['orig_polygons'])
-    all_cells['class'] = all_cells['class_y']
-    
-    
-    all_cells.geometry = all_cells.apply(shift_polygon, axis=1)
-    
-    
-    all_cells = all_cells.drop(columns=['offset_x', 'offset_y', 'pooled_offset_x', 'pooled_offset_y'])
-    
-    return all_cells

@@ -33,6 +33,8 @@ See tutorial `4. Running HEST Benchmark`.
 
 ## HESTData class
 
+Core object representing a (pooled) Spatial Transcriptomics sample along with a full resolution H&E image and associated metadata. See tutorial `2. Interacting with HEST`.
+
 ```{eval-rst}
 .. module:: hest
 ```
@@ -58,25 +60,22 @@ Methods used to pool Xenium transcripts and Visium-HD bins into square bins of c
    
     pool_transcripts_xenium
     pool_bins_visiumhd
+    pool_bins_visiumhd_per_cell
 ```
 
-## Batch effect visualization/correction
+## CellViT segmentation
+Simplified API for nuclei segmentation
+
 
 ```{eval-rst}
-.. module:: hest
-```
-
-```{eval-rst}
-.. currentmodule:: hest.batch_effect
+.. currentmodule:: hest.segmentation.cell_segmenters
 
 .. autosummary::
     :toctree: generated
-   
-    filter_hest_stromal_housekeeping
-    get_silhouette_score
-    plot_umap
-    correct_batch_effect
+
+    segment_cellvit
 ```
+
 
 ## Gene names manipulation
 
@@ -108,20 +107,6 @@ Readers to expand HEST-1k with additional samples. See tutorial `3. Assembling H
     STReader
 ```
 
-
-## CellViT segmentation
-Simplified API for nuclei segmentation
-
-
-```{eval-rst}
-.. currentmodule:: hest.segmentation.cell_segmenters
-
-.. autosummary::
-    :toctree: generated
-
-    segment_cellvit
-```
-
 ## IO
 
 ```{eval-rst}
@@ -136,6 +121,24 @@ Simplified API for nuclei segmentation
     XeniumTranscriptsReader
     HESTXeniumTranscriptsReader
     write_geojson
+```
+
+## Batch effect visualization/correction
+
+```{eval-rst}
+.. module:: hest
+```
+
+```{eval-rst}
+.. currentmodule:: hest.batch_effect
+
+.. autosummary::
+    :toctree: generated
+   
+    filter_hest_stromal_housekeeping
+    get_silhouette_score
+    plot_umap
+    correct_batch_effect
 ```
 
 
