@@ -40,7 +40,7 @@ For the documentations of core WSI manipulations methods please visit the [hestc
 
 .. card:: Tutorials
     :link: tutorials
-    :link-type: url
+    :link-type: doc
 
     Concrete examples on how to use ``hest``.
 ```
