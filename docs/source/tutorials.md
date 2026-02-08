@@ -5,6 +5,7 @@ This section contains step-by-step guides for using the HEST library:
 ```{eval-rst}
 .. toctree::
     :maxdepth: 2
+    :hidden:
     :caption: Available Tutorials:
 
     1. Downloading HEST-1k <tutorials/1-Downloading-HEST-1k.ipynb>
