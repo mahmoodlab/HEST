@@ -37,8 +37,8 @@ intersphinx_mapping = {
     "shapely": ("https://shapely.readthedocs.io/en/stable", None),
 }
 intersphinx_disabled_reftypes = ["*"]
-
-
+html_favicon = "_static/icon.png"
+html_logo = "_static/icon.png"
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
