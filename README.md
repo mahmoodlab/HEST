@@ -11,7 +11,7 @@ Welcome to the official GitHub repository of the HEST-Library introduced in *"HE
 <br/>
 
 ### What does this repository provide?
-- **HEST-1k:** Free access to <b>HEST-1K</b>, a dataset of 1,255 paired Spatial Transcriptomics samples with HE-stained whole-slide images 
+- **HEST-1k:** Free access to <b>HEST-1K</b>, a dataset of 1,276 paired Spatial Transcriptomics samples with HE-stained whole-slide images 
 - **HEST-Library:** A series of helpers to assemble new ST samples (ST, Visium, Visium HD, Xenium) and work with HEST-1k (ST analysis, batch effect viz and correction, etc.)
 - **HEST-Benchmark:** A new benchmark to assess the predictive performance of foundation models for histology in predicting gene expression from morphology 
 
@@ -20,6 +20,8 @@ HEST-1k, HEST-Library, and HEST-Benchmark are released under the Attribution-Non
 <br/>
 
 ## Updates
+
+- **8.02.26**: 18 new Xenium (including Xenium 5k) samples added to HEST (v1.3.0)!
 
 - **6.01.26**: 27 new high-quality Visium HD samples added to HEST (v1.2.0)!
 
@@ -35,7 +37,7 @@ HEST-1k, HEST-Library, and HEST-Benchmark are released under the Attribution-Non
 
 To download/query HEST-1k, follow the tutorial [1-Downloading-HEST-1k.ipynb](https://github.com/mahmoodlab/HEST/blob/main/tutorials/1-Downloading-HEST-1k.ipynb) or follow instructions on [Hugging Face](https://huggingface.co/datasets/MahmoodLab/hest).
 
-**NOTE:** The entire dataset weighs more than 1TB but you can easily download a subset by querying per id, organ, species...
+**NOTE:** The entire dataset weighs more than 2TB but you can easily download a subset by querying per id, organ, species...
 
 
 ## HEST-Library installation
@@ -43,7 +45,7 @@ To download/query HEST-1k, follow the tutorial [1-Downloading-HEST-1k.ipynb](htt
 ```
 git clone https://github.com/mahmoodlab/HEST.git
 cd HEST
-conda create -n "hest" python=3.10
+conda create -n "hest" python=3.11
 conda activate hest
 pip install -e .
 ```

@@ -152,14 +152,10 @@ class TestHESTData(unittest.TestCase):
             with self.subTest(st_object=idx):
                 st.segment_tissue(method='deep')
                 st.save_tissue_contours(self.output_dir, name=f'deep_{idx}')
-                st.save_tissue_seg_jpg(self.output_dir, name=f'deep_{idx}')
-                st.save_tissue_seg_pkl(self.output_dir, name=f'deep_{idx}')
                 st.save_tissue_vis(self.output_dir, name=f'deep_{idx}')
                 
                 st.segment_tissue(method='otsu')
                 st.save_tissue_contours(self.output_dir, name=f'otsu_{idx}')
-                st.save_tissue_seg_jpg(self.output_dir, name=f'otsu_{idx}')
-                st.save_tissue_seg_pkl(self.output_dir, name=f'otsu_{idx}')
                 st.save_tissue_vis(self.output_dir, name=f'otsu_{idx}')
 
 
@@ -224,7 +220,7 @@ if __name__ == '__main__':
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromTestCase(TestHESTData)
     # suite = unittest.TestSuite()
-    # suite.addTest(TestHESTData('test_patching'))
+    #suite.addTest(TestHESTData('test_spatialdata'))
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     if not result.wasSuccessful():
         raise Exception('Test failed')

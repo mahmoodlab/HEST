@@ -653,7 +653,7 @@ class HESTData:
         else:
             new_table = self.adata.copy()
         
-        return SpatialData(tables=new_table, images=images, shapes=shapes)
+        return SpatialData(tables={'table': new_table}, images=images, shapes=shapes)
     
     def ensembl_id_to_gene(self) -> None:
         """
