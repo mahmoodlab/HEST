@@ -12,6 +12,8 @@ build:
   jobs:
     post_checkout:
       - ln -s tutorials docs/source/tutorials
+      - ls docs/source
+      - ls docs/source/tutorials
 
 python:
   install:
