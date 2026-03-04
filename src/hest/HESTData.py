@@ -10,10 +10,14 @@ from typing import Dict, List, Union
 
 import cv2
 import geopandas as gpd
+import h5py
 import numpy as np
 from loguru import logger
-from hestcore.wsi import (WSI, CucimWarningSingleton, NumpyWSI,
-                          wsi_factory)
+from hest.trident_compat import (WSI, CucimWarningSingleton,
+                                 apply_otsu_thresholding, mask_to_gdf,
+                                 segment_tissue_deep, wsi_factory, wsi_to_numpy)
+from hest.path_utils import get_path_relative
+from trident.IO import save_h5
 from loguru import logger
 
 from hest.io.seg_readers import TissueContourReader, write_geojson
@@ -25,8 +29,6 @@ try:
 except Exception:
     print("Couldn't import openslide, verify that openslide is installed on your system, https://openslide.org/download/")
 import pandas as pd
-from hestcore.segmentation import (apply_otsu_thresholding, mask_to_gdf,
-                                   save_pkl, segment_tissue_deep, get_path_relative)
 from PIL import Image
 from shapely import Point
 from tqdm import tqdm
@@ -88,7 +90,7 @@ class HESTData:
         
         self.adata = adata
         
-        self.wsi = wsi_factory(img)
+        self.wsi = wsi_factory(img, mpp=pixel_size)
             
         self.meta = meta
         self._verify_format(adata)
@@ -97,7 +99,11 @@ class HESTData:
         self._tissue_contours = tissue_contours
         
         if 'total_counts' not in self.adata.var_names and len(self.adata) > 0:
-            sc.pp.calculate_qc_metrics(self.adata, inplace=True)
+            # Some public samples contain zero-count spots; scanpy emits a benign
+            # runtime warning while computing QC ratios for those rows.
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message="invalid value encountered in divide", category=RuntimeWarning)
+                sc.pp.calculate_qc_metrics(self.adata, inplace=True)
         
 
     @staticmethod
@@ -171,7 +177,7 @@ class HESTData:
     
     def load_wsi(self) -> None:
         """Load the full WSI in memory"""
-        self.wsi = NumpyWSI(self.wsi.numpy())
+        self.wsi = wsi_factory(wsi_to_numpy(self.wsi), mpp=self.pixel_size)
     
         
     def save(self, path: str, save_img=True, pyramidal=True, bigtiff=False, plot_pxl_size=False, 
@@ -195,17 +201,30 @@ class HESTData:
         os.makedirs(path, exist_ok=True)
         
         if save_adata:
+            # Ensure image payloads in `uns` are serializable by AnnData/HDF5.
+            spatial = self.adata.uns.get('spatial', {})
+            st_dict = spatial.get('ST', {})
+            images = st_dict.get('images', {})
+            downscaled = images.get('downscaled_fullres')
+            if isinstance(downscaled, Image.Image):
+                images['downscaled_fullres'] = np.asarray(downscaled)
+
             try:
                 self.adata.write(os.path.join(path, 'aligned_adata.h5ad'))
-            except:
-                # workaround from https://github.com/theislab/scvelo/issues/255
+            except Exception:
+                # Legacy workaround from https://github.com/theislab/scvelo/issues/255
                 import traceback
                 traceback.print_exc()
-                self.adata.__dict__['_raw'].__dict__['_var'] = self.adata.__dict__['_raw'].__dict__['_var'].rename(columns={'_index': 'features'})
-                self.adata.write(os.path.join(path, 'aligned_adata.h5ad'))
+                raw_obj = getattr(self.adata, "_raw", None)
+                raw_var = getattr(raw_obj, "_var", None) if raw_obj is not None else None
+                if raw_var is not None and '_index' in raw_var.columns:
+                    raw_obj._var = raw_var.rename(columns={'_index': 'features'})
+                    self.adata.write(os.path.join(path, 'aligned_adata.h5ad'))
+                else:
+                    raise
         
         if save_img:
-            img = self.wsi.numpy()
+            img = wsi_to_numpy(self.wsi)
         self.meta['adata_nb_col'] = len(self.adata.var_names)
         
         width, height = self.wsi.get_dimensions()
@@ -291,8 +310,8 @@ class HESTData:
         
             width, height = self.wsi.get_dimensions()
             scale = thumbnail_width / width
-            thumbnail = self.wsi.get_thumbnail(round(width * scale), round(height * scale))
-            mask = apply_otsu_thresholding(thumbnail).astype(np.uint8)
+            thumbnail = self.wsi.get_thumbnail((round(width * scale), round(height * scale)))
+            mask = apply_otsu_thresholding(np.array(thumbnail)).astype(np.uint8)
             mask = 1 - mask
             tissue_mask = np.round(cv2.resize(mask, (width, height))).astype(np.uint8)
             
@@ -304,7 +323,16 @@ class HESTData:
     
     
     def save_tissue_contours(self, save_dir: str, name: str) -> None:
-        self.tissue_contours.to_file(os.path.join(save_dir, name + '_contours.geojson'), driver="GeoJSON")   
+        contours = self.tissue_contours.copy()
+        if contours.crs is None:
+            contours = contours.set_crs("EPSG:3857")
+        contours.to_file(os.path.join(save_dir, name + '_contours.geojson'), driver="GeoJSON")
+
+    @deprecated
+    def save_tissue_seg_pkl(self, save_dir: str, name: str) -> None:
+        """Backward-compatible alias kept for old tutorials."""
+        os.makedirs(save_dir, exist_ok=True)
+        self.tissue_contours.to_pickle(os.path.join(save_dir, name + "_contours.pkl"))
     
 
     def dump_patches(
@@ -354,7 +382,6 @@ class HESTData:
         
         src_pixel_size = self.pixel_size
         
-        patch_count = 0
         h5_path = os.path.join(patch_save_dir, name + '.h5')
 
         assert len(adata.obs) == len(adata.obsm['spatial'])
@@ -380,11 +407,37 @@ class HESTData:
         else:
             valid_barcodes = barcodes
 
-        patcher.to_h5(h5_path, extra_assets={'barcode': valid_barcodes})
+        coords = np.asarray(patcher.valid_coords, dtype=np.int32)
+        assets = {"coords": coords}
+        if not coords_only:
+            imgs = np.stack([patcher[i][0] for i in range(len(patcher))], axis=0).astype(np.uint8)
+            assets["img"] = imgs
+        if len(valid_barcodes) > 0:
+            max_len = max(len(str(x)) for x in valid_barcodes)
+            encoded_barcodes = np.array([str(x).encode("utf-8") for x in valid_barcodes], dtype=f"S{max_len}")
+        else:
+            encoded_barcodes = np.array([], dtype="S1")
+        assets["barcodes"] = encoded_barcodes
+
+        src_mag = self.wsi.mag if self.wsi.mag is not None else (10.0 / src_pixel_size)
+        target_mag = 10.0 / dst_pixel_size
+        coords_attrs = {
+            "patch_size": int(target_patch_size),
+            "patch_size_level0": int(round(target_patch_size * (dst_pixel_size / src_pixel_size))),
+            "level0_magnification": float(src_mag),
+            "target_magnification": float(target_mag),
+            "overlap": 0,
+            "name": str(name),
+            "savetodir": str(patch_save_dir),
+            "level0_width": int(self.wsi.width),
+            "level0_height": int(self.wsi.height),
+        }
+        save_h5(h5_path, assets=assets, attributes={"coords": coords_attrs}, mode="w")
 
         if dump_visualization:
-            patcher.save_visualization(os.path.join(patch_save_dir, name + '_patch_vis.png'), dpi=400)
+            patcher.visualize().save(os.path.join(patch_save_dir, name + '_patch_vis.png'))
             
+        patch_count = len(patcher)
         if verbose:
             print(f'found {patch_count} valid patches')
             
@@ -395,6 +448,8 @@ class HESTData:
             random_idx = np.random.randint(0, len(patcher), size=min(nb_qc_patches, len(patcher)))
             for i in random_idx:
                 img, x, y = patcher[i]
+                if not isinstance(img, np.ndarray):
+                    img = np.array(img)
                 Image.fromarray(img).save(os.path.join(qc_dir, f'patch_vis_qc_{i}_{x}_{y}.jpg'))
                 
     
@@ -414,12 +469,29 @@ class HESTData:
 
 
     def get_tissue_vis(self):
-         return self.wsi.get_tissue_vis(
-            self.tissue_contours,
-            fill_color=(0, 255, 0),
-            target_width=1000,
-            seg_display=True,
-        )
+        from trident.IO import overlay_gdf_on_thumbnail
+
+        width, height = self.wsi.get_dimensions()
+        target_width = 1000
+        target_height = int(target_width * height / width)
+        thumbnail = np.array(self.wsi.get_thumbnail((target_width, target_height)))
+        if self.tissue_contours is not None and len(self.tissue_contours) > 0:
+            import tempfile
+
+            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+                tmp_path = tmp.name
+            try:
+                overlay_gdf_on_thumbnail(
+                    self.tissue_contours,
+                    thumbnail,
+                    tmp_path,
+                    scale=target_width / width,
+                    tissue_color=(0, 255, 0),
+                )
+                return Image.open(tmp_path).convert("RGB")
+            finally:
+                os.remove(tmp_path)
+        return Image.fromarray(thumbnail)
     
     
     def save_tissue_vis(self, save_dir: str, name: str) -> None:
@@ -501,6 +573,12 @@ class HESTData:
         INSTANCE_KEY = "instance_id"
         SPOT_DIAMETER_FULLRES_DEFAULT = 10
         
+        def _get_best_level_for_downsample(wsi, downsample: float) -> int:
+            if hasattr(wsi, "get_best_level_for_downsample"):
+                return wsi.get_best_level_for_downsample(downsample)
+            level, _ = wsi.get_best_level_and_custom_downsample(downsample)
+            return level
+
         images = {}
         shapes = {}
         spot_diameter_fullres_list = []
@@ -521,8 +599,8 @@ class HESTData:
                     else: 
                         pixel_size=self.meta['pixel_size_um_estimated']
                         ds_factor = 4/pixel_size # proxy for visium hires scale factor
-                        ds_level = self.wsi.get_best_level_for_downsample(ds_factor)
-                        tissue_hires_scalef = 1/self.wsi.level_downsamples()[ds_level]
+                        ds_level = _get_best_level_for_downsample(self.wsi, ds_factor)
+                        tissue_hires_scalef = 1 / self.wsi.level_downsamples[ds_level]
                         
                     if TISSUE_LOWRES_SCALEF in scalefactors:
                         tissue_lowres_scalef = scalefactors[TISSUE_LOWRES_SCALEF]
@@ -536,14 +614,14 @@ class HESTData:
 
                         # load wsi
                         def read_hest_wsi(wsi: WSI, width, height): 
-                            return wsi.get_thumbnail(width, height)
+                            return np.array(wsi.get_thumbnail((width, height)))
         
                         if fullres: 
                             full_width, full_height = self.wsi.get_dimensions()
                             fullres = from_delayed(delayed(read_hest_wsi)(self.wsi, full_width, full_height), shape=(full_height, full_width, 3), dtype=np.int8)
                         else: 
                             fullres=None
-                        hires_width, hires_height = self.wsi.level_dimensions()[ds_level]
+                        hires_width, hires_height = self.wsi.level_dimensions[ds_level]
                         hires = from_delayed(delayed(read_hest_wsi)(self.wsi, hires_width, hires_height), shape=(hires_height, hires_width, 3), dtype=np.int8)
                             
                     if LOWRES in image_data:
@@ -571,7 +649,7 @@ class HESTData:
                     fullres = fullres.transpose(2, 0, 1)
                     
                     # compute scale factors: each scale level is relative to the previous level 
-                    scale_factors = np.array([int(l) for l in self.wsi.level_downsamples()[1:] if full_height % l == 0 and full_width % l == 0])
+                    scale_factors = np.array([int(l) for l in self.wsi.level_downsamples[1:] if full_height % l == 0 and full_width % l == 0])
                     scale_factors[1:] = scale_factors[1:] / scale_factors[:-1]
                     scale_factors = scale_factors.tolist()
 

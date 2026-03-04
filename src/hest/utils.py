@@ -19,7 +19,7 @@ import cv2
 import numpy as np
 import pandas as pd
 import tifffile
-from hestcore.wsi import WSI, NumpyWSI, WSIPatcher, wsi_factory
+from hest.trident_compat import WSI, wsi_factory
 from loguru import logger
 from packaging import version
 from PIL import Image
@@ -544,7 +544,7 @@ def plot_transcripts_qc(
     width, height = wsi.get_dimensions()
     
     if plot_global:
-        thumb = Image.fromarray(wsi.get_thumbnail(round(width * 0.1), round(height * 0.1)))
+        thumb = Image.fromarray(wsi.get_thumbnail((round(width * 0.1), round(height * 0.1))))
         feat_names = _get_random_transcript_names(df, k=3)
         if verbose:
             print(f"Plot global transcripts for the following genes: {feat_names}.")
@@ -1237,7 +1237,9 @@ def register_downscale_img(adata: sc.AnnData, wsi: WSI, pixel_size: float, spot_
     """
     width, height = wsi.get_dimensions()
     downscale_factor = target_size / np.max((width, height))
-    downscaled_fullres = wsi.get_thumbnail(round(width * downscale_factor), round(height * downscale_factor))
+    downscaled_fullres = wsi.get_thumbnail((round(width * downscale_factor), round(height * downscale_factor)))
+    # AnnData serialization requires array-like objects in `uns`.
+    downscaled_fullres = np.asarray(downscaled_fullres)
     
     # register the image
     adata.uns['spatial'] = {}
@@ -1539,7 +1541,7 @@ def load_wsi(img_path: str) -> Tuple[WSI, float]:
         img /= 2**8
         img = img.astype(np.uint8)
         
-    wsi = NumpyWSI(img)
+    wsi = wsi_factory(img, mpp=pixel_size_embedded if pixel_size_embedded is not None else 1.0)
     
     return wsi, pixel_size_embedded
 

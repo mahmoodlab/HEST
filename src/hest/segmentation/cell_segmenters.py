@@ -11,7 +11,7 @@ from typing import Tuple, Union
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-from hestcore.segmentation import get_path_relative
+from hest.path_utils import get_path_relative
 from loguru import logger
 from tqdm import tqdm
 

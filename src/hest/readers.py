@@ -11,13 +11,13 @@ from abc import abstractmethod
 
 import numpy as np
 import pandas as pd
-from hestcore.segmentation import get_path_relative
+from hest.path_utils import get_path_relative
 from loguru import logger
 from tqdm import tqdm
 
 from hest.HESTData import (HESTData, STHESTData, VisiumHDHESTData,
                            VisiumHESTData, XeniumHESTData)
-from hestcore.wsi import wsi_factory
+from hest.trident_compat import wsi_factory, wsi_to_numpy
 from hest.io.seg_readers import XeniumParquetCellReader, read_gdf
 from hest.LazyShapes import LazyShapes
 from hest.segmentation.cell_segmenters import assign_spot_to_cell, expand_nuclei, read_adata, read_seg, read_spots_gdf, segment_cellvit, sum_per_cell
@@ -415,7 +415,7 @@ class VisiumReader(Reader):
             autoalign_save_dir = None
             if save_autoalign:
                 autoalign_save_dir = os.path.join(os.path.dirname(img_path), 'spatial')
-            align_json = autoalign_visium(wsi.numpy(), autoalign_save_dir)
+            align_json = autoalign_visium(wsi_to_numpy(wsi), autoalign_save_dir)
             spatial_aligned = self._alignment_file_to_tissue_positions('', adata, align_json)
         
         elif tissue_position_exists:
@@ -953,7 +953,7 @@ class XeniumReader(Reader):
             print("Loading the WSI... (can be slow for large images)")
             img, pixel_size_embedded = load_wsi(img_path)
         else:
-            img, pixel_size_embedded = wsi_factory(np.zeros((1, 1, 3))), None
+            img, pixel_size_embedded = wsi_factory(np.zeros((1, 1, 3)), mpp=1.0), None
         
         dict = {}
         dict['pixel_size_um_embedded'] = pixel_size_embedded

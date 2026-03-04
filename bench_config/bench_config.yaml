@@ -7,9 +7,6 @@ results_dir: 'eval/ST_pred_results'
 # directory where the vision embeddings will be dumped
 embed_dataroot: 'eval/ST_data_emb'
 
-# directory to the model weights root
-weights_root: 'eval/fm_v1'
-
 # inference parameters
 batch_size: 128
 num_workers: 1
@@ -17,21 +14,27 @@ num_workers: 1
 # encoders to benchmark
 encoders: [
   "resnet50",
-  #"uni_v1", # uncomment after requesting the weights
-  # "uni_v2",
-  #"ctranspath",
-  #"phikon",
-  #"phikon_v2",
-  #"h0_mini", # uncomment after requesting the weights
-  #"hibou_large",
-  #"kaiko_base_8",
-  #"remedis", # uncomment after requesting the weights
-  #"conch_v1", # uncomment after requesting the weights
-  #"conch_v15",
-  #"gigapath", # uncomment after requesting the weights
-  #"virchow", # uncomment after requesting the weights
-  #"virchow2", # uncomment after requesting the weights
-  #"hoptimus0",
+  # "uni_v1", # you need to request the weights
+  # "uni_v2", # you need to request the weights
+  # "ctranspath",
+  # "phikon",
+  # "phikon_v2",
+  # "hibou_l",
+  # "kaiko-vitb8",
+  # "kaiko-vitb16",
+  # "kaiko-vits8",
+  # "kaiko-vits16",
+  # "kaiko-vitl14",
+  # "lunit-vits8",
+  # "conch_v1", # you need to request the weights
+  # "conch_v15",
+  # "gigapath", # you need to request the weights
+  # "virchow", # you need to request the weights
+  # "virchow2", # you need to request the weights
+  # "hoptimus0", # you need to request the weights
+  # "hoptimus1", # you need to request the weights
+  # "musk", # you need to request the weights
+  # "midnight12k",
 ]
 
 # datasets contained in `bench_data_root` to benchmark

@@ -12,7 +12,7 @@ from loguru import logger
 from hest.io.seg_readers import HESTXeniumTranscriptsReader, XeniumTranscriptsReader, groupby_shape, read_gdf, write_geojson
 from hest.utils import (deprecated, get_name_datetime, merge_parquet,
                         value_error_str)
-from hestcore.wsi import WSI
+from hest.trident_compat import WSI
 
 
 def register_dapi_he(

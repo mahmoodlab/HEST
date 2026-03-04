@@ -9,7 +9,7 @@ from typing import Tuple, Union
 import geopandas as gpd
 import numpy as np
 import openslide
-from hestcore.wsi import WSI
+from hest.trident_compat import WSI
 from loguru import logger
 from tqdm import tqdm
 

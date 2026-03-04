@@ -13,22 +13,20 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.multiprocessing
+from torch.utils.data import DataLoader
 import yaml
-from hestcore.segmentation import get_path_relative
 from loguru import logger
 from sklearn.discriminant_analysis import StandardScaler
 from sklearn.pipeline import Pipeline
 from tqdm import tqdm
 
-from hest.bench.cpath_model_zoo.inference_models import (
-    CustomInferenceEncoder, InferenceEncoder, inf_encoder_factory)
+from trident.patch_encoder_models import CustomInferenceEncoder, encoder_factory
 
 torch.multiprocessing.set_sharing_strategy('file_system')
 
-from hestcore.datasets import H5HESTDataset
 from huggingface_hub import snapshot_download
 
-from hest.bench.st_dataset import load_adata
+from hest.bench.st_dataset import H5PatchDataset, load_adata
 from hest.bench.trainer import train_test_reg
 from hest.bench.utils.file_utils import (read_assets_from_h5, save_hdf5,
                                          save_pkl)
@@ -43,8 +41,6 @@ parser.add_argument('--overwrite', action='store_true',
                     help='overwrite existing results')
 parser.add_argument('--bench_data_root', type=str, help='root directory containing all the datasets')
 parser.add_argument('--embed_dataroot', type=str)
-parser.add_argument('--weights_root', type=str)
-parser.add_argument('--private_weights_root', type=str)
 parser.add_argument('--results_dir', type=str)
 parser.add_argument('--exp_code', type=str)
 
@@ -82,9 +78,6 @@ class BenchmarkConfig:
     embed_dataroot: Optional[str] = 'eval/ST_data_emb'
     # Embeddings generated during benchmarking will be saved to this path
 
-    weights_root: Optional[str] = 'eval/fm_v1'
-    # Path to patch encoder weights
-
     results_dir: Optional[str] = 'eval/ST_pred_results'
     # Path to benchmark results
 
@@ -94,7 +87,6 @@ class BenchmarkConfig:
     num_workers: int = 1
     # Number of workers used during embedding extraction
 
-    private_weights_root: Optional[str] = None
     exp_code: Optional[str] = None
     gene_list: str = 'var_50genes.json'
     method: str = 'ridge'
@@ -108,8 +100,9 @@ class BenchmarkConfig:
     datasets: list = field(default_factory=lambda: ['IDC'])
     config: Optional[str] = None
 
+
 def get_path(path):
-    src = get_path_relative(__file__, '../../../../')
+    src = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../../'))
     if path.startswith('./'):
         new_path = os.path.join(src, path)
     else:
@@ -138,7 +131,7 @@ def benchmark_grid(args, device, model_names, datasets: List[str], save_dir, cus
             
         with open(os.path.join(save_dir, dataset, 'enc_results.json'), 'w') as f:
             enc_perfs = sorted(enc_perfs, key=itemgetter('pearson_mean'), reverse=True)
-            json.dump({'results': enc_perfs}, f, sort_keys=True, indent=4)
+            json.dump(_sanitize_metrics({'results': enc_perfs}), f, sort_keys=True, indent=4)
             
 
         dataset_perfs.append({
@@ -165,26 +158,39 @@ def benchmark_grid(args, device, model_names, datasets: List[str], save_dir, cus
     df.to_csv(os.path.join(save_dir, 'dataset_results.csv'))
             
     for key, val in perf_per_enc.items():
-        perf_per_enc[key] = np.mean(val)
+        perf_per_enc[key] = float(np.mean(val))
     perf_per_enc = dict(sorted(perf_per_enc.items(), key=lambda item: item[1], reverse=True))
         
     with open(os.path.join(save_dir, 'dataset_results.json'), 'w') as f:
-        json.dump({'results': dataset_perfs, 'average': perf_per_enc}, f, sort_keys=True, indent=4)
+        json.dump(_sanitize_metrics({'results': dataset_perfs, 'average': perf_per_enc}), f, sort_keys=True, indent=4)
     
     return dataset_perfs, perf_per_enc
         
 
-def post_collate_fn(batch):
-    """
-    Post collate function to clean up batch
-    """
-    if batch["imgs"].dim() == 5:
-        assert batch["imgs"].size(0) == 1
-        batch["imgs"] = batch["imgs"].squeeze(0)
-    if batch["coords"].dim() == 3:
-        assert batch["coords"].size(0) == 1
-        batch["coords"] = batch["coords"].squeeze(0)
-    return batch
+def _to_numpy(value):
+    if torch.is_tensor(value):
+        arr = value.detach().cpu().numpy()
+    else:
+        arr = np.asarray(value)
+    if arr.dtype.kind == "U":
+        max_len = max((len(x) for x in arr.flatten()), default=1)
+        arr = arr.astype(f"S{max_len}")
+    return arr
+
+
+def _sanitize_metrics(value, ndigits: int = 4):
+    """Convert numpy scalars to Python types and round floats recursively."""
+    if isinstance(value, dict):
+        return {k: _sanitize_metrics(v, ndigits=ndigits) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_metrics(v, ndigits=ndigits) for v in value]
+    if isinstance(value, tuple):
+        return tuple(_sanitize_metrics(v, ndigits=ndigits) for v in value)
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, float):
+        return round(value, ndigits)
+    return value
 
 
 def embed_tiles(
@@ -194,10 +200,9 @@ def embed_tiles(
     device: str,
     precision
 ):
-    """ Extract embeddings from tiles using `encoder` and save to an h5 file (TODO move to hestcore) """
+    """Extract embeddings from patch tiles and save to HDF5."""
     model.eval()
     for batch_idx, batch in tqdm(enumerate(dataloader), total=len(dataloader)):
-        batch = post_collate_fn(batch)
         imgs = batch['imgs'].to(device).float()
         with torch.inference_mode(), torch.amp.autocast('cuda', dtype=precision):
             embeddings = model(imgs)
@@ -206,25 +211,12 @@ def embed_tiles(
         else:
             mode = 'a'
         asset_dict = {'embeddings': embeddings.cpu().numpy()}
-        asset_dict.update({key: np.array(val) for key, val in batch.items() if key != 'imgs'})
+        asset_dict.update({key: _to_numpy(val) for key, val in batch.items() if key != 'imgs'})
         save_hdf5(embedding_save_path,
                   asset_dict=asset_dict,
                   mode=mode)
     return embedding_save_path
 
-
-def get_bench_weights(weights_root, name):
-    local_ckpt_registry = get_path_relative(__file__, 'local_ckpts.json')
-    with open(local_ckpt_registry, 'r') as f:
-        ckpt_registry = json.load(f)
-    if name in ckpt_registry:
-        path = ckpt_registry[name]
-        if os.path.isabs(path):
-            return path
-        else:
-            return os.path.join(weights_root, path)
-    else:
-        raise ValueError(f"Please specify the weights path to {name} in {local_ckpt_registry}")
 
 def predict_single_split(train_split, test_split, args, save_dir, dataset_name, model_name, device, bench_data_root, custom_encoder, extract_tiles):
     """ Predict a single split for a single model """
@@ -242,12 +234,11 @@ def predict_single_split(train_split, test_split, args, save_dir, dataset_name, 
     
     # Embed patches
     logger.info(f"Embedding tiles for {dataset_name} using {model_name} encoder")
-    weights_path = get_bench_weights(args.weights_root, model_name)
     if model_name == 'custom_encoder':
         encoder = custom_encoder
         args.overwrite = True # always overwrite custom encoders
     else:
-        encoder: InferenceEncoder = inf_encoder_factory(model_name)(weights_path)
+        encoder = encoder_factory(model_name)
     precision = encoder.precision
     
     for split in [train_df, test_df]:
@@ -262,9 +253,9 @@ def predict_single_split(train_split, test_split, args, save_dir, dataset_name, 
                     _ = encoder.eval()
                     encoder.to(device)
 
-                    tile_dataset = H5HESTDataset(tile_h5_path, chunk_size=args.batch_size, img_transform=encoder.eval_transforms)
+                    tile_dataset = H5PatchDataset(tile_h5_path, img_transform=encoder.eval_transforms)
                     tile_dataloader = torch.utils.data.DataLoader(tile_dataset, 
-                                                            batch_size=1, 
+                                                            batch_size=args.batch_size, 
                                                             shuffle=False,
                                                             num_workers=args.num_workers)
                     
@@ -319,6 +310,8 @@ def predict_single_split(train_split, test_split, args, save_dir, dataset_name, 
     probe_summary = {}
     probe_summary.update({'n_train': len(y_train), 'n_test': len(y_test)})
     probe_summary.update({key: val for key, val in probe_results.items()})
+    probe_results = _sanitize_metrics(probe_results)
+    probe_summary = _sanitize_metrics(probe_summary)
     logger.info(probe_summary)
     with open(os.path.join(save_dir, f'results.json'), 'w') as f:
         json.dump(probe_results, f, sort_keys=True, indent=4)
@@ -342,14 +335,19 @@ def merge_fold_results(arr):
         aggr_results.append({
             "name": key,
             "pearson_corrs": value,
-            "mean": np.mean(value),
-            "std": np.std(value)
+            "mean": float(np.mean(value)),
+            "std": float(np.std(value))
         })
         all_corrs += value
         
     mean_per_split = [d['pearson_mean'] for d in arr]    
         
-    return {"pearson_corrs": aggr_results, "pearson_mean": np.mean(mean_per_split), "pearson_std": np.std(mean_per_split), "mean_per_split": mean_per_split}
+    return {
+        "pearson_corrs": aggr_results,
+        "pearson_mean": float(np.mean(mean_per_split)),
+        "pearson_std": float(np.std(mean_per_split)),
+        "mean_per_split": mean_per_split
+    }
         
         
 def predict_folds(args, exp_save_dir, model_name, dataset_name, device, bench_data_root, custom_encoder):
@@ -377,7 +375,7 @@ def predict_folds(args, exp_save_dir, model_name, dataset_name, device, bench_da
         p_corrs = kfold_results['pearson_corrs']
         p_corrs = sorted(p_corrs, key=itemgetter('mean'), reverse=True)
         kfold_results['pearson_corrs'] = p_corrs
-        json.dump(kfold_results, f, sort_keys=True, indent=4)
+        json.dump(_sanitize_metrics(kfold_results), f, sort_keys=True, indent=4)
         
     return kfold_results
 
@@ -428,9 +426,6 @@ def benchmark(encoder: torch.nn.Module, enc_transf: Callable, precision: torch.d
         
     set_seed(args.seed)
 
-    logger.info(f'Saving models to {args.weights_root}...')
-    snapshot_download(repo_id="MahmoodLab/hest-bench", repo_type='dataset', local_dir=args.weights_root, allow_patterns=['fm_v1/*'])
-    
     logger.info(f'Fetch the bench data...')
     snapshot_download(repo_id="MahmoodLab/hest-bench", repo_type='dataset', local_dir=args.bench_data_root, ignore_patterns=['fm_v1/*'])
     
@@ -455,10 +450,9 @@ def benchmark(encoder: torch.nn.Module, enc_transf: Callable, precision: torch.d
     os.makedirs(save_dir, exist_ok=True)
     
     encoders = []
-    weights_root = args.weights_root
     if encoder is not None:
         encoders.append('custom_encoder')
-        custom_encoder = CustomInferenceEncoder(None, 'custom_encoder', encoder, enc_transf, precision)
+        custom_encoder = CustomInferenceEncoder('custom_encoder', encoder, enc_transf, precision)
     else:
         custom_encoder = None
         

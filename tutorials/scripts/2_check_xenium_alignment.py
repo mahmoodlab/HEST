@@ -3,7 +3,7 @@ from dask.distributed import LocalCluster, Client
 import pandas as pd
 
 from hest.utils import get_path_from_meta_row, plot_xenium_align_qc, read_parquet_dask, read_parquet_dask_geopandas
-from hestcore.wsi import wsi_factory
+from hest.trident_compat import wsi_factory
 
 id_list = [
     'NCBI888',

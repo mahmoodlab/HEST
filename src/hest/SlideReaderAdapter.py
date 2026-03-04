@@ -5,7 +5,7 @@ import numpy as np
 from valis_hest import slide_tools
 from valis_hest.slide_io import PIXEL_UNIT, MetaData, SlideReader
 
-from hestcore.wsi import wsi_factory
+from hest.trident_compat import wsi_factory
 
 
 class SlideReaderAdapter(SlideReader):
@@ -22,7 +22,7 @@ class SlideReaderAdapter(SlideReader):
         slide_meta.channel_names = self._get_channel_names('NO_NAME')
         slide_meta.n_channels = 1
         slide_meta.pixel_physical_size_xyu = [0.25, 0.25, PIXEL_UNIT]
-        level_dim = self.wsi.level_dimensions() #self._get_slide_dimensions()
+        level_dim = self.wsi.level_dimensions  # self._get_slide_dimensions()
         slide_meta.slide_dimensions = np.array([list(item) for item in level_dim])
 
         return slide_meta
@@ -34,8 +34,8 @@ class SlideReaderAdapter(SlideReader):
         return vips_img
 
     def slide2image(self, level, xywh=None, *args, **kwargs):
-        level_dim = self.wsi.level_dimensions()[level]
-        img = self.wsi.get_thumbnail(level_dim[0], level_dim[1])
+        level_dim = self.wsi.level_dimensions[level]
+        img = np.array(self.wsi.get_thumbnail((level_dim[0], level_dim[1])))
 
         if xywh is not None:
             xywh = np.array(xywh)

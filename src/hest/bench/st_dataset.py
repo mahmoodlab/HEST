@@ -8,6 +8,50 @@ import numpy as np
 import torch
 from PIL import Image
 
+
+class H5PatchDataset(Dataset):
+    """Dataset for patch HDF5 files written by HEST/TRIDENT-style patching."""
+
+    def __init__(self, h5_path, img_transform=None):
+        self.h5_path = h5_path
+        self.img_transform = img_transform
+        with h5py.File(self.h5_path, "r") as f:
+            self.img_key = "img" if "img" in f else ("imgs" if "imgs" in f else "images")
+            self.coords_key = "coords"
+            self.barcodes_key = "barcodes" if "barcodes" in f else ("barcode" if "barcode" in f else None)
+            self.length = int(f[self.img_key].shape[0])
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, idx):
+        with h5py.File(self.h5_path, "r") as f:
+            img = f[self.img_key][idx]
+            coords = f[self.coords_key][idx]
+            if self.barcodes_key is not None:
+                barcode = f[self.barcodes_key][idx]
+            else:
+                barcode = b""
+
+        if isinstance(barcode, np.ndarray) and barcode.shape:
+            barcode = barcode[0]
+        if isinstance(barcode, bytes):
+            barcode = barcode.decode("utf-8")
+        else:
+            barcode = str(barcode)
+
+        if self.img_transform is not None:
+            img_out = self.img_transform(Image.fromarray(img.astype(np.uint8)))
+        else:
+            img_out = img
+
+        return {
+            "imgs": img_out,
+            "coords": coords,
+            "barcodes": barcode,
+        }
+
+
 def normalize_adata(adata: sc.AnnData, smooth=False) -> sc.AnnData:
     """
     Normalize each spot by total gene counts + Logarithmize each spot
