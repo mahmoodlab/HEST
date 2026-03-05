@@ -41,7 +41,7 @@ This section contains step-by-step guides for using the HEST library:
         :link: tutorials/4-Running-HEST-Benchmark
         :link-type: doc
 
-        Instructions on how to run the HEST-benchmark.
+        Instructions on how to run HEST-Benchmark (install extras with `pip install -e ".[benchmark]"`).
 
     .. grid-item-card:: 5. Batch effect visualization
         :link: tutorials/5-Batch-effect-visualization

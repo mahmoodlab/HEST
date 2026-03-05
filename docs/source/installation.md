@@ -9,6 +9,21 @@ conda activate hest
 pip install -e .
 ```
 
+## Optional: HEST-Benchmark dependencies
+
+To run HEST-Benchmark (including TRIDENT patch encoders), install benchmark extras:
+
+```
+pip install -e ".[benchmark]"
+```
+
+Many benchmark encoders are hosted on Hugging Face and may be gated.
+Request access where needed and authenticate in your environment:
+
+```
+huggingface-cli login
+```
+
 ## Additional dependencies (for WSI manipulation):
 
 ```
