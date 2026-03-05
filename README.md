@@ -91,29 +91,36 @@ In addition, we provide complete [documentation](https://hest.readthedocs.io/en/
 
 The HEST-Benchmark was designed to assess 11 foundation models for pathology under a new, diverse, and challenging benchmark. HEST-Benchmark includes nine tasks for gene expression prediction (50 highly variable genes) from morphology (112 x 112 um regions at 0.5 um/px) in nine different organs and eight cancer types. We provide a step-by-step tutorial to run HEST-Benchmark and reproduce our results in [4-Running-HEST-Benchmark.ipynb](https://github.com/mahmoodlab/HEST/tree/main/tutorials/4-Running-HEST-Benchmark.ipynb).
 
-### HEST-Benchmark results (01.14.26)
+### HEST-Benchmark results (03.04.26)
 
-HEST-Benchmark was used to assess 14 publicly available models.
-Reported results are based on a Ridge Regression with PCA (256 factors). Ridge regression unfairly penalizes models with larger embedding dimensions. To ensure fair and objective comparison between models, we opted for PCA-reduction. 
-Model performance measured with Pearson correlation. Best is **bold**, second best
-is _underlined_. Additional results based on Random Forest and XGBoost regression are provided in the paper. 
+HEST-Benchmark was used to assess 22 publicly available models.
+Reported results are based on Ridge Regression with PCA (256 factors). Ridge regression can penalize models with larger embedding dimensions; PCA-reduction is used for fairer comparison.
+Model performance is measured with Pearson correlation.
 
-| Model                  | IDC    | PRAD   | PAAD   | SKCM   | COAD   | READ   | ccRCC  | LUAD   | LYMPH IDC | Average |
-|------------------------|--------|--------|--------|--------|--------|--------|--------|--------|-----------|---------|
-| **[Resnet50](https://arxiv.org/abs/1512.03385)**      | 0.4741 | 0.3075 | 0.3889 | 0.4822 | 0.2528 | 0.0812 | 0.2231 | 0.4917 | 0.2322    | 0.326   |
-| **[CTransPath](https://www.sciencedirect.com/science/article/abs/pii/S1361841522002043)**         | 0.511  | 0.3427 | 0.4378 | 0.5106 | 0.2285 | 0.11   | 0.2279 | 0.4985 | 0.2353    | 0.3447  |
-| **[Phikon](https://huggingface.co/owkin/phikon)**            | 0.5327 | 0.342  | 0.4432 | 0.5355 | 0.2585 | 0.1517 | 0.2423 | 0.5468 | 0.2373    | 0.3656  |
-| **[CONCH](https://huggingface.co/MahmoodLab/CONCH)**             | 0.5363 | 0.3548 | 0.4475 | 0.5791 | 0.2533 | 0.1674 | 0.2179 | 0.5312 | 0.2507    | 0.3709  |
-| **[Remedis](https://arxiv.org/abs/2205.09723)**            | 0.529  | 0.3471 | 0.4644 | 0.5818 | 0.2856 | 0.1145 | 0.2647 | 0.5336 | 0.2473    | 0.3742  |
-| **CONCH 1.5** | 0.5440 | 0.3808 | 0.4570 | 0.5518 | 0.2801 | 0.1600 | 0.2176 | 0.5514 | 0.2699 | 0.3792 | 
-| **[Gigapath](https://huggingface.co/prov-gigapath/prov-gigapath)**          | 0.5508 | _0.3708_ | 0.4768 | 0.5538 | 0.301 | 0.186 | 0.2391 | 0.5399 | 0.2493    | 0.3853  |
-| **[UNI](https://huggingface.co/MahmoodLab/UNI)**                | 0.5702 | 0.314  | 0.4764 | 0.6254 | 0.263  | 0.1762 | 0.2427 | 0.5511 | 0.2565    | 0.3862  |
-| **[H0-mini](https://huggingface.co/bioptimus/H0-mini)** | 0.5862 | 0.3684 | 0.4919 | 0.6011 | 0.2494 | 0.1863 | _0.2670_ | 0.5481 | _0.2629_ | 0.3957 |
-| **[Virchow](https://huggingface.co/paige-ai/Virchow)**            | 0.5702 | 0.3309 | 0.4875 | 0.6088 | **0.311** | 0.2019 | 0.2637 | 0.5459 | 0.2594    | 0.3977  |
-| **[Virchow2](https://huggingface.co/paige-ai/Virchow2)**           | 0.5922 | 0.3465 | 0.4661 | 0.6174 | 0.2578 | 0.2084 | **0.2788** | **0.5605** | 0.2582    | 0.3984  |
-| **UNIv1.5**            | **0.5989** | 0.3645 | 0.4902 | 0.6401 | 0.2925 | _0.2240_ | 0.2522 | _0.5586_ | 0.2597 | 0.4090 |
-| **UNIv2** |0.5898 | 0.3568 | **0.4999** | **0.6598** | _0.3009_ | 0.2226 | 0.2640 | 0.5582 | **0.2728** | _0.4139_ |
-| **[Hoptimus0](https://github.com/bioptimus/releases/blob/main/models/h-optimus/v0/LICENSE.md)**        | _0.5982_ | **0.385** | _0.4932_ | _0.6432_ | 0.2991 | **0.2292** | 0.2654 | 0.5582 | 0.2595 | **0.4146** |
+| Model | IDC | PRAD | PAAD | SKCM | COAD | READ | CCRCC | LUNG | LYMPH_IDC | Average |
+|---|---|---|---|---|---|---|---|---|---|---|
+| [H-Optimus-1](https://huggingface.co/bioptimus/H-optimus-1) | 0.6024 | 0.3781 | 0.4964 | 0.6589 | 0.3195 | 0.2421 | 0.2533 | 0.5779 | 0.2774 | 0.4229 |
+| [H-Optimus-0](https://huggingface.co/bioptimus/H-optimus-0) | 0.5976 | 0.3848 | 0.4911 | 0.6454 | 0.3086 | 0.2216 | 0.2676 | 0.5590 | 0.2591 | 0.4150 |
+| [UNI2-h](https://huggingface.co/MahmoodLab/UNI2-h) | 0.5898 | 0.3569 | 0.5001 | 0.6606 | 0.3015 | 0.2223 | 0.2640 | 0.5587 | 0.2727 | 0.4141 |
+| [Virchow](https://huggingface.co/paige-ai/Virchow) | 0.5846 | 0.3378 | 0.5159 | 0.6243 | 0.3079 | 0.1981 | 0.2586 | 0.5664 | 0.2610 | 0.4061 |
+| [Virchow2](https://huggingface.co/paige-ai/Virchow2) | 0.5971 | 0.3529 | 0.4779 | 0.6402 | 0.2581 | 0.2074 | 0.2719 | 0.5685 | 0.2568 | 0.4034 |
+| [Midnight-12k](https://huggingface.co/kaiko-ai/midnight) | 0.5823 | 0.3370 | 0.4900 | 0.6360 | 0.2908 | 0.1856 | 0.2132 | 0.5577 | 0.2642 | 0.3952 |
+| [Hibou-L](https://huggingface.co/histai/hibou-L) | 0.5701 | 0.2945 | 0.4674 | 0.5817 | 0.3040 | 0.1902 | 0.2657 | 0.5762 | 0.2432 | 0.3881 |
+| [GigaPath](https://huggingface.co/prov-gigapath/prov-gigapath) | 0.5515 | 0.3699 | 0.4746 | 0.5619 | 0.2992 | 0.1961 | 0.2430 | 0.5412 | 0.2500 | 0.3875 |
+| [UNI](https://huggingface.co/MahmoodLab/UNI) | 0.5890 | 0.2943 | 0.4807 | 0.6346 | 0.2614 | 0.1836 | 0.2400 | 0.5464 | 0.2559 | 0.3873 |
+| [CONCH v1.5](https://huggingface.co/MahmoodLab/conchv1_5) | 0.5440 | 0.3808 | 0.4570 | 0.5517 | 0.2802 | 0.1600 | 0.2176 | 0.5513 | 0.2699 | 0.3792 |
+| [Phikon-v2](https://huggingface.co/owkin/phikon-v2) | 0.5408 | 0.3545 | 0.4455 | 0.5554 | 0.2500 | 0.1749 | 0.2659 | 0.5419 | 0.2437 | 0.3747 |
+| [Kaiko ViT-B/8](https://huggingface.co/1aurent/vit_base_patch8_224.kaiko_ai_towards_large_pathology_fms) | 0.5599 | 0.3611 | 0.4601 | 0.5725 | 0.2683 | 0.1623 | 0.2313 | 0.5183 | 0.2273 | 0.3735 |
+| [CONCH v1](https://huggingface.co/MahmoodLab/conch) | 0.5363 | 0.3548 | 0.4468 | 0.5787 | 0.2489 | 0.1602 | 0.2180 | 0.5322 | 0.2507 | 0.3696 |
+| [Lunit ViT-S/8](https://huggingface.co/1aurent/vit_small_patch8_224.lunit_dino) | 0.5449 | 0.2829 | 0.4267 | 0.5738 | 0.2826 | 0.1610 | 0.2463 | 0.5415 | 0.2506 | 0.3678 |
+| [Phikon](https://huggingface.co/owkin/phikon) | 0.5327 | 0.3420 | 0.4425 | 0.5355 | 0.2623 | 0.1532 | 0.2423 | 0.5466 | 0.2373 | 0.3660 |
+| [Kaiko ViT-B/16](https://huggingface.co/1aurent/vit_base_patch16_224.kaiko_ai_towards_large_pathology_fms) | 0.5352 | 0.3275 | 0.4524 | 0.5502 | 0.2812 | 0.1525 | 0.2291 | 0.5156 | 0.2365 | 0.3645 |
+| [Kaiko ViT-L/14](https://huggingface.co/1aurent/vit_large_patch14_reg4_dinov2.kaiko_ai_towards_large_pathology_fms) | 0.5535 | 0.3470 | 0.4372 | 0.5533 | 0.2535 | 0.1472 | 0.2194 | 0.5379 | 0.2283 | 0.3641 |
+| [Kaiko ViT-S/8](https://huggingface.co/1aurent/vit_small_patch8_224.kaiko_ai_towards_large_pathology_fms) | 0.5304 | 0.3340 | 0.4181 | 0.5174 | 0.2281 | 0.1469 | 0.2346 | 0.5053 | 0.2463 | 0.3512 |
+| [Kaiko ViT-S/16](https://huggingface.co/1aurent/vit_small_patch16_224.kaiko_ai_towards_large_pathology_fms) | 0.5333 | 0.3483 | 0.4409 | 0.5449 | 0.2057 | 0.1328 | 0.2099 | 0.5030 | 0.2249 | 0.3493 |
+| [CTransPath](https://huggingface.co/datasets/MahmoodLab/hest-bench/tree/main/fm_v1/ctranspath) | 0.4993 | 0.3551 | 0.4314 | 0.5097 | 0.2382 | 0.0968 | 0.2362 | 0.5137 | 0.2409 | 0.3468 |
+| [MUSK](https://huggingface.co/xiangjx/musk) | 0.5248 | 0.3430 | 0.4277 | 0.5233 | 0.2365 | 0.1110 | 0.1825 | 0.5171 | 0.2545 | 0.3467 |
+| [ResNet50](https://huggingface.co/timm/resnet50.tv_in1k) | 0.4739 | 0.3044 | 0.3880 | 0.4821 | 0.2500 | 0.0783 | 0.2252 | 0.4949 | 0.2305 | 0.3252 |
 
 
 
