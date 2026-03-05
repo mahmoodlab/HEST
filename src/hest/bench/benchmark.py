@@ -387,13 +387,23 @@ def set_seed(seed):
     random.seed(seed)
 
 
-def benchmark(encoder: torch.nn.Module, enc_transf: Callable, precision: torch.dtype, cli_args: dict=None, **kwargs) -> Tuple[list, dict]:
+def benchmark(
+    encoder: Optional[torch.nn.Module],
+    enc_transf: Optional[Callable],
+    precision: Optional[torch.dtype],
+    cli_args: dict = None,
+    **kwargs
+) -> Tuple[list, dict]:
     """ Benchmark a patch encoder on HEST-bench
 
     Args:
-        encoder (torch.nn.Module): patch encoder to benchmark
+        encoder (torch.nn.Module): patch encoder to benchmark. Can be:
+            - a plain torch module (requires `enc_transf` and `precision`), or
+            - a TRIDENT-style encoder object exposing `eval_transforms` and `precision`.
         enc_transf (Callable): transformation applied to `encoder` during inference
-        precision (torch.dtype): precision used by torch.amp.autocast('cuda') during inference for `encoder`
+            (only required when `encoder` is a plain torch module).
+        precision (torch.dtype): precision used by torch.amp.autocast('cuda') during inference
+            (only required when `encoder` is a plain torch module).
         cli_args (dict): cli_arguments. Defaults to None.
         **kwargs: lookup `BenchmarkConfig` for additional parameters
 
@@ -452,7 +462,15 @@ def benchmark(encoder: torch.nn.Module, enc_transf: Callable, precision: torch.d
     encoders = []
     if encoder is not None:
         encoders.append('custom_encoder')
-        custom_encoder = CustomInferenceEncoder('custom_encoder', encoder, enc_transf, precision)
+        if hasattr(encoder, "eval_transforms") and hasattr(encoder, "precision"):
+            # Already a TRIDENT-style encoder wrapper.
+            custom_encoder = encoder
+        else:
+            if enc_transf is None or precision is None:
+                raise ValueError(
+                    "For custom plain torch modules, please provide both `enc_transf` and `precision`."
+                )
+            custom_encoder = CustomInferenceEncoder('custom_encoder', encoder, enc_transf, precision)
     else:
         custom_encoder = None
         
