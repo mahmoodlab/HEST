@@ -22,12 +22,11 @@ dependencies = [
     "einops",
     "einops-exts",
     "pyarrow >= 16.1.0",
-    "timm-ctp",
     "spatialdata >= 0.6.1",
     "dask[complete] >= 2024.2.1",
     "spatial_image >= 1.2.3",
     "mygene",
-    "trident[patch-encoders] @ git+https://github.com/mahmoodlab/TRIDENT.git@gja/cleanup/multiple"
+    "trident @ git+https://github.com/mahmoodlab/TRIDENT.git@gja/cleanup/multiple"
 ]
 
 requires-python = ">=3.11"
@@ -37,6 +36,9 @@ requires-python = ">=3.11"
 where = ["src"]
 
 [project.optional-dependencies]
+benchmark = [
+    "trident[patch-encoders] @ git+https://github.com/mahmoodlab/TRIDENT.git@gja/cleanup/multiple",
+]
 docs = [
     "myst-nb",
     "sphinx-design",

@@ -50,6 +50,12 @@ conda activate hest
 pip install -e .
 ```
 
+#### Additional dependencies (HEST-Benchmark):
+To run HEST-Benchmark and load patch encoder models, install benchmark extras:
+```
+pip install -e ".[benchmark]"
+```
+
 #### Additional dependencies (for WSI manipulation):
 ```
 sudo apt install libvips libvips-dev openslide-tools
