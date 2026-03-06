@@ -99,7 +99,7 @@ The HEST-Benchmark was designed to assess 11 foundation models for pathology und
 
 ### HEST-Benchmark results (03.04.26)
 
-HEST-Benchmark was used to assess 22 publicly available models.
+HEST-Benchmark was used to assess 25 publicly available models.
 Reported results are based on Ridge Regression with PCA (256 factors). Ridge regression can penalize models with larger embedding dimensions; PCA-reduction is used for fairer comparison.
 Model performance is measured with Pearson correlation.
 
@@ -111,10 +111,13 @@ Model performance is measured with Pearson correlation.
 | [Virchow](https://huggingface.co/paige-ai/Virchow) | 0.5846 | 0.3378 | 0.5159 | 0.6243 | 0.3079 | 0.1981 | 0.2586 | 0.5664 | 0.2610 | 0.4061 |
 | [Virchow2](https://huggingface.co/paige-ai/Virchow2) | 0.5971 | 0.3529 | 0.4779 | 0.6402 | 0.2581 | 0.2074 | 0.2719 | 0.5685 | 0.2568 | 0.4034 |
 | [Midnight-12k](https://huggingface.co/kaiko-ai/midnight) | 0.5823 | 0.3370 | 0.4900 | 0.6360 | 0.2908 | 0.1856 | 0.2132 | 0.5577 | 0.2642 | 0.3952 |
+| [H0-mini](https://huggingface.co/bioptimus/H0-mini) | 0.5862 | 0.3687 | 0.4919 | 0.6012 | 0.2494 | 0.1863 | 0.2670 | 0.5482 | 0.2629 | 0.3958 |
+| [OpenMidnight](https://huggingface.co/SophontAI/OpenMidnight) | 0.5870 | 0.3590 | 0.4731 | 0.5941 | 0.2728 | 0.1762 | 0.2458 | 0.5534 | 0.2598 | 0.3912 |
 | [Hibou-L](https://huggingface.co/histai/hibou-L) | 0.5701 | 0.2945 | 0.4674 | 0.5817 | 0.3040 | 0.1902 | 0.2657 | 0.5762 | 0.2432 | 0.3881 |
 | [GigaPath](https://huggingface.co/prov-gigapath/prov-gigapath) | 0.5515 | 0.3699 | 0.4746 | 0.5619 | 0.2992 | 0.1961 | 0.2430 | 0.5412 | 0.2500 | 0.3875 |
 | [UNI](https://huggingface.co/MahmoodLab/UNI) | 0.5890 | 0.2943 | 0.4807 | 0.6346 | 0.2614 | 0.1836 | 0.2400 | 0.5464 | 0.2559 | 0.3873 |
 | [CONCH v1.5](https://huggingface.co/MahmoodLab/conchv1_5) | 0.5440 | 0.3808 | 0.4570 | 0.5517 | 0.2802 | 0.1600 | 0.2176 | 0.5513 | 0.2699 | 0.3792 |
+| [GPFM](https://huggingface.co/majiabo/GPFM) | 0.5660 | 0.3423 | 0.4601 | 0.5891 | 0.2480 | 0.1646 | 0.2591 | 0.5472 | 0.2371 | 0.3793 |
 | [Phikon-v2](https://huggingface.co/owkin/phikon-v2) | 0.5408 | 0.3545 | 0.4455 | 0.5554 | 0.2500 | 0.1749 | 0.2659 | 0.5419 | 0.2437 | 0.3747 |
 | [Kaiko ViT-B/8](https://huggingface.co/1aurent/vit_base_patch8_224.kaiko_ai_towards_large_pathology_fms) | 0.5599 | 0.3611 | 0.4601 | 0.5725 | 0.2683 | 0.1623 | 0.2313 | 0.5183 | 0.2273 | 0.3735 |
 | [CONCH v1](https://huggingface.co/MahmoodLab/conch) | 0.5363 | 0.3548 | 0.4468 | 0.5787 | 0.2489 | 0.1602 | 0.2180 | 0.5322 | 0.2507 | 0.3696 |

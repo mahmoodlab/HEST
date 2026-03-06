@@ -13,7 +13,7 @@ num_workers: 1
 
 # encoders to benchmark
 encoders: [
-  "resnet50",
+  # "resnet50",
   # "uni_v1", # you need to request the weights
   # "uni_v2", # you need to request the weights
   # "ctranspath",
@@ -35,6 +35,9 @@ encoders: [
   # "hoptimus1", # you need to request the weights
   # "musk", # you need to request the weights
   # "midnight12k",
+  # "h0-mini", 
+  # "openmidnight", # you need to request the weights
+  # gpfm,
 ]
 
 # datasets contained in `bench_data_root` to benchmark
