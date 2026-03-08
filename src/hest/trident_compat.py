@@ -105,6 +105,7 @@ def segment_tissue_deep(
     num_workers: int = 8,
     weights_dir: Optional[str] = None,
     holes_are_tissue: bool = True,
+    verbose: bool=True
 ):
     _ = (pixel_size, patch_size_um, model_name, auto_download, weights_dir)
     effective_pxl_size = 2.0 if fast_mode and target_pxl_size == 1 else float(target_pxl_size)
@@ -118,5 +119,6 @@ def segment_tissue_deep(
         batch_size=batch_size,
         device=device,
         num_workers=num_workers,
-        holes_are_tissue=holes_are_tissue
+        holes_are_tissue=holes_are_tissue,
+        verbose=verbose,
     )

@@ -158,7 +158,7 @@ class TestHESTData(unittest.TestCase):
     def test_tissue_seg(self):
         for idx, st in enumerate(self.sts):
             with self.subTest(st_object=idx):
-                st.segment_tissue(method='deep')
+                st.segment_tissue(method='deep', verbose=True, fast_mode=True)
                 st.save_tissue_contours(self.output_dir, name=f'deep_{idx}')
                 st.save_tissue_vis(self.output_dir, name=f'deep_{idx}')
                 

@@ -271,6 +271,7 @@ class HESTData:
         method: str='deep',
         weights_dir = None,
         holes_are_tissue = True,
+        verbose = True,
     ) -> Union[None, np.ndarray]:
         """ Compute tissue mask and stores it in the current HESTData object
 
@@ -288,6 +289,7 @@ class HESTData:
                 Deep-learning based segmentation will be more accurate but a GPU is recommended, 'otsu' is faster but less accurate. Defaults to 'deep'.
             weights_dir (str, optional): directory containing the models, if None will be ../models relative to the src package of hestcore. None
             holes_are_tissue (bool, optional): Whether to treat holes in the mask as tissue (only if method is 'deep'). Defaults to True.
+            verbose (bool, optional): verbose level. Defaults to True.
             
         Returns:
             gpd.GeoDataFrame: a geodataframe of the tissue contours, contains a column `tissue_id` indicating to which tissue the contour belongs to.
@@ -307,7 +309,8 @@ class HESTData:
                 auto_download,
                 num_workers,
                 weights_dir,
-                holes_are_tissue=holes_are_tissue
+                holes_are_tissue=holes_are_tissue,
+                verbose=verbose
             )
         elif method == 'otsu':
         
