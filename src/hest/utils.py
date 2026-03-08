@@ -483,7 +483,7 @@ def plot_shapes_qc(
         right_x = xy_center[0] + size_region // 2
         bottom_y = xy_center[1] + size_region // 2
         top_y = round(xy_center[1]-size_region // 2)
-        region = wsi.read_region_pil((left_x, top_y), 0, (size_region, size_region))
+        region = wsi.read_region((left_x, top_y), 0, (size_region, size_region))
         
         fig, ax = plt.subplots()
         ax.imshow(region)
@@ -593,7 +593,7 @@ def plot_transcripts_qc(
         right_x = xy_center[0] + size_region // 2
         bottom_y = xy_center[1] + size_region // 2
         top_y = round(xy_center[1]-size_region // 2)
-        region = wsi.read_region_pil((left_x, top_y), 0, (size_region, size_region))
+        region = wsi.read_region((left_x, top_y), 0, (size_region, size_region))
          
         sub_df = joined_df[joined_df['region_id'] == k]
         
