@@ -67,10 +67,33 @@ def wsi_factory(
     mpp: Optional[float] = None,
     reader_type: Optional[str] = None,
 ) -> WSI:
+
+    try:
+        from cucim import CuImage as _CuImage  # type: ignore
+    except Exception:
+        _CuImage = None
+
     if isinstance(img, WSI):
         return _ensure_initialized(img)
+    
     if isinstance(img, np.ndarray):
         return _array_to_wsi(img, mpp=mpp)
+    
+    if _CuImage is not None and isinstance(img, _CuImage):
+        path_like = (
+            getattr(img, "path", None)
+            or getattr(img, "filename", None)
+            or getattr(img, "_path", None)
+            or getattr(img, "_filename", None)
+        )
+        if path_like is None:
+            raise ValueError(
+                "CuImage object does not expose a usable source path; "
+                "please pass a file path (str/Path) to wsi_factory."
+            )
+        loaded = trident_load_wsi(str(path_like), reader_type=reader_type or "cucim")
+        return _ensure_initialized(loaded)
+    
     if isinstance(img, (str, Path)):
         try:
             loaded = trident_load_wsi(str(img), reader_type=reader_type)
@@ -105,7 +128,7 @@ def segment_tissue_deep(
     num_workers: int = 8,
     weights_dir: Optional[str] = None,
     holes_are_tissue: bool = True,
-    verbose: bool=True
+    verbose: bool = True,
 ):
     _ = (pixel_size, patch_size_um, model_name, auto_download, weights_dir)
     effective_pxl_size = 2.0 if fast_mode and target_pxl_size == 1 else float(target_pxl_size)
