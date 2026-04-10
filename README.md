@@ -106,6 +106,7 @@ Model performance is measured with Pearson correlation.
 | Model | Average | IDC | PRAD | PAAD | SKCM | COAD | READ | CCRCC | LUNG | LYMPH_IDC |
 |---|---|---|---|---|---|---|---|---|---|---|
 | [H-Optimus-1](https://huggingface.co/bioptimus/H-optimus-1) | 0.4229 | 0.6024 | 0.3781 | 0.4964 | 0.6589 | 0.3195 | 0.2421 | 0.2533 | 0.5779 | 0.2774 |
+| [GenBio-PathFM](https://huggingface.co/genbio-ai/genbio-pathfm) | 0.4197 | 0.5872 | 0.3913 | 0.4959 | 0.6715 | 0.3284 | 0.1785 | 0.2615 | 0.5787 | 0.2842 |
 | [H-Optimus-0](https://huggingface.co/bioptimus/H-optimus-0) | 0.4150 | 0.5976 | 0.3848 | 0.4911 | 0.6454 | 0.3086 | 0.2216 | 0.2676 | 0.5590 | 0.2591 |
 | [UNI2-h](https://huggingface.co/MahmoodLab/UNI2-h) | 0.4141 | 0.5898 | 0.3569 | 0.5001 | 0.6606 | 0.3015 | 0.2223 | 0.2640 | 0.5587 | 0.2727 |
 | [Virchow](https://huggingface.co/paige-ai/Virchow) | 0.4061 | 0.5846 | 0.3378 | 0.5159 | 0.6243 | 0.3079 | 0.1981 | 0.2586 | 0.5664 | 0.2610 |
