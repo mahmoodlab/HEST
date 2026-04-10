@@ -70,7 +70,7 @@ def wsi_factory(
 
     try:
         from cucim import CuImage as _CuImage  # type: ignore
-    except Exception:
+    except ImportError:
         _CuImage = None
 
     if isinstance(img, WSI):
@@ -91,7 +91,13 @@ def wsi_factory(
                 "CuImage object does not expose a usable source path; "
                 "please pass a file path (str/Path) to wsi_factory."
             )
-        loaded = trident_load_wsi(str(path_like), reader_type=reader_type or "cucim")
+        # CuCIM does not always expose MPP reliably in metadata, so forward it when available.
+        if mpp is not None:
+            loaded = trident_load_wsi(
+                str(path_like), reader_type=reader_type or "cucim", mpp=float(mpp)
+            )
+        else:
+            loaded = trident_load_wsi(str(path_like), reader_type=reader_type or "cucim")
         return _ensure_initialized(loaded)
     
     if isinstance(img, (str, Path)):
@@ -103,6 +109,7 @@ def wsi_factory(
             else:
                 raise exc
         return _ensure_initialized(loaded)
+    
     if hasattr(img, "read_region") and hasattr(img, "dimensions"):
         width, height = img.dimensions
         arr = np.array(img.read_region((0, 0), 0, (width, height)).convert("RGB"))
