@@ -4,9 +4,12 @@ import warnings
 from datetime import datetime
 from os.path import join as _j
 import zipfile
+import pandas as pd
+import dask.dataframe as dd
 
 from hest.path_utils import get_path_relative
 from hest.trident_compat import CucimWarningSingleton
+from hest.readers import pool_transcripts_xenium
 from huggingface_hub import snapshot_download
 from tqdm import tqdm
 
@@ -220,6 +223,41 @@ class TestHESTData(unittest.TestCase):
     #            st.meta['pixel_size_um_embedded'] = st.pixel_size / 1.5
     #            st.meta['pixel_size_um_estimated'] = st.pixel_size
     #            st.save(_j(self.output_dir, f'test_save_{idx}'), save_img=True, plot_pxl_size=True)
+
+class TestXenium(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(self):
+        self.df = pd.DataFrame({
+            'he_x': [3228.11, 3227.8, 3271.2], 
+            'he_y': [46903.1, 47103.0, 46892.5],
+            'feature_name': ["b'TCIM'", "b'RUNX1'", "b'SEC11C'"]
+            })
+
+    def test_pool_transcripts_xenium_pandas(self):
+        adata = pool_transcripts_xenium(
+            df=self.df,
+            pixel_size_he=0.21,
+            key_x='he_x',
+            key_y='he_y',
+            spot_size_um=200,
+        )
+        assert adata.n_obs > 0
+        assert adata.n_vars == 3
+
+    def test_pool_transcripts_xenium_dask(self):
+        df = dd.from_pandas(self.df, npartitions=2)
+        
+        adata = pool_transcripts_xenium(
+            df=df,
+            pixel_size_he=0.21,
+            key_x='he_x',
+            key_y='he_y',
+            spot_size_um=200,
+        )
+        
+        assert adata.n_obs > 0
+        assert adata.n_vars == 3
 
 
 if __name__ == '__main__':
