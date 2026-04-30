@@ -105,6 +105,7 @@ Model performance is measured with Pearson correlation.
 
 | Model | Average | IDC | PRAD | PAAD | SKCM | COAD | READ | CCRCC | LUNG | LYMPH_IDC |
 |---|---|---|---|---|---|---|---|---|---|---|
+| [UNI2-h](https://huggingface.co/MahmoodLab/UNI2-h) (α-CV)¹ | **0.4338** | 0.5952 | 0.3712 | 0.5121 | 0.6871 | 0.3417 | 0.2477 | 0.2653 | 0.6005 | 0.2837 |
 | [H-Optimus-1](https://huggingface.co/bioptimus/H-optimus-1) | 0.4229 | 0.6024 | 0.3781 | 0.4964 | 0.6589 | 0.3195 | 0.2421 | 0.2533 | 0.5779 | 0.2774 |
 | [GenBio-PathFM](https://huggingface.co/genbio-ai/genbio-pathfm) | 0.4197 | 0.5872 | 0.3913 | 0.4959 | 0.6715 | 0.3284 | 0.1785 | 0.2615 | 0.5787 | 0.2842 |
 | [H-Optimus-0](https://huggingface.co/bioptimus/H-optimus-0) | 0.4150 | 0.5976 | 0.3848 | 0.4911 | 0.6454 | 0.3086 | 0.2216 | 0.2676 | 0.5590 | 0.2591 |
@@ -132,6 +133,7 @@ Model performance is measured with Pearson correlation.
 | [MUSK](https://huggingface.co/xiangjx/musk) | 0.3467 | 0.5248 | 0.3430 | 0.4277 | 0.5233 | 0.2365 | 0.1110 | 0.1825 | 0.5171 | 0.2545 |
 | [ResNet50](https://huggingface.co/timm/resnet50.tv_in1k) | 0.3252 | 0.4739 | 0.3044 | 0.3880 | 0.4821 | 0.2500 | 0.0783 | 0.2252 | 0.4949 | 0.2305 |
 
+¹ Same UNI2-h backbone, same protocol (PCA-256 + Ridge), only the ridge `alpha` is selected per outer fold via inner 5-fold cross-validation on training spots (no test leakage). Modal selected α ≈ 5000. The default heuristic `alpha = 100/(d·n_genes) ≈ 0.0078` is several orders of magnitude smaller than the optimum and was previously hardcoded — see the bug fix in this PR. All 9 tasks improve over the default-α baseline (0.4141).
 
 
 ### Benchmarking your own model
