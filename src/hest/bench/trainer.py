@@ -9,7 +9,8 @@ def train_test_reg(X_train, X_test, y_train, y_test,
     
     if method == 'ridge':
         from sklearn.linear_model import Ridge
-        alpha = 100 / (X_train.shape[1] * y_train.shape[1])
+        if alpha is None:
+            alpha = 100 / (X_train.shape[1] * y_train.shape[1])
 
         print(f"Using alpha: {alpha}")
         reg = Ridge(solver='lsqr',
@@ -22,9 +23,10 @@ def train_test_reg(X_train, X_test, y_train, y_test,
         preds_all = reg.predict(X_test)
     elif method == 'ridge-gpu':
         from cuml.linear_model import Ridge
-        
-        alpha = 100 / (X_train.shape[1] * y_train.shape[1])
-        
+
+        if alpha is None:
+            alpha = 100 / (X_train.shape[1] * y_train.shape[1])
+
         print('using ridge-gpu method')
         print(f"Using alpha: {alpha}")
         
