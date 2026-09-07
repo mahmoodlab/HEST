@@ -19,7 +19,7 @@ if elapsed_time > MAX_HEST_IMPORT_S:
     raise ImportError(f"Importing 'hest' took too long ({elapsed_time:.2f} seconds). Maximum allowed time is {MAX_HEST_IMPORT_S} seconds. Please, keep large large imports conditional")
 
 from hest.autoalign import autoalign_visium
-from hest.readers import VisiumReader
+from hest.readers import VisiumReader, pool_bins_visiumhd
 from hest.HESTData import ensembl_id_to_gene
 from hest.utils import load_image
 
@@ -35,6 +35,59 @@ def download_hest(patterns, local_dir):
                         
             with zipfile.ZipFile(path_zip, 'r') as zip_ref:
                 zip_ref.extractall(seg_dir)
+
+
+class TestVisiumHDPooling(unittest.TestCase):
+    def test_count_conservation(self):
+        from itertools import product
+        from tempfile import TemporaryDirectory
+
+        import anndata as ad
+        import numpy as np
+        import pandas as pd
+        from scipy.sparse import csr_matrix, csc_matrix, issparse
+
+        # Each destination has repeated indices and a final zero-count source bin.
+        counts = np.array([
+            [1, 10, 0], [2, 20, 0], [3, 30, 0], [0, 0, 0],
+            [4, 40, 0], [5, 50, 0], [6, 60, 0], [0, 0, 0],
+        ], dtype=np.float32)
+        obs = pd.DataFrame({
+            'pxl_col_in_fullres': [8, 24, 8, 24, 136, 152, 136, 152],
+            'pxl_row_in_fullres': [8, 8, 24, 24, 8, 8, 24, 24],
+        }, index=[str(i) for i in range(8)])
+        genes = ['gene_b', 'gene_a', 'zero_gene']
+        orders = [np.arange(8), np.arange(8)[::-1], np.array([0, 4, 1, 5, 2, 6, 3, 7])]
+
+        with TemporaryDirectory() as tmp:
+            for storage, backed, chunk_len, order in product(
+                (np.array, csr_matrix, csc_matrix), (False, True), (1, 2, 3, 50000), orders
+            ):
+                with self.subTest(storage=storage.__name__, backed=backed,
+                                  chunk_len=chunk_len, order=order.tolist()):
+                    adata = ad.AnnData(
+                        storage(counts[order]), obs=obs.iloc[order].copy(),
+                        var=pd.DataFrame(index=genes),
+                    )
+                    if backed:
+                        path = os.path.join(tmp, 'counts.h5ad')
+                        adata.write_h5ad(path)
+                        adata = ad.read_h5ad(path, backed='r')
+                    try:
+                        pooled = pool_bins_visiumhd(adata, pixel_size=1.0, chunk_len=chunk_len)
+                        np.testing.assert_array_equal(pooled.X, [[6, 60, 0], [15, 150, 0]])
+                        self.assertEqual(pooled.X.sum(), counts.sum())
+                        self.assertEqual(pooled.var_names.tolist(), genes)
+                        np.testing.assert_array_equal(pooled.obsm['spatial'], [[72, 72], [200, 72]])
+                        np.testing.assert_array_equal(pooled.obs['array_col'], [0, 1])
+                        np.testing.assert_array_equal(pooled.obs['array_row'], [0, 0])
+                        remaining = adata.X[:]
+                        if issparse(remaining):
+                            remaining = remaining.toarray()
+                        np.testing.assert_array_equal(remaining, counts[order])
+                    finally:
+                        if backed:
+                            adata.file.close()
 
 
 class TestHESTReader(unittest.TestCase):
@@ -227,6 +280,7 @@ if __name__ == '__main__':
     
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromTestCase(TestHESTData)
+    suite.addTests(loader.loadTestsFromTestCase(TestVisiumHDPooling))
     # suite = unittest.TestSuite()
     #suite.addTest(TestHESTData('test_spatialdata'))
     result = unittest.TextTestRunner(verbosity=2).run(suite)

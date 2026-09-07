@@ -1241,6 +1241,7 @@ def pool_bins_visiumhd(adata: sc.AnnData, pixel_size: float, dst_bin_size_um=128
         sc.AnnData: AnnData object, each row in .obs represents a bin, each row in `.X` represents the sum of visium-hd sub-bins (of size `src_bin_size_um`) within that larger bin (of size `dst_bin_size_um`). Center coordinates of each bin (in pixel on WSI) are in adata.obsm['spatial']
     """
     import scanpy as sc
+    from scipy.sparse import issparse
 
     if src_bin_size_um >= dst_bin_size_um:
         raise ValueError("dst_bin_size_um needs to be larger than src_bin_size_um")
@@ -1278,7 +1279,11 @@ def pool_bins_visiumhd(adata: sc.AnnData, pixel_size: float, dst_bin_size_um=128
 
     for i in range(nb_chunks):
         start, end = i * chunk_len, min((i + 1) * chunk_len, len(c))
-        spot_grid_np[c[start:end]] += adata.X[start:end]
+        counts = adata.X[start:end]
+        if issparse(counts):
+            counts = counts.toarray()
+        # Repeated destination indices must accumulate every source bin.
+        np.add.at(spot_grid_np, c[start:end], counts)
 
     
     expression_df = pd.DataFrame(spot_grid_np, columns=spot_grid.columns)
